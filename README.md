@@ -16,5 +16,5 @@
 ## General plan
 
 1. Implement live evaluation on Grammatical Error Correction(GEC) models
-. . .
-Final. Deploy final python framework for evaluation of different task models on the fly
+2. . . .
+3. Deploy final python framework for evaluation of different task models on the fly
