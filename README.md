@@ -18,3 +18,22 @@
 1. Implement live evaluation on Grammatical Error Correction(GEC) models
 2. . . .
 3. Deploy final python framework for evaluation of different task models on the fly
+
+
+## GEC
+
+### Generation Models:
+
+### Task-Models:
+- T5
+- Grammar Error Correcter v1
+- Fine-tuned bert-uncased
+
+### Metrics:
+- ERRANT
+- MaxMatch
+- GLEU
+
+### Evaluation dataset:
+- C4 200M GEC dataset
+- GEC dataset from hugginface
