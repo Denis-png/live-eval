@@ -1,0 +1,301 @@
+Category,Original,Vennify_Fix,Gramformer_Fix,GLEU_Vennify,GLEU_Gramformer
+Garden Path: Baseline (Correct),The old man the boats during the storm.,The old man the boats during the storm.,The old man on the boat during the storm.,1.0,0.4333
+Garden Path: Baseline (Correct),The horse raced past the barn fell down.,The horse raced past the barn fell down.,The horse racing past the barn fell down.,1.0,0.6538
+Syntactic Ambiguity,I saw the man with the telescope that was broken.,I saw the man with the telescope that was broken.,I saw the man with the telescope broken.,0.5294,0.6923
+Mixed: SVA/Redundancy,The data is suggests that we are failing.,The data suggests that we are failing.,The data suggests that we are failing.,1.0,1.0
+Homonym: weather/whether,He did not know weather to go or stay.,He did not know how to go or stay.,He did not know weather to go or stay.,0.6667,0.6667
+Punctuation: It's/Its,Its a long way to the top if you want to rock.,It's a long way to the top if you want to rock.,Its a long way to the top if you want to rock.,1.0,0.9048
+Irregular Plural SVA,The criteria for the project is very strict.,The criteria for the project are very strict.,The criteria for the project are very strict.,1.0,1.0
+Baseline: Non-gradable (Stylistic),He is more unique than his brother.,He is more unique than his brother.,He is more unique than his brother.,1.0,1.0
+Conditional Type 3,"If I would have been there, I would have helped.","If I would have been there, I would have helped.","If I would have been there, I would have helped.",0.6176,0.6176
+Mixed: Gerund/Adverb,I look forward to hear from you soonly.,I look forward to hearing from you soon.,I look forward to hearing from you soon.,1.0,1.0
+SVA: Collective/Plural context,The sheep is eating grass in the fields.,The sheep is eating grass in the fields.,The sheep are eating grass in the fields.,0.6538,1.0
+Homonym: Affect/Effect,He effect the outcome of the game.,He affects the outcome of the game.,He affects the outcome of the game.,0.6818,0.6818
+Mixed: Irregular Past/Spelling,She lead the team to victory yesteday.,She led the team to victory on Thursday.,She led the team to victory Sunday.,0.6923,0.8182
+Baseline: Homonym Check,The principal of the school is a man of principle.,The principal of the school is a man of principle.,The principal of the school is a man of principle.,1.0,1.0
+Verb Pattern: Used to,I am not used to drive on this side.,I am not used to driving on this side.,I am not used to driving on this side.,1.0,1.0
+Triple Negative,He don't know nothing about no gold.,He doesn't know anything about no gold.,He doesn't know anything about gold.,0.6818,0.6818
+Uncountable SVA/Article,The news are spreading like a wildfire.,The news are spreading like a wildfire.,The news is spreading like wildfire.,0.3182,1.0
+Preposition: Preference,I prefer tea than coffee in the morning.,I prefer tea than coffee in the morning.,I prefer tea over coffee in the morning.,0.6154,0.6154
+Comparison: Superlative,She is the taller of the three sisters.,She is the taller of the three sisters.,She is the tallest of the three sisters.,0.6154,1.0
+Redundancy: Prep,"Despite of the heat, they kept running.","Despite the heat, they kept running.","Despite the heat, they kept running.",1.0,1.0
+Verb Pattern: Suggest,He suggested us to take the bus.,He suggested we take the bus.,He suggested we take the bus.,0.5909,0.5909
+SVA: Plural-only Noun,The scissors is on the desk near the paper.,The scissors are on the desk near the paper.,The scissors are on the desk near the paper.,1.0,1.0
+Prep: Duration,I've been waiting here since two hours.,I've been waiting here for two hours.,I've been waiting here for two hours.,1.0,1.0
+Article: Phonetic,He works as a engineer in the city.,He works as an engineer in the city.,He works as an engineer in the city.,1.0,1.0
+Relative Clause Redundancy,The man who I saw him was very tall.,The man who I saw was very tall.,The man I saw was very tall.,0.6538,1.0
+Adjective/Adverb,She speaks English very good for a tourist.,She speaks English very well for a tourist.,She speaks English very well for a tourist.,1.0,1.0
+Subjunctive,I wish I was taller than I am now.,I wish I was taller than I am now.,I wish I was taller than I am now.,0.6667,0.6667
+Confusing Verb: Lie/Lay,He layed the book on the table yesterday.,He layed the book on the table yesterday.,He laid the book on the table yesterday.,0.7308,1.0
+Irregular Singular/Plural,The phenomena was observed by the scientist.,The phenomena was observed by the scientist.,The phenomena was observed by the scientist.,0.6818,0.6818
+SVA: Relative Clause,He is one of those people who is always late.,He is one of those people who is always late.,He is one of those people who is always late.,0.7353,0.7353
+Adverb Over-extension,"I forgot my umbrella, so I got wetly.","I forgot my umbrella, so I got wet.","I forgot my umbrella, so I got wet.",1.0,1.0
+Stative Verb/Adjective,The cake smells deliciously and looks great.,The cake smells deliciously and looks great.,The cake smells delicious and looks great.,0.5455,1.0
+Quantifier: Countable,He has less friends than he used to.,He has less friends than he used to.,He has less friends than he used to.,0.6538,0.6538
+Tense: Auxiliary,I didn't saw him at the gym today.,I didn't see him at the gym today.,I didn't see him at the gym today.,1.0,1.0
+Double Comparison,The car's engine is more powerfuler now.,The car's engine is more powerful now.,The car's engine is more powerful now.,1.0,1.0
+SVA: Compound with Every,Every boy and girl have to participate.,Every boy and girl has to participate.,Every boy and girl has to participate.,1.0,1.0
+Prep: Duration,He has been gone since a long time.,He has been gone for a long time.,He has been gone for a long time.,1.0,1.0
+Homonym: Who's/Whose,Whose going to be at the party tonight?,Who is going to be at the party tonight?,Who's going to be at the party tonight?,0.7333,1.0
+Participle: -ing/-ed,I am very interesting in ancient history.,I am very interested in ancient history.,I am very interested in ancient history.,1.0,1.0
+Verb Pattern: Recommend,She recommended me to see that movie.,She recommended me to see that movie.,She recommended me to see that movie.,0.4091,0.4091
+SVA: 'The number of',The number of students are increasing.,The number of students is increasing.,The number of students is increasing.,1.0,1.0
+SVA: 'A number of',A number of students is waiting outside.,A number of students is waiting outside.,A number of students are waiting outside.,0.5909,1.0
+Comparison/Subjunctive,He acts like he is the boss of me.,He acts like he is the boss of me.,He acts like he is the boss of me.,0.4118,0.4118
+Redundancy: Reason/Because,The reason is because I was tired.,The reason is because I was tired.,The reason is because I was tired.,0.5455,0.5455
+Double Negative,I can't hardly hear you over the noise.,I can't hardly hear you over the noise.,I can't hardly hear you over the noise.,0.7308,0.7308
+Redundancy: Time,She arrived at 5 PM in the afternoon.,She arrived at 5 PM in the afternoon.,She arrived at 5 PM in the afternoon.,0.3846,0.3846
+Case: Object Pronoun,They invited my wife and I to dinner.,They invited my wife and I to dinner.,They invited my wife and I to dinner.,0.6538,0.6538
+Prep Case,"Between you and I, this is a secret.","Between you and I, this is a secret.","Between you and I, this is a secret.",0.6154,0.6154
+Case: Who/Whom,He is a man whom I know is honest.,He is a man whom I know is honest.,He is a man whom I know is honest.,0.6667,0.6667
+Verb Pattern: Thinking,I am thinking to quit my job soon.,I am thinking to quit my job soon.,I am thinking of quit my job soon.,0.4615,0.6154
+Subjunctive: Present,I suggest that he goes to the doctor.,I suggest that he goes to the doctor.,I suggest that he go to the doctor.,0.6154,1.0
+Double Superlative,He is the most cleverest boy I know.,He is the smartest boy I know.,He is the cleverest boy I know.,0.5455,1.0
+Redundancy: Reason why,The reason why he left is a mystery.,The reason why he left is a mystery.,The reason why he left is a mystery.,0.6538,0.6538
+Preposition: Time,I have been living here since five years.,I have been living here for five years.,I have been living here for five years.,1.0,1.0
+Double Comparative,She is more smarter than her sister.,She is smarter than her sister.,She is smarter than her sister.,1.0,1.0
+Verb Pattern: Gerund,I look forward to see you next week.,I look forward to seeing you next week.,I look forward to seeing you next week.,1.0,1.0
+Double Negative/SVA,He don't like to play football no more.,He doesn't like to play football anymore.,He doesn't like to play football anymore.,1.0,1.0
+Collective Noun SVA,The police is investigating the crime.,The police is investigating the crime.,The police are investigating the crime.,0.5,1.0
+Verb Phrase: Agree,I am not agree with your statement.,I am not agree with your statement.,I do not agree with your statement.,0.6818,1.0
+Adverb: Hard/Hardly,He works hardly to finish the project.,He works hardly to finish the project.,He worked hard to finish the project.,0.5909,0.6818
+Preposition: Material,The table is made by wood.,The table is made of wood.,The table is made of wood.,1.0,1.0
+Tense: Past Simple/Perfect,I have finished my work an hour ago.,I have finished my work an hour ago.,I finished my work an hour ago.,0.7308,1.0
+Noun: Number,She is one of the girl who won.,She is one of the girls who won.,She is one of the girls who won.,1.0,1.0
+Subjunctive: Conditional,"If I was you, I would take the job.","If I was you, I would take the job.","If I were you, I would take the job.",0.7,1.0
+Uncountable SVA,The news were very shocking to everyone.,The news was very shocking to everyone.,The news was very shocking to everyone.,1.0,1.0
+Indirect Object Pattern,He explained me the whole situation.,He explained the whole situation.,He explained to me the whole situation.,0.4545,0.3182
+Verb Pattern: Gerund,I am thinking to buy a new car.,I am thinking to buy a new car.,I am thinking of buying a new car.,0.4615,1.0
+Question Structure,How long it takes to reach there?,How long does it take to reach there?,How long does it take to get there?,1.0,0.7308
+Double Superlative,She is the most prettiest girl here.,She is the prettiest girl here.,She is the prettiest girl here.,1.0,1.0
+Verb Pattern: Gerund,He denied to have stolen the money.,He denied to have stolen the money.,He denied having stolen the money.,0.4091,1.0
+Subjunctive: Wish,I wish I have a bigger house.,I wish I had a bigger house.,I wish I had a bigger house.,1.0,1.0
+Modal Pattern,He had better to stay at home today.,He had better stay at home today.,He had better stay home today.,1.0,0.5909
+Determiner Redundancy,The most of people like ice cream.,The most of people like ice cream.,Most people like ice cream.,0.4545,1.0
+Distributive SVA,Neither of the two books are good.,Neither of the two books are good.,Neither of the two books is good.,0.6818,1.0
+Tense: Past Simple,I have seen her yesteday morning.,I have seen her today morning.,I saw her yesterday morning.,0.1667,1.0
+Quantifier Redundancy,The water is too much hot to drink.,The water is too hot to drink.,The water is too hot to drink.,1.0,1.0
+Redundancy: Suppose/If,"Suppose if you win, what will you do?","Suppose you win, what will you do?","Suppose if you win, what will you do?",1.0,0.7308
+Preposition: Skill,He is good in playing chess.,He is good at playing chess.,He is good at playing chess.,1.0,1.0
+Verb Pattern: Used to,I am used to get up early.,I am used to getting up early.,I used to get up early.,1.0,0.3182
+Relative Redundancy,The man whom I met him is a doctor.,The man whom I met is a doctor.,The man whom I met is a doctor.,0.6538,0.6538
+Adjective/Adverb,She speaks English very good.,She speaks English very well.,She speaks English very well.,1.0,1.0
+Uncountable Noun,I am having a lot of works to do.,I am having a lot of work to do.,I have a lot of work to do.,0.6333,1.0
+Case/Comparative,He is taller than me am.,He is taller than I am.,He is taller than I am.,1.0,1.0
+Stative Verb,The house is belonging to my uncle.,The house belongs to my uncle.,The house belongs to my uncle.,1.0,1.0
+Tense: Present Perfect,I didn't saw the movie yet.,I didn't see the movie yet.,I haven't seen the movie yet.,0.3889,1.0
+Double Comparative,He is more stronger than his friend.,He is stronger than his friend.,He is stronger than his friend.,1.0,1.0
+Indefinite Pronoun SVA,Everyone have their own problems.,Everyone has their own problems.,Everyone has their own problems.,1.0,1.0
+Stative Verb: Tense,I have been knowing him for years.,I have been knowing him for years.,I have been knowing him for years.,0.4091,0.4091
+Baseline: Non-gradable,She is the most unique person I know.,She is the most unique person I know.,She is the most unique person I know.,1.0,1.0
+Adverb Order,He is enough old to drive a car.,He is enough old to drive a car.,He is old enough to drive a car.,0.5769,1.0
+Preposition: Preference,I prefer swimming than running.,I prefer swimming than running.,I prefer swimming than running.,0.5,0.5
+Baseline: Plural Noun,The scissors are missing from the drawer.,The scissors are missing from the drawer.,The scissors are missing from the drawer.,1.0,1.0
+Verb Pattern: Tell,He told to me that he was tired.,He told me that he was tired.,He told me that he was tired.,1.0,1.0
+Verb Pattern: Gerund,I look forward to meet you.,I look forward to meeting you.,I look forward to meeting you.,1.0,1.0
+SVA/Auxiliary,He don't has any money left.,He doesn't have any money left.,He doesn't have any money left.,1.0,1.0
+Uncountable SVA,The informations are very useful.,The information are very useful.,The information is very useful.,0.4286,1.0
+Tense: Duration,I am waiting for you since an hour.,I am waiting for you since an hour.,I am waiting for you for an hour.,0.3333,0.6333
+Comparative Suffix,She is more clever than her brother.,She is more clever than her brother.,She is more clever than her brother.,0.4091,0.4091
+Relative Pronoun,He is the man which stole my bag.,He is the man who stole my bag.,He is the man who stole my bag.,1.0,1.0
+Baseline: Perfect Tense,I haven't seen him for ages.,I haven't seen him for ages.,I haven't seen him for ages.,1.0,1.0
+Preposition Redundancy,They reached to the station late.,They reached the station late.,They reached the station late.,1.0,1.0
+Preposition: Relationship,He is married with a doctor.,He is married with a doctor.,He is married to a doctor.,0.5,1.0
+Quantifier Redundancy,I am very much interested in music.,I am very much interested in music.,I am very much interested in music.,0.5455,0.5455
+Baseline: Adverb,The film was so boring that I fell asleep.,The film was so boring that I fell asleep.,The film was so boring that I fell asleep.,1.0,1.0
+Uncountable Noun,He does not have many luggages.,He does not have many luggages.,He does not have many luggages.,0.5556,0.5556
+Collocation,I saw a dream last night.,I saw a dream last night.,I saw a dream last night.,0.6111,0.6111
+Comparative Preposition,He is senior than me in the office.,He is senior than me in the office.,He is senior than me in the office.,0.6154,0.6154
+Baseline: General Truth,The sun rises in the east.,The sun rises in the east.,The sun rises in the east.,1.0,1.0
+Noun: Number,She is one of the best student.,She is one of the best students.,She is one of the best students.,1.0,1.0
+Phrasal Verb: Redundancy,I can't cope up with the pressure.,I can't cope with the pressure.,I can't cope with the pressure.,1.0,1.0
+Verb Pattern: Gerund,He is addicted to smoke.,He is addicted to smoking.,He is addicted to smoke.,1.0,0.7143
+Vocabulary: Drown/Sink,The ship was drownded in the sea.,The ship was drowned in the sea.,The ship drowned in the sea.,0.4091,0.5
+Article: Uncountable,I have a news for you.,I have a news for you.,I have news for you.,0.5,1.0
+Article: Phonetic,He is a honest man.,He is an honest man.,He is an honest man.,1.0,1.0
+Tense: Duration,I am working here since 2010.,I am working here since 2010.,I have been working here since 2010.,0.5,1.0
+Stative Verb: Adjective,The flowers smell sweetly.,The flowers smell sweetly.,The flowers smell sweet.,0.6,1.0
+Double Comparative,He is more taller than his brother.,He is more tall than his brother.,He is taller than his brother.,0.4091,1.0
+Baseline: Distributive SVA,Neither of the plans was successful.,Neither of the plans was successful.,Neither of the plans was successful.,1.0,1.0
+Verb Pattern: Gerund,I am thinking to go to London.,I am thinking to go to London.,I am thinking of going to London.,0.4091,1.0
+Verb Pattern: Suggest,She suggested to go for a walk.,She suggested to go for a walk.,She suggested going for a walk.,0.4091,1.0
+Uncountable SVA,The scenerys of the hills are beautiful.,The scenery of the hills are beautiful.,The scenery of the hills is beautiful.,0.6818,1.0
+Idiomatic Expression,He is a man of his words.,He is a man of his words.,He is a man of his words.,0.8182,0.8182
+Preposition: Future Time,I will return the book after two days.,I will return the book after two days.,I will return the book after two days.,0.6538,0.6538
+Preposition: Point in time,He has been ill for last week.,He has been ill for last week.,He has been ill since last week.,0.5909,1.0
+Indirect Question Order,I don't know who is he.,I don't know who is he.,I don't know who is he.,0.5556,0.5556
+Double Superlative,She is the most intelligentest girl.,She is the intelligentest girl.,She is the most intelligent girl.,0.3889,1.0
+Preposition Redundancy,He entered into the room quietly.,He entered the room quietly.,He entered into the room quietly.,1.0,0.5
+Uncountable Noun,I have many works to finish today.,I have many works to finish today.,I have many works to finish today.,0.4091,0.4091
+Double Comparative,He is more better today.,He is better today.,He is better today.,1.0,1.0
+Preposition: Duration,I haven't seen him since a long time.,I haven't seen him for a long time.,I haven't seen him for a long time.,1.0,1.0
+Baseline: Noun Phrase,The death of the king was a big shock.,The death of the king was a big shock.,The death of the king was a big shock.,1.0,1.0
+Infinitive Pattern,He does not know to swim.,He does not know to swim.,He does not know how to swim.,0.5909,1.0
+Preposition: Fear,I am afraid from spiders.,I am afraid of spiders.,I am afraid of spiders.,1.0,1.0
+Preposition: Skill,She is good in English.,She is good in English.,She is good at English.,0.5,1.0
+Uncountable Noun,He has a lot of furnitures.,He has a lot of furniture.,He has a lot of furniture.,1.0,1.0
+Aspect: Continuous,I am look forward to meeting you.,I look forward to meeting you.,I look forward to meeting you.,0.5,0.5
+SVA: Third Person,He don't like coffee.,He doesn't like coffee.,He doesn't like coffee.,1.0,1.0
+Baseline: Collective Noun (Plural intent),The jury were divided in their opinion.,The jury was divided in their opinion.,The jury was divided in their opinion.,0.5909,0.5909
+Baseline: Continuous Perfect,I have been writing this book for a year.,I have been writing this book for a year.,I have been writing this book for a year.,1.0,1.0
+Baseline: Idiom,He is suffering from fever.,He is suffering from fever.,He is suffering from fever.,1.0,1.0
+Baseline: Comparative for two,She is the taller of the two.,She is the taller of the two.,She is the tallest of the two.,1.0,0.5455
+Noun: Number,He is one of the most famous man.,He is one of the most famous men.,He is one of the most famous men.,1.0,1.0
+Verb Pattern: Bare Infinitive,I saw him to go there.,I saw him go there.,I saw him go there.,1.0,1.0
+Causative Pattern,He made me to do it.,He made me do it.,He made me do it.,1.0,1.0
+Modal Pattern,I would rather to stay here.,I would rather stay here.,I would rather stay here.,1.0,1.0
+Infinitive of Result,He is too weak for walking.,He is too weak for walking.,He is too weak to walk.,0.5556,1.0
+Preposition: Cause,I am very tired for working.,I am very tired of working.,I am very tired of working.,0.6111,0.6111
+Baseline: Preposition,She is married to a rich man.,She is married to a rich man.,She is married to a rich man.,1.0,1.0
+Case/Comparative,He is younger than me.,He is younger than me.,He is younger than me.,0.5556,0.5556
+Preposition Redundancy,I am busy in doing my work.,I am busy doing my work.,I am busy doing my work.,1.0,1.0
+Preposition: Belonging,He is a member in our club.,He is a member in our club.,He is a member of our club.,0.5909,1.0
+Uncountable Noun,I have a great deal of works.,I have a great deal of work.,I have a great deal of work to do.,1.0,0.6
+Comparative Exclusion,He is taller than any boy in the class.,He is taller than any boy in the class.,He is taller than any boy in the class.,0.7059,0.7059
+Noun/Determiner Agreement,I don't like these kind of things.,I don't like these kinds of things.,I don't like these kind of things.,0.3182,0.4091
+Baseline: Tense,He has finished his lunch just now.,He has finished his lunch just now.,He has finished his lunch just now.,1.0,1.0
+Preposition Redundancy,I will meet you on next Monday.,I will meet you next Monday.,I will meet you next Monday.,1.0,1.0
+Preposition Redundancy,He is coming on this evening.,He is coming on this evening.,He is coming on this evening.,0.5,0.5
+Preposition: Duration,I have been waiting here since an hour.,I have been waiting here for an hour.,I have been waiting here for an hour.,1.0,1.0
+Preposition: Cause of Death,He died from cancer.,He died from cancer.,He died of cancer.,0.4,1.0
+Baseline: Used to,I am not used to the cold weather.,I am not used to the cold weather.,I am not used to the cold weather.,1.0,1.0
+Inanimate Possessive,The house's roof is leaking.,The house's roof is leaking.,The house's roof is leaking.,0.2273,0.2273
+Double Comparative,He is more cleverer than his brother.,He is more clever than his brother.,He is cleverer than his brother.,0.4091,1.0
+Compound Adjective,I have a ten years old son.,I have a ten year old son.,I have a ten year old son.,0.3182,0.3182
+Idiomatic Accuracy,He is a man of his words.,He is a man of his words.,He is a man of his words.,0.8182,0.8182
+Preposition: Interest,I am very interested to this book.,I am very interested in this book.,I am very interested in this book.,1.0,1.0
+Preposition: Skill,He is good in playing guitar.,He is good at playing guitar.,He is good at playing guitar.,1.0,1.0
+Preposition: Duration,I haven't seen him since ages.,I haven't seen him since ages.,I haven't seen him in ages.,0.6111,0.6111
+Double Superlative,She is the most tallest girl in class.,She is the tallest girl in class.,She is the tallest girl in class.,1.0,1.0
+Redundancy: Any,He has no any money.,He has no money.,He has no money.,1.0,1.0
+Baseline: Adjective,I am sorry for the delay.,I am sorry for the delay.,I am sorry for the delay.,1.0,1.0
+Baseline: Gerund,He is addicted to gambling.,He is addicted to gambling.,He is addicted to gambling.,1.0,1.0
+Preposition: Fatigue,I am tired with this work.,I am tired of this work.,I am tired of this work.,1.0,1.0
+Comparative Preposition,He is senior than me.,He is older than me.,He is older than me.,0.2857,0.2857
+Tense: Past Simple,I have seen the movie yesterday.,I have seen the movie yesterday.,I saw the movie yesterday.,0.3889,1.0
+Double Comparative/Case,She is more smarter than him.,She is smarter than him.,She is smarter than him.,0.5556,0.5556
+SVA: Third Person,He don't care about anything.,He doesn't care about anything.,He doesn't care about anything.,1.0,1.0
+Verb Pattern: Gerund,I am look forward to see you.,I look forward to seeing you.,I look forward to seeing you.,0.5,0.5
+Baseline: Collective Noun,The jury has given its verdict.,The jury has given its verdict.,The jury has given its verdict.,1.0,1.0
+Preposition: Relationship,He is married with my sister.,He is married to my sister.,He is married to my sister.,1.0,1.0
+Baseline: Used to,I am used to living in a city.,I am used to living in a city.,I am used to living in a city.,1.0,1.0
+Double Comparative/Case,He is more stronger than me.,He is stronger than me.,He is stronger than me.,0.5556,0.5556
+Preposition: Point in time,I have been working here for 2010.,I have been working here since 2010.,I have been working here since 2010.,1.0,1.0
+SVA: Plural Noun,The scissor is on the table.,The scissor is on the table.,The scissor is on the table.,0.3889,0.3889
+Uncountable Noun,I have a lot of furnitures in my room.,I have a lot of furniture in my room.,I have a lot of furniture in my room.,1.0,1.0
+SVA: Relative Clause,He is one of those who never tells a lie.,He is one of those who never tells a lie.,He is one of those who never tells a lie.,0.7353,0.7353
+Baseline: Uncountable,The news is very good today.,The news is very good today.,The news is very good today.,1.0,1.0
+Verb Pattern: Gerund,I am thinking to quit my job.,I am thinking to quit my job.,I am thinking of quit my job.,0.4091,0.5909
+Verb Pattern: Suggest,She suggested us to go for a movie.,She suggested we go for a movie.,She suggested we go for a movie.,0.6538,0.6538
+Indirect Object Pattern,He explained me why he was late.,He explained to me why he was late.,He explained to me why he was late.,1.0,1.0
+Collective Noun SVA,The police is coming to the scene.,The police is coming to the scene.,The police are coming to the scene.,0.5909,1.0
+Verb Phrase: Agree,I am not agree with you.,I am not agree with you.,I do not agree with you.,0.6111,1.0
+Adverb: Hard/Hardly,He works hardly for his exams.,He works hardly for his exams.,He works hardly for his exams.,0.5,0.5
+Stative Verb,The book is belonging to the library.,The book is belonging to the library.,The book belongs to the library.,0.4091,1.0
+Tense: Auxiliary,I didn't saw him at the party.,I didn't see him at the party.,I didn't see him at the party.,1.0,1.0
+Adverb Order,He is enough strong to lift the box.,He is enough strong to lift the box.,He is strong enough to lift the box.,0.5769,1.0
+Preposition: Preference,I prefer coffee than tea.,I prefer coffee than tea.,I prefer coffee over tea.,0.5,0.5
+Baseline: Material,The table is made of wood.,The table is made of wood.,The table is made of wood.,1.0,1.0
+Tense: Past Simple,I have finished the work an hour ago.,I have finished the work an hour ago.,I finished the work an hour ago.,0.7308,1.0
+Noun: Number,She is one of the girl who won.,She is one of the girls who won.,She is one of the girls who won.,1.0,1.0
+Subjunctive: Conditional,"If I was you, I would take the job.","If I was you, I would take the job.","If I were you, I would take the job.",0.7,1.0
+Uncountable SVA,The news were very shocking.,The news were very shocking.,The news were very shocking.,0.4286,0.4286
+Double Superlative,He is the most cleverest boy.,He is the most clever boy.,He is the cleverest boy.,0.3889,1.0
+Baseline: Gerund,I look forward to meeting you soon.,I look forward to meeting you soon.,I look forward to meeting you soon.,1.0,1.0
+SVA: Third Person,He don't like playing football.,He doesn't like playing football.,He doesn't like playing football.,1.0,1.0
+Uncountable SVA,The informations you gave me were wrong.,The information you gave me were wrong.,The information you gave me was wrong.,0.6818,1.0
+Tense: Duration,I am waiting for the bus since an hour.,I am waiting for the bus for an hour.,I have been waiting for the bus for an hour.,0.6765,1.0
+Baseline: Comparative,She is more intelligent than her sister.,She is more intelligent than her sister.,She is more intelligent than her sister.,1.0,1.0
+Relative Pronoun,He is the man which stole the car.,He is the man who stole the car.,He is the man who stole the car.,1.0,1.0
+Baseline: Perfect Tense,I haven't seen him for ages.,I haven't seen him for ages.,I haven't seen him for ages.,1.0,1.0
+Baseline: Preposition,They reached the station late.,They reached the station late.,They reached the station late.,1.0,1.0
+Baseline: Comparative,He is senior to me in rank.,He is senior to me in rank.,He is senior to me in rank.,1.0,1.0
+Baseline: Number,She is one of the best students in the class.,She is one of the best students in the class.,She is one of the best students in the class.,1.0,1.0
+Baseline: Phrasal Verb,I can't cope with the work.,I can't cope with the work.,I can't cope with the work.,1.0,1.0
+Baseline: Gerund,He is addicted to smoking.,He is addicted to smoking.,He is addicted to smoking.,1.0,1.0
+Baseline: Uncountable,I have news for you today.,I have news for you today.,I have news for you today.,1.0,1.0
+Baseline: Article,He is an honest person.,He is an honest person.,He is an honest person.,1.0,1.0
+Baseline: Duration,I have been working here since Monday.,I have been working here since Monday.,I have been working here since Monday.,1.0,1.0
+Baseline: Stative,The flowers smell sweet in the morning.,The flowers smell sweet in the morning.,The flowers smell sweet in the morning.,1.0,1.0
+Baseline: Comparative,He is taller than his friend.,He is taller than his friend.,He is taller than his friend.,1.0,1.0
+Baseline: SVA,Neither of the students was present.,Neither of the students was present.,Neither of the students was present.,1.0,1.0
+Baseline: Gerund,I am thinking of going to Paris.,I am thinking of going to Paris.,I am thinking of going to Paris.,1.0,1.0
+Baseline: Uncountable,The scenery is beautiful.,The scenery is beautiful.,The scenery is beautiful.,1.0,1.0
+Baseline: Idiom,He is a man of his word.,He is a man of his word.,He is a man of his word.,1.0,1.0
+Baseline: Time,I will return the money in a week.,I will return the money in a week.,I will return the money in a week.,1.0,1.0
+Baseline: Indirect Question,I don't know who he is.,I don't know who he is.,I don't know who he is.,1.0,1.0
+Baseline: Preposition,He entered the room quietly.,He entered the room quietly.,He entered the room quietly.,1.0,1.0
+Baseline: Uncountable,I have much work to do today.,I have a lot of work to do today.,I have much work to do today.,0.4333,1.0
+Baseline: Comparative,He is better now.,He is better now.,He is better now.,1.0,1.0
+Baseline: Duration,I haven't seen her for a long time.,I haven't seen her for a long time.,I haven't seen her for a long time.,1.0,1.0
+Baseline: Noun Phrase,The death of the pilot was a tragedy.,The death of the pilot was a tragedy.,The death of the pilot was a tragedy.,0.2308,0.2308
+Baseline: Infinitive,He does not know how to drive.,He does not know how to drive.,He does not know how to drive.,1.0,1.0
+Baseline: Preposition,I am afraid of snakes.,I am afraid of snakes.,I am afraid of snakes.,1.0,1.0
+Baseline: Skill,She is good at math.,She is good at math.,She is good at math.,1.0,1.0
+Baseline: Uncountable,He has a lot of furniture.,He has a lot of furniture.,He has a lot of furniture.,1.0,1.0
+Baseline: Aspect,I am looking forward to seeing you.,I am looking forward to seeing you.,I am looking forward to seeing you.,1.0,1.0
+Baseline: SVA,He doesn't like tea.,He doesn't like tea.,He doesn't like tea.,1.0,1.0
+Collective Noun SVA (Singular intent),The jury were unanimous in their decision.,The jury was unanimous in their decision.,The jury was unanimous in their decision.,0.6818,0.6818
+Baseline: Idiom,He is suffering from a cold.,He is suffering from a cold.,He is suffering from a cold.,1.0,1.0
+Baseline: Comparative,She is the taller of the two girls.,She is the taller of the two girls.,She is the tallest of the two girls.,1.0,0.6154
+Baseline: Number,He is one of the most famous men in history.,He is one of the most famous men in history.,He is one of the most famous men in history.,1.0,1.0
+Baseline: Bare Infinitive,I saw him go out.,I saw him go out.,I saw him go out.,1.0,1.0
+Baseline: Causative,He made me cry.,He made me cry.,He made me cry.,1.0,1.0
+Baseline: Modal,I would rather stay home.,I would rather stay home.,I would rather stay home.,1.0,1.0
+Baseline: Result,He is too old to work.,He is too old to work.,He is too old to work.,1.0,1.0
+Baseline: Cause,I am tired from the journey.,I am tired from the journey.,I am tired from the journey.,1.0,1.0
+Baseline: Relationship,She is married to a scientist.,She is married to a scientist.,She is married to a scientist.,1.0,1.0
+Baseline: Case,He is younger than I am.,He is younger than I am.,He is younger than I am.,1.0,1.0
+Baseline: Pattern,I am busy doing my homework.,I am busy doing my homework.,I am busy doing my homework.,1.0,1.0
+Baseline: Belonging,He is a member of the team.,He is a member of the team.,He is a member of the team.,1.0,1.0
+Baseline: Uncountable,I have much work to finish.,I have a lot of work to finish.,I have much work to finish.,0.3462,1.0
+Inversion: Correlative,"Not only he is late, but he also forgot the files.","Not only is he late, but he also forgot the files.","Not only is he late, but he also forgot the files.",1.0,1.0
+Inversion: Negative Adverb,Rarely I have seen such a beautiful sunset.,Rarely have I seen such a beautiful sunset.,Rarely have I seen such a beautiful sunset.,1.0,1.0
+Dangling Participle,"Walking down the street, the trees were beautiful.","Walking down the street, the trees were beautiful.","Walking down the street, the trees were beautiful.",0.3947,0.3947
+SVA: Proximity Rule,Neither the manager nor the employees was happy.,Neither the manager nor the employees were happy.,Neither the manager nor the employees were happy.,1.0,1.0
+SVA: Proximity Rule,Either the players or the coach are responsible.,Either the players or the coach are responsible.,Either the players or the coach are responsible.,0.7308,0.7308
+Subjunctive: Unreal,He acted as if he was the king.,He acted as if he was the king.,He acted as if he were the king.,0.6538,1.0
+Preposition: Congratulate,I would like to congratulate you for your success.,I would like to congratulate you for your success.,I would like to congratulate you on your success.,0.7,1.0
+Preposition: Skill,He is proficient of three languages.,He is proficient in three languages.,He is proficient in three languages.,1.0,1.0
+Preposition: Comply,You should comply to the rules of the house.,You should comply to the rules of the house.,You should comply with the rules of the house.,0.6667,1.0
+Redundancy: Reason/Because,The reason for his failure is because he didn't study.,The reason for his failure is because he didn't study.,The reason for his failure is because he didn't study.,0.7059,0.7059
+Inversion: Time,Hardly I had reached the station when the train left.,Hardly I had reached the station when the train left.,Hardly I had reached the station when the train left.,0.7353,0.7353
+Inversion: No Sooner,No sooner the sun rose than the birds started singing.,No sooner the sun rose than the birds started singing.,No sooner did the sun rise than the birds started singing.,0.5263,1.0
+Baseline: Adjective/Infinitive,He is very kind to help us.,He is very kind to help us.,He is very kind to help us.,1.0,1.0
+Preposition: Preference,I prefer traveling by train than flying.,I prefer traveling by train than flying.,I prefer traveling by train than flying.,0.6818,0.6818
+Comparative: Ellipsis,"He is as tall, if not taller than, his brother.","He is as tall, if not taller than, his brother.","He is as tall, if not taller than his brother.",0.6316,0.3947
+Correlative Conjunction,She is both intelligent as well as hardworking.,She is both intelligent as well as hardworking.,She is both intelligent as well as hardworking.,0.4231,0.4231
+Case: Object of Preposition,"Between you and I, the plan is flawed.","Between you and I, the plan is flawed.","Between you and I, the plan is flawed.",0.6154,0.6154
+SVA: Head Noun,The quality of the oranges were not good.,The quality of the oranges were not good.,The quality of the oranges was not good.,0.6538,1.0
+Preposition: Duration,He has been ill since three days.,He has been ill since three days.,He has been ill for three days.,0.5909,1.0
+Stative Verb: Tense,I am knowing him for a long time.,I am knowing him for a long time.,I have known him for a long time.,0.5769,1.0
+Question Tag,"She works in a hospital, isn't it?","She works in a hospital, isn't it?","She works in a hospital, isn't it?",0.6364,0.6364
+Baseline: Question Tag,"He went to the cinema yesterday, didn't he?","He went to the cinema yesterday, didn't he?","He went to the cinema yesterday, didn't he?",1.0,1.0
+Verb Pattern: Used to,I am used to drive in heavy traffic.,I am used to driving in heavy traffic.,I am used to driving in heavy traffic.,1.0,1.0
+Verb Choice: Say/Tell,He told that he would come.,He told him that he would come.,He told him that he would come.,0.5,0.5
+Double Comparative/Case,She is more taller than me.,She is more taller than me.,She is taller than me.,0.3333,0.5556
+Double Negative,I didn't see nobody there.,I didn't see anybody there.,I didn't see anybody there.,1.0,1.0
+Baseline: Uncountable Tag,"The news is true, isn't it?","The news is true, isn't it?","The news is true, isn't it?",1.0,1.0
+Indirect Question,He asked me where did I live.,He asked me where did I live.,He asked me where did I live.,0.5,0.5
+Subjunctive: Wish,I wish I was a millionaire.,I wish I was a millionaire.,I wish I was a millionaire.,0.5,0.5
+Noun: Number,He is one of the tallest boy in the class.,He is one of the tallest boys in the class.,He is one of the tallest boys in the class.,1.0,1.0
+Double Negative: Unless,"Unless you do not work hard, you will fail.","Unless you do not work hard, you will fail.","Unless you do not work hard, you will fail.",0.5667,0.5667
+Inversion: Scarcely,Scarcely he had started when it began to rain.,Scarcely he had started when it began to rain.,Scarcely he started when it began to rain.,0.7,0.7667
+Illogical Comparison,The climate of India is hotter than Europe.,The climate of India is hotter than Europe.,The climate of India is hotter than Europe.,0.6765,0.6765
+Verb Pattern: Gerund,He is addicted to play video games.,He is addicted to play video games.,He is addicted to playing video games.,0.5909,1.0
+Baseline: Uncountable,I have a lot of work to do.,I have a lot of work to do.,I have a lot of work to do.,1.0,1.0
+Redundant Subject,"The boy who works hard, he succeeds.",The boy who works hard succeeds.,"The boy who works hard, succeeds.",1.0,0.6111
+SVA: Distributive,Neither of the candidates are fit for the job.,Neither of the candidates are fit for the job.,Neither of the candidates are fit for the job.,0.6667,0.6667
+SVA: Formal None,None of the students have finished the test.,None of the students have finished the test.,None of the students have finished the test.,0.6154,0.6154
+Verb Pattern: Gerund,I am looking forward to see you.,I am looking forward to see you.,I am looking forward to seeing you.,0.6818,1.0
+Adverb Order,He is enough old to marry.,He is enough old to marry.,He is too old to marry.,0.4444,0.3889
+Preposition: Skill,She is very good in cooking.,She is very good at cooking.,She is very good at cooking.,1.0,1.0
+Verb Pattern: Gerund,I am thinking to buy a new house.,I am thinking to buy a new house.,I am thinking of buying a new house.,0.4615,1.0
+Baseline: Indirect Object,He explained the problem to me.,He explained the problem to me.,He explained the problem to me.,1.0,1.0
+Uncountable SVA,The furniture in this room are old.,The furniture in this room are old.,The furniture in this room is old.,0.6818,1.0
+Misplaced Modifier,I saw a man with a wooden leg named Smith.,I saw a man with a wooden leg named Smith.,I saw a man with a wooden leg named Smith.,0.3684,0.3684
+Causative Pattern,The teacher made the students to write an essay.,The teacher made the students write an essay.,The teacher asked the students to write an essay.,1.0,0.4
+Modal Parallelism,He would rather die than to beg.,He would rather die than to beg.,He would rather die than beg.,0.6818,1.0
+Comparative Exclusion,She is more intelligent than any girl in the class.,She is more intelligent than any girl in the class.,She is more intelligent than any girl in the class.,0.7368,0.7368
+Preposition: Duration,I have been waiting for you since two hours.,I have been waiting for you for two hours.,I have been waiting for you for two hours.,1.0,1.0
+Comparative Preposition,He is senior than all his colleagues.,He is senior than all his colleagues.,He is senior than all his colleagues.,0.5455,0.5455
