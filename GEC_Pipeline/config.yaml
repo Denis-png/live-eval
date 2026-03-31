@@ -1,0 +1,26 @@
+# config.yaml
+pipeline:
+  num_runs: 3
+  sample_size: 20
+  trash_data_after_run: true
+
+generation:
+  model: "llama-3.1-8b-instant"
+  temperature: 0.5
+  error_types:
+    - "subject-verb disagreement"
+    - "wrong tense"
+    - "missing article"
+    - "spelling mistake"
+    - "wrong preposition"
+
+task_models:
+  - name: "vennify/t5-base-grammar-correction"
+    type: "t5"
+  - name: "prithivida/grammar_error_correcter_v1"
+    type: "gec_v1"
+
+dataset:
+  name: "agentlans/grammar-correction"
+  split: "train"
+  seed_size: 50
