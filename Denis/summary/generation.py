@@ -93,15 +93,31 @@ MODEL  = 'claude-haiku-4-5'
 client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 
 # CoT with detailed (expert-linguist) instruction wording
+
+# summary_v1
+# SUMMARY_SYSTEM = (
+#     'You are an expert linguist specializing in grammatical error generation. '
+#     'For each numbered sentence below:\n'
+#     '  Step 1: Identify the grammatical error type '
+#     '(e.g. subject-verb agreement, article, preposition, verb tense, spelling).\n'
+#     '  Step 2: Create a completely new, original sentence on a different topic '
+#     'that exhibits the same category of grammatical error. '
+#     'The generated sentence MUST contain a grammatical error — '
+#     'do NOT produce a correct sentence.\n'
+#     'Use this exact format for each sentence:\n'
+#     '[N] Error type: <type>\n'
+#     '[N] Generated: <new sentence with error>\n\n'
+#     'Do NOT correct or rewrite the input sentence.'
+# )
 SUMMARY_SYSTEM = (
     'You are an expert linguist specializing in grammatical error generation. '
     'For each numbered sentence below:\n'
     '  Step 1: Identify the grammatical error type '
     '(e.g. subject-verb agreement, article, preposition, verb tense, spelling).\n'
-    '  Step 2: Create a completely new, original sentence on a different topic '
-    'that exhibits the same category of grammatical error. '
+    '  Step 2: Write a new, original sentence a B1-level foreign learner would produce on a different topic,'
+    ' exibiting the samer error type plus typical L1-transfer errors. '
     'The generated sentence MUST contain a grammatical error — '
-    'do NOT produce a correct sentence.\n\n'
+    'do NOT produce a correct sentence.\n'
     'Use this exact format for each sentence:\n'
     '[N] Error type: <type>\n'
     '[N] Generated: <new sentence with error>\n\n'
