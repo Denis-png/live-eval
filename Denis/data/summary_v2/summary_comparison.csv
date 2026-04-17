@@ -1,0 +1,9 @@
+model,dataset,errant_f0.5,cola_input,cola_corrected,cola_delta,correction_extent,n_edits
+t5_base,generated,0.659,0.719,0.938,0.219,0.264,1.34
+t5_base,original,0.468,0.674,0.841,0.167,0.45,2.59
+coedit_large,generated,0.661,0.719,0.969,0.25,0.353,1.97
+coedit_large,original,0.521,0.674,0.912,0.238,0.527,3.34
+prithivida,generated,0.662,0.719,0.918,0.199,0.23,1.13
+prithivida,original,0.563,0.674,0.783,0.108,0.253,1.38
+haiku,generated,0.702,0.719,0.992,0.273,0.404,2.28
+haiku,original,0.575,0.674,0.988,0.314,0.622,4.17
