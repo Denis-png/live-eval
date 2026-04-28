@@ -8,6 +8,7 @@ Input:  data/summary/summary_comparison.csv
 Output: data/summary/summary_f05_bar.png
         data/summary/summary_cola_bar.png
         data/summary/summary_correction_bar.png
+        data/summary/summary_gt_metrics_bar.png
         data/summary/summary_heatmap.png
 """
 from pathlib import Path
@@ -169,11 +170,66 @@ def plot_correction(df: pd.DataFrame) -> None:
     print(f'Saved → {out}')
 
 
-# ── Plot 4: Heatmap (all metrics) ─────────────────────────────────────────────
+# ── Plot 4: Ground-truth metrics (errant_f0.5_gt + gleu_gt) ──────────────────
+
+def plot_gt_metrics(df: pd.DataFrame) -> None:
+    """Side-by-side bar charts for the two per-sentence GT-based metrics."""
+    available = [c for c in ['errant_f0.5_gt', 'gleu_gt'] if c in df.columns]
+    if not available:
+        print('No GT metrics found — skipping plot_gt_metrics.')
+        return
+
+    models   = [m for m in MODEL_ORDER if m in df['model'].values]
+    datasets = ['original', 'generated']
+    x        = np.arange(len(models))
+    width    = 0.35
+
+    ylabels = {'errant_f0.5_gt': 'ERRANT F0.5 (sentence-level GT)',
+               'gleu_gt':        'GLEU (sentence-level GT)'}
+    titles  = {'errant_f0.5_gt': 'ERRANT F0.5 — per-sentence ground truth reference',
+               'gleu_gt':        'GLEU — per-sentence ground truth reference'}
+
+    fig, axes = plt.subplots(1, len(available), figsize=(7 * len(available), 5),
+                             sharey=False)
+    if len(available) == 1:
+        axes = [axes]
+
+    for ax, metric in zip(axes, available):
+        for i, ds in enumerate(datasets):
+            vals = [
+                df.loc[(df['model'] == m) & (df['dataset'] == ds), metric].values[0]
+                if len(df.loc[(df['model'] == m) & (df['dataset'] == ds)]) > 0 else 0.0
+                for m in models
+            ]
+            bars = ax.bar(
+                x + (i - 0.5) * width, vals, width,
+                label=ds.capitalize(), color=DATASET_COLORS[ds], alpha=0.85,
+            )
+            ax.bar_label(bars, fmt='%.3f', padding=2, fontsize=8)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels([MODEL_LABELS.get(m, m) for m in models], fontsize=11)
+        ax.set_ylabel(ylabels[metric])
+        ax.set_title(titles[metric])
+        ax.set_ylim(0, 1.05)
+        ax.yaxis.set_major_formatter(mticker.FormatStrFormatter('%.2f'))
+        ax.legend(fontsize=10)
+        ax.grid(axis='y', linestyle='--', alpha=0.5)
+
+    fig.suptitle('GT-referenced metrics — original FCE vs generated benchmark', fontsize=12)
+    fig.tight_layout()
+    out = SUMMARY / 'summary_gt_metrics_bar.png'
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    print(f'Saved → {out}')
+
+
+# ── Plot 5: Heatmap (all metrics) ─────────────────────────────────────────────
 
 def plot_heatmap(df: pd.DataFrame) -> None:
-    metrics = ['errant_f0.5', 'cola_input', 'cola_corrected', 'cola_delta',
-               'correction_extent', 'n_edits']
+    metrics = [c for c in ['errant_f0.5', 'errant_f0.5_gt', 'gleu_gt',
+                            'cola_input', 'cola_corrected', 'cola_delta',
+                            'correction_extent', 'n_edits'] if c in df.columns]
     models   = [m for m in MODEL_ORDER if m in df['model'].values]
     datasets = ['original', 'generated']
 
@@ -193,7 +249,7 @@ def plot_heatmap(df: pd.DataFrame) -> None:
     col_max = data.max(axis=0)
     norm    = np.where(col_max > col_min, (data - col_min) / (col_max - col_min), 0.5)
 
-    fig, ax = plt.subplots(figsize=(len(metrics) * 1.5, len(row_labels) * 0.55 + 1.5))
+    fig, ax = plt.subplots(figsize=(len(metrics) * 1.6, len(row_labels) * 0.55 + 1.5))
     im = ax.imshow(norm, aspect='auto', cmap='YlGn', vmin=0, vmax=1)
 
     ax.set_xticks(range(len(metrics)))
@@ -220,6 +276,7 @@ def main() -> None:
     plot_f05(df)
     plot_cola(df)
     plot_correction(df)
+    plot_gt_metrics(df)
     plot_heatmap(df)
 
 

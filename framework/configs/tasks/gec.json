@@ -1,0 +1,30 @@
+{
+  "error_types": [
+    "subject-verb disagreement",
+    "wrong tense",
+    "missing article",
+    "spelling mistake",
+    "wrong preposition",
+    "verb form",
+    "noun number",
+    "pronoun reference",
+    "word order",
+    "punctuation",
+    "conjunction",
+    "adjective"
+  ],
+  "prompt": "You are a grammar error generator for NLP research.\nGiven a correct English sentence, introduce exactly one grammatical error of type: {error_type}\nReturn ONLY the corrupted sentence. No explanation.\n\nCorrect sentence: {sentence}\nCorrupted sentence:",
+  "metrics": ["gleu", "errant"],
+  "models": {
+    "t5": {
+      "prefix": "grammar: ",
+      "num_beams": 5,
+      "max_length": 128
+    },
+    "gec_v1": {
+      "prefix": "gec: ",
+      "num_beams": 5,
+      "max_length": 128
+    }
+  }
+}

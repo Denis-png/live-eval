@@ -1,15 +1,3 @@
-# ============================================================
-# Base Task — Abstract Template
-# ============================================================
-# This is the base class for all tasks in the framework.
-# Every new task (GEC, Hate Speech, Spam, etc.) must inherit
-# from this class and implement the required methods.
-#
-# If you want to add a new task,
-# you MUST implement these methods. This ensures all tasks
-# work the same way inside the pipeline.
-# ============================================================
-
 from abc import ABC, abstractmethod
 
 
@@ -18,41 +6,44 @@ class BaseTask(ABC):
     @abstractmethod
     def get_error_types(self) -> list[str]:
         """
-        Return a list of error types for this task.
-        The generator LLM will use these to corrupt sentences.
+        List of corruption types the generator LLM will introduce.
 
-        Example for GEC:
-            ["subject-verb disagreement", "wrong tense", "missing article"]
-
-        Example for Hate Speech:
-            ["add racial slur", "add gender-based insult"]
+        GEC example:   ["subject-verb disagreement", "wrong tense"]
+        Spam example:  ["add urgency phrase", "add fake offer"]
         """
         pass
 
     @abstractmethod
     def get_prompt_instruction(self) -> str:
         """
-        Return the instruction for the generator LLM.
-        This tells the LLM what kind of corruption to introduce.
-
-        Example for GEC:
-            "Introduce exactly one grammatical error of type: {error_type}"
-
-        Example for Hate Speech:
-            "Rewrite this sentence to contain hate speech of type: {error_type}"
+        Prompt template for the generator LLM.
+        Must contain {error_type} and {sentence} placeholders.
         """
         pass
 
     @abstractmethod
     def get_metrics(self) -> list[str]:
         """
-        Return the list of metrics to use for this task.
+        Metric names to compute for this task.
+        Must match keys returned by get_metric_fns().
+        """
+        pass
 
-        Example for GEC:     ["gleu", "errant"]
-        Example for Hate Speech: ["accuracy", "f1"]
+    @abstractmethod
+    def get_metric_fns(self) -> dict:
+        """
+        Map of metric name → callable(results: list[dict]) → score.
+        results dicts contain: original, corrupted, prediction.
+        """
+        pass
+
+    @abstractmethod
+    def get_evaluator(self, model_config: dict):
+        """
+        Return a BaseEvaluator instance for the given model config.
+        The task owns the mapping from model type to evaluator class.
         """
         pass
 
     def get_task_name(self) -> str:
-        """Return the name of this task."""
         return self.__class__.__name__

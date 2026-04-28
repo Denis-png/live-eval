@@ -1,0 +1,35 @@
+# ── Dataset ─────────────────────────────────────────────────
+dataset:
+  source: huggingface          # huggingface | local
+  name: "agentlans/grammar-correction"
+  split: "train"
+  sample_size: 50
+  streaming: false             # set true for large HuggingFace datasets
+  # For local datasets (source: local):
+  # local_path: data/gec/fce.m2
+  # format: m2                 # m2 | csv | tsv
+
+# ── Generation (LLM that creates synthetic corrupted sentences) ──
+generation:
+  provider: "groq"             # groq | openai
+  model: "llama-3.1-8b-instant"
+  api_key: "YOUR_API_KEY_HERE"
+  temperature: 0.5
+  max_tokens: 256                # used by Anthropic (required); ignored by OpenAI-compatible providers
+  num_runs: 3                  # repeat N times → outputs mean ± std
+  sample_size: 20              # synthetic sentences per run
+
+# ── Task ────────────────────────────────────────────────────
+task:
+  name: "gec"                  # gec | spam | hate_speech (future)
+
+# ── Task Models (models under evaluation) ───────────────────
+task_models:
+  - name: "vennify/t5-base-grammar-correction"
+    type: "t5"
+  - name: "prithivida/grammar_error_correcter_v1"
+    type: "gec_v1"
+
+# ── Output ──────────────────────────────────────────────────
+output:
+  results_path: "results.json"

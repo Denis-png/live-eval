@@ -5,7 +5,6 @@ Run from Denis/:
     python summary/evaluation.py
 
 Input:  data/summary/summary_generated.csv
-        data/fce/fce.m2
 
 Output: data/summary/summary_corrected.csv          (generated sentences + all model corrections)
         data/summary/summary_original_corrected.csv (original FCE sentences + all model corrections)
@@ -17,9 +16,12 @@ GEC models:
   prithivida   — prithivida/grammar_error_correcter_v1
   haiku        — claude-haiku-4-5 (zero-shot via Anthropic API)
 
-Metrics: ERRANT F0.5 (vs FCE reference), CoLA (input/corrected), correction_extent
+Metrics:
+  errant_f0.5    — distribution-level F0.5 vs FCE reference (cross-dataset comparison)
+  errant_f0.5_gt — sentence-level F0.5 using per-sentence ground truth (actual correction accuracy)
+  CoLA (input/corrected), correction_extent, n_edits
 """
-import os, time, re, warnings
+import os, time, re, warnings, math
 from pathlib import Path
 from collections import Counter
 import numpy as np
@@ -84,16 +86,16 @@ if not gen_path.exists():
 
 df_gen = pd.read_csv(gen_path)
 df_gen['generated'] = df_gen['generated'].fillna('[GENERATION FAILED]')
-print(f'Loaded {len(df_gen)} generated sentences')
 
-df_orig = load_m2(str(ROOT / 'data/fce/fce.m2'))
-# Align to the same set of original sentences present in summary_generated.csv
-df_orig = df_orig[df_orig['original'].isin(df_gen['original'])].reset_index(drop=True)
-# Keep same row order as df_gen
-df_orig = df_gen[['original', 'ground_truth']].merge(
-    df_orig, on=['original', 'ground_truth'], how='left'
-).reset_index(drop=True)
-print(f'Aligned {len(df_orig)} original FCE sentences')
+# Backward-compat: old CSVs used 'ground_truth' instead of 'fce_ground_truth'
+if 'fce_ground_truth' not in df_gen.columns and 'ground_truth' in df_gen.columns:
+    df_gen = df_gen.rename(columns={'ground_truth': 'fce_ground_truth'})
+if 'gen_ground_truth' not in df_gen.columns:
+    df_gen['gen_ground_truth'] = ''
+df_gen['fce_ground_truth'] = df_gen['fce_ground_truth'].fillna('')
+df_gen['gen_ground_truth']  = df_gen['gen_ground_truth'].fillna('')
+
+print(f'Loaded {len(df_gen)} generated sentences')
 
 # ── GEC model definitions ──────────────────────────────────────────────────────
 
@@ -273,7 +275,9 @@ def load_or_correct_haiku(sentences_gen: list[str],
 # ── Run all models ─────────────────────────────────────────────────────────────
 
 sentences_gen  = df_gen['generated'].tolist()
-sentences_orig = df_orig['original'].tolist()
+sentences_orig = df_gen['original'].tolist()
+fce_gt_list    = df_gen['fce_ground_truth'].tolist()
+gen_gt_list    = df_gen['gen_ground_truth'].tolist()
 
 corrections_gen:  dict[str, list[str]] = {}
 corrections_orig: dict[str, list[str]] = {}
@@ -291,13 +295,13 @@ corrections_orig['haiku'] = o
 
 # ── Save corrected CSVs ────────────────────────────────────────────────────────
 
-df_corr_gen = df_gen[['original', 'ground_truth', 'generated']].copy()
+df_corr_gen = df_gen[['original', 'fce_ground_truth', 'generated', 'gen_ground_truth']].copy()
 for m, corr in corrections_gen.items():
     df_corr_gen[f'{m}_corrected'] = corr
 df_corr_gen.to_csv(ROOT / 'data/summary/summary_corrected.csv', index=False)
 print(f'\nSaved → data/summary/summary_corrected.csv')
 
-df_corr_orig = df_orig[['original', 'ground_truth']].copy()
+df_corr_orig = df_gen[['original', 'fce_ground_truth']].copy()
 for m, corr in corrections_orig.items():
     df_corr_orig[f'{m}_corrected'] = corr
 df_corr_orig.to_csv(ROOT / 'data/summary/summary_original_corrected.csv', index=False)
@@ -351,6 +355,30 @@ def dist_f05(hyp: dict, ref: dict) -> float:
     return (1.25 * p * r) / (0.25 * p + r) if 0.25 * p + r > 0 else 0
 
 
+def errant_f05_gt(sources: list[str], hypotheses: list[str],
+                  references: list[str]) -> float:
+    """Sentence-level ERRANT F0.5 using per-sentence ground-truth references.
+
+    Skips rows where the reference is empty or a failure placeholder.
+    """
+    tp = fp = fn = 0
+    _skip = {'', '[GENERATION FAILED]', '[CORRECTION FAILED]'}
+    for src, hyp, ref in zip(sources, hypotheses, references):
+        if ref in _skip:
+            continue
+        src_p = annotator.parse(src)
+        hyp_c = Counter(e.type for e in annotator.annotate(src_p, annotator.parse(hyp)))
+        ref_c = Counter(e.type for e in annotator.annotate(src_p, annotator.parse(ref)))
+        for t in set(hyp_c) | set(ref_c):
+            h, r = hyp_c.get(t, 0), ref_c.get(t, 0)
+            tp += min(h, r)
+            fp += max(h - r, 0)
+            fn += max(r - h, 0)
+    p = tp / (tp + fp) if tp + fp > 0 else 0
+    r = tp / (tp + fn) if tp + fn > 0 else 0
+    return (1.25 * p * r) / (0.25 * p + r) if 0.25 * p + r > 0 else 0
+
+
 def bigram_jaccard(s1: str, s2: str) -> float:
     def bigrams(s):
         toks = s.lower().split()
@@ -361,13 +389,52 @@ def bigram_jaccard(s1: str, s2: str) -> float:
     return len(b1 & b2) / len(b1 | b2)
 
 
-# Reference ERRANT distribution: original FCE errors (original → ground_truth)
+def _ngram_counts(tokens: list, n: int) -> Counter:
+    return Counter(tuple(tokens[i:i+n]) for i in range(len(tokens) - n + 1))
+
+
+def gleu_sentence(hypothesis: str, reference: str, max_n: int = 4) -> float:
+    """Sentence-level GEC GLEU (Napoles et al. 2015).
+
+    GLEU_n = |hyp ∩ ref| / max(|hyp_n|, |ref_n|); penalises both over- and
+    under-generation. Final score = geometric mean across n=1..max_n.
+    """
+    hyp = hypothesis.lower().split()
+    ref = reference.lower().split()
+    if not hyp or not ref:
+        return 0.0
+    log_score = 0.0
+    for n in range(1, max_n + 1):
+        hyp_ng = _ngram_counts(hyp, n)
+        ref_ng = _ngram_counts(ref, n)
+        matches = sum(min(hyp_ng[g], ref_ng[g]) for g in hyp_ng)
+        total   = max(sum(hyp_ng.values()), sum(ref_ng.values()))
+        if total == 0:
+            continue
+        if matches == 0:
+            return 0.0
+        log_score += math.log(matches / total)
+    return math.exp(log_score / max_n)
+
+
+def mean_gleu(hypotheses: list[str], references: list[str]) -> float:
+    """Mean sentence GLEU, skipping empty/failed references."""
+    _skip = {'', '[GENERATION FAILED]', '[CORRECTION FAILED]'}
+    scores = [
+        gleu_sentence(h, r)
+        for h, r in zip(hypotheses, references)
+        if r not in _skip
+    ]
+    return float(np.mean(scores)) if scores else 0.0
+
+
+# Reference ERRANT distribution: original FCE errors (original → fce_ground_truth)
 print('\nComputing FCE reference ERRANT distribution...')
 ref_edits = [
     get_edits(o, g)
     for o, g in tqdm(
-        zip(df_orig['original'].tolist(), df_orig['ground_truth'].tolist()),
-        desc='Ref ERRANT', total=len(df_orig),
+        zip(sentences_orig, fce_gt_list),
+        desc='Ref ERRANT', total=len(df_gen),
     )
 ]
 ref_dist = edit_type_dist(ref_edits)
@@ -385,9 +452,9 @@ rows = []
 all_model_names = list(HF_MODELS.keys()) + ['haiku']
 
 for model_name in all_model_names:
-    for dataset, input_sents, corr_sents, cola_input in [
-        ('generated', sentences_gen,  corrections_gen[model_name],  cola_gen_input),
-        ('original',  sentences_orig, corrections_orig[model_name], cola_orig_input),
+    for dataset, input_sents, corr_sents, cola_input, gt_sents in [
+        ('generated', sentences_gen,  corrections_gen[model_name],  cola_gen_input,  gen_gt_list),
+        ('original',  sentences_orig, corrections_orig[model_name], cola_orig_input, fce_gt_list),
     ]:
         print(f'\nMetrics: {model_name} × {dataset}')
         corr_sents = [s if isinstance(s, str) else '[CORRECTION FAILED]' for s in corr_sents]
@@ -405,18 +472,23 @@ for model_name in all_model_names:
 
         jac = [bigram_jaccard(inp, corr) for inp, corr in zip(input_sents, corr_sents)]
 
+        f05_gt   = errant_f05_gt(input_sents, corr_sents, gt_sents)
+        gleu_val = mean_gleu(corr_sents, gt_sents)
+
         rows.append({
-            'model':          model_name,
-            'dataset':        dataset,
-            'errant_f0.5':    round(dist_f05(hyp_dist, ref_dist), 3),
-            'cola_input':     round(np.mean(cola_input), 3),
-            'cola_corrected': round(np.mean(cola_corr), 3),
-            'cola_delta':     round(np.mean(cola_corr) - np.mean(cola_input), 3),
+            'model':             model_name,
+            'dataset':           dataset,
+            'errant_f0.5':       round(dist_f05(hyp_dist, ref_dist), 3),
+            'errant_f0.5_gt':    round(f05_gt, 3),
+            'gleu_gt':           round(gleu_val, 3),
+            'cola_input':        round(np.mean(cola_input), 3),
+            'cola_corrected':    round(np.mean(cola_corr), 3),
+            'cola_delta':        round(np.mean(cola_corr) - np.mean(cola_input), 3),
             'correction_extent': round(1 - np.mean(jac), 3),
-            'n_edits':        round(np.mean([len(e) for e in hyp_edits]), 2),
+            'n_edits':           round(np.mean([len(e) for e in hyp_edits]), 2),
         })
-        print(f'  F0.5={rows[-1]["errant_f0.5"]}  '
-              f'CoLA Δ={rows[-1]["cola_delta"]:+.3f}  '
+        print(f'  F0.5={rows[-1]["errant_f0.5"]}  F0.5_gt={rows[-1]["errant_f0.5_gt"]}  '
+              f'GLEU={rows[-1]["gleu_gt"]}  CoLA Δ={rows[-1]["cola_delta"]:+.3f}  '
               f'corr_extent={rows[-1]["correction_extent"]}')
 
 # ── Save comparison ────────────────────────────────────────────────────────────

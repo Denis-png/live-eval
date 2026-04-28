@@ -1,0 +1,10 @@
+# Ignore actual dataset files — never commit large data to git.
+# Place your benchmark files in the task subdirectory (e.g. data/gec/)
+# and point to them in configs/config.yaml under dataset.local_path.
+*.csv
+*.tsv
+*.m2
+*.txt
+*.jsonl
+*.json
+!.gitignore

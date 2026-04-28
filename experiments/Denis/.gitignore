@@ -1,0 +1,9 @@
+.devcontainer/
+.env
+
+
+data/
+!data/summary_*/
+!data/summary_*/*.png
+
+venv/
