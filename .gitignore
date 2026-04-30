@@ -2,4 +2,4 @@ Denis/.env
 Denis/data/
 Denis/.devcontainer
 GEC_Pipeline/.env
-GEC_Pipeline/__pycache__/
+GEC_Pipeline/src/__pycache__/
