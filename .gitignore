@@ -3,3 +3,6 @@ Denis/data/
 Denis/.devcontainer
 GEC_Pipeline/.env
 GEC_Pipeline/src/__pycache__/
+.env
+**/__pycache__/
+*.pyc
