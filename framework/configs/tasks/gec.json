@@ -1,20 +1,183 @@
 {
   "error_types": [
-    "subject-verb disagreement",
-    "wrong tense",
-    "missing article",
-    "spelling mistake",
-    "wrong preposition",
-    "verb form",
-    "noun number",
-    "pronoun reference",
-    "word order",
+    "subject_verb_agreement",
+    "article",
+    "preposition",
+    "verb_tense",
+    "spelling",
+    "verb_form",
+    "noun_number",
+    "pronoun",
+    "word_order",
     "punctuation",
     "conjunction",
     "adjective"
   ],
-  "prompt": "You are a grammar error generator for NLP research.\nGiven a correct English sentence, introduce exactly one grammatical error of type: {error_type}\nReturn ONLY the corrupted sentence. No explanation.\n\nCorrect sentence: {sentence}\nCorrupted sentence:",
-  "metrics": ["gleu", "errant"],
+  "error_type_examples": {
+    "subject_verb_agreement": "The group of students are going to the library.",
+    "article": "She adopted a old cat from the shelter.",
+    "preposition": "He is good in playing the guitar.",
+    "verb_tense": "Yesterday, she goes to the market and buys vegetables.",
+    "spelling": "The goverment announced new education policies.",
+    "verb_form": "He has went to the store three times this week.",
+    "noun_number": "She gave me a lot of advices about the project.",
+    "pronoun": "Everyone should bring their own lunch, but him forgot.",
+    "word_order": "She always is late to the morning meetings.",
+    "punctuation": "However she decided to stay and finish the report.",
+    "conjunction": "He studied hard, but however he failed the exam.",
+    "adjective": "This is the most cheapest option available in the store."
+  },
+  "few_shot_examples": {
+    "subject_verb_agreement": [
+      {"correct": "The list of items was checked twice before shipping.",
+       "incorrect": "The list of items were checked twice before shipping."},
+      {"correct": "Each of the students has submitted the assignment.",
+       "incorrect": "Each of the students have submitted the assignment."},
+      {"correct": "Neither of the answers is correct.",
+       "incorrect": "Neither of the answers are correct."}
+    ],
+    "article": [
+      {"correct": "She is an honest person who always tells the truth.",
+       "incorrect": "She is a honest person who always tells the truth."},
+      {"correct": "I need an umbrella because it looks like rain.",
+       "incorrect": "I need a umbrella because it looks like rain."},
+      {"correct": "The sun rises in the east every morning.",
+       "incorrect": "A sun rises in the east every morning."}
+    ],
+    "preposition": [
+      {"correct": "She is very interested in classical music.",
+       "incorrect": "She is very interested on classical music."},
+      {"correct": "He arrived at the station just in time.",
+       "incorrect": "He arrived to the station just in time."},
+      {"correct": "They have been married for twenty years.",
+       "incorrect": "They have been married since twenty years."}
+    ],
+    "verb_tense": [
+      {"correct": "By the time they arrived, she had already left.",
+       "incorrect": "By the time they arrived, she already left."},
+      {"correct": "He has lived in this city for ten years.",
+       "incorrect": "He is living in this city for ten years."},
+      {"correct": "I was watching TV when the phone rang.",
+       "incorrect": "I watched TV when the phone rang."}
+    ],
+    "spelling": [
+      {"correct": "The committee approved the new budget unanimously.",
+       "incorrect": "The commitee approved the new budget unanimously."},
+      {"correct": "She received a letter from her old friend.",
+       "incorrect": "She recieved a letter from her old friend."},
+      {"correct": "The schedule for next week has been confirmed.",
+       "incorrect": "The shedule for next week has been confirmed."}
+    ],
+    "verb_form": [
+      {"correct": "She has written three novels in the past decade.",
+       "incorrect": "She has wrote three novels in the past decade."},
+      {"correct": "They were given extra time to complete the exam.",
+       "incorrect": "They were gave extra time to complete the exam."},
+      {"correct": "He should have called before coming over.",
+       "incorrect": "He should have call before coming over."}
+    ],
+    "noun_number": [
+      {"correct": "The equipment was delivered on time.",
+       "incorrect": "The equipments were delivered on time."},
+      {"correct": "She gave him some very useful feedback.",
+       "incorrect": "She gave him some very useful feedbacks."},
+      {"correct": "The research shows several interesting results.",
+       "incorrect": "The researches show several interesting results."}
+    ],
+    "pronoun": [
+      {"correct": "Between you and me, this plan will not work.",
+       "incorrect": "Between you and I, this plan will not work."},
+      {"correct": "The manager asked her to stay after the meeting.",
+       "incorrect": "The manager asked she to stay after the meeting."},
+      {"correct": "Nobody knew where he had gone that evening.",
+       "incorrect": "Nobody knew where him had gone that evening."}
+    ],
+    "word_order": [
+      {"correct": "He hardly ever misses a deadline at work.",
+       "incorrect": "He ever hardly misses a deadline at work."},
+      {"correct": "I have never seen such a beautiful landscape.",
+       "incorrect": "I never have seen such a beautiful landscape."},
+      {"correct": "She always finishes her work before the deadline.",
+       "incorrect": "She finishes always her work before the deadline."}
+    ],
+    "punctuation": [
+      {"correct": "After the meeting, she went straight home.",
+       "incorrect": "After the meeting she went straight home."},
+      {"correct": "He bought apples, oranges, and bananas at the market.",
+       "incorrect": "He bought apples oranges and bananas at the market."},
+      {"correct": "It's a difficult problem that requires careful thought.",
+       "incorrect": "Its a difficult problem that requires careful thought."}
+    ],
+    "conjunction": [
+      {"correct": "She was tired, so she went to bed early.",
+       "incorrect": "She was tired, but so she went to bed early."},
+      {"correct": "He is tall, and his brother is quite short.",
+       "incorrect": "He is tall, and but his brother is quite short."},
+      {"correct": "Although it was raining, they went for a walk.",
+       "incorrect": "Although but it was raining, they went for a walk."}
+    ],
+    "adjective": [
+      {"correct": "This is the most interesting book I have ever read.",
+       "incorrect": "This is the most interestingest book I have ever read."},
+      {"correct": "She is more careful than her sister when driving.",
+       "incorrect": "She is more carefuler than her sister when driving."},
+      {"correct": "He is the best player on the entire team.",
+       "incorrect": "He is the most best player on the entire team."}
+    ]
+  },
+  "demonstrations": {
+    "subject_verb_agreement": {
+      "input":  "The list of items were checked twice before shipping.",
+      "output": "The collection of rare coins were sold at the auction."
+    },
+    "article": {
+      "input":  "She is a honest person who always tells the truth.",
+      "output": "He found a interesting solution to the engineering problem."
+    },
+    "preposition": {
+      "input":  "She is very interested on classical music.",
+      "output": "He is very good on solving complex mathematical equations."
+    },
+    "verb_tense": {
+      "input":  "By the time they arrived, she already left.",
+      "output": "When I called him, he already ate his dinner."
+    },
+    "spelling": {
+      "input":  "The commitee approved the new budget unanimously.",
+      "output": "The goverment introduced new regulations on food safety."
+    },
+    "verb_form": {
+      "input":  "She has wrote three novels in the past decade.",
+      "output": "They have saw this documentary at least three times."
+    },
+    "noun_number": {
+      "input":  "The equipments were delivered on time.",
+      "output": "She gave her colleagues some very useful advices."
+    },
+    "pronoun": {
+      "input":  "Between you and I, this plan will not work.",
+      "output": "The teacher asked I to present my findings first."
+    },
+    "word_order": {
+      "input":  "He ever hardly misses a deadline at work.",
+      "output": "She always is late for the morning team meetings."
+    },
+    "punctuation": {
+      "input":  "After the meeting she went straight home.",
+      "output": "Before the concert they had dinner at a nearby restaurant."
+    },
+    "conjunction": {
+      "input":  "She was tired, but so she went to bed early.",
+      "output": "He was exhausted, and but he continued working until midnight."
+    },
+    "adjective": {
+      "input":  "This is the most interestingest book I have ever read.",
+      "output": "That was the most cheapest meal on the entire menu."
+    }
+  },
+  "prompt": "You are an expert linguist specializing in grammatical error generation. For the input sentence below:\n\n  Step 1: Identify the grammatical error type (e.g. subject-verb agreement, article, preposition, verb tense, spelling).\n  Step 2: Write a new, original sentence a B1-level foreign learner would produce on a different topic, exhibiting the same error type plus typical L1-transfer errors. The generated sentence MUST contain a grammatical error — do NOT produce a correct sentence.\n  Step 3: Write the fully corrected version of the sentence from Step 2 (fix all grammatical errors so it reads as natural, fluent English).\n\nUse this exact format:\nError type: <type>\nGenerated: <new sentence with error>\nGround truth: <corrected version of Generated>\n\nDo NOT correct or rewrite the input sentence.\n\nInput sentence: {sentence}",
+  "judge_prompt": "You are a GEC (grammatical error correction) quality evaluator. You receive an erroneous sentence and its proposed correction.\n\nAssess two criteria:\n  Redundancy: \"trivial\" if the error is too obvious or uninteresting for GEC evaluation (e.g. a single missing full-stop, one clearly wrong article in isolation, a trivial misspelling of one very common word with no other errors). \"valid\" otherwise.\n  Correction: \"correct\" if the proposed correction is grammatically correct and natural English with no remaining errors. \"incorrect\" otherwise.\n\nUse this exact format:\nRedundancy: trivial/valid\nCorrection: correct/incorrect\n\nErroneous sentence: {sentence}\nProposed correction: {correction}",
+  "metrics": ["gleu", "errant", "errant_dist", "cola", "correction_extent", "n_edits"],
   "models": {
     "t5": {
       "prefix": "grammar: ",
@@ -25,6 +188,17 @@
       "prefix": "gec: ",
       "num_beams": 5,
       "max_length": 128
+    },
+    "coedit": {
+      "prefix": "Fix the grammar of this sentence: ",
+      "num_beams": 5,
+      "max_length": 128
+    },
+    "claude": {
+      "max_tokens": 1024,
+      "temperature": 0,
+      "batch_size": 5,
+      "sleep_sec": 0
     }
   }
 }

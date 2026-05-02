@@ -161,6 +161,7 @@ def run_pipeline(config: dict) -> dict:
             error_types=task.get_error_types(),
             prompt_instruction=task.get_prompt_instruction(),
             sample_size=config["generation"]["sample_size"],
+            judge_prompt=task.get_judge_prompt(),
         )
         synthetic = verify(synthetic)
         corrupted_sentences = [item["corrupted"] for item in synthetic]

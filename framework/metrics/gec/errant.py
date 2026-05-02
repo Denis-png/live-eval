@@ -1,7 +1,4 @@
-import errant
-
-# Load once — errant annotator is expensive to initialise
-_annotator = errant.load("en")
+from ._errant_shared import annotator
 
 
 def compute_errant(results: list[dict]) -> dict:
@@ -13,18 +10,22 @@ def compute_errant(results: list[dict]) -> dict:
         corrupted  — sentence with introduced error (model input)
         prediction — model's correction attempt
 
+    Edits are matched on (start, end, type), so this is the strict,
+    position-aware variant. See `errant_dist` for the position-insensitive
+    distribution-level F0.5 used in Denis's experiments.
+
     F0.5 weights precision twice as much as recall: in GEC, over-correcting
     fluent text is worse than missing an error.
     """
     tp = fp = fn = 0
 
     for item in results:
-        orig = _annotator.parse(item["corrupted"])
-        ref  = _annotator.parse(item["original"])
-        pred = _annotator.parse(item["prediction"])
+        orig = annotator.parse(item["corrupted"])
+        ref  = annotator.parse(item["original"])
+        pred = annotator.parse(item["prediction"])
 
-        ref_edits  = _annotator.annotate(orig, ref)
-        pred_edits = _annotator.annotate(orig, pred)
+        ref_edits  = annotator.annotate(orig, ref)
+        pred_edits = annotator.annotate(orig, pred)
 
         ref_set  = {(e.o_start, e.o_end, e.type) for e in ref_edits}
         pred_set = {(e.o_start, e.o_end, e.type) for e in pred_edits}

@@ -18,6 +18,9 @@ from abc import ABC, abstractmethod
 
 class BaseEvaluator(ABC):
 
+    def __init__(self, model_config: dict):
+        self.load_model(model_config)
+
     @abstractmethod
     def load_model(self, model_config: dict):
         """

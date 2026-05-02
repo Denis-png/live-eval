@@ -45,5 +45,13 @@ class BaseTask(ABC):
         """
         pass
 
+    def get_judge_prompt(self) -> str | None:
+        """
+        Optional LLM-as-judge prompt for filtering bad generations.
+        Must contain {sentence} and {correction} placeholders.
+        Return None to disable the judge step.
+        """
+        return None
+
     def get_task_name(self) -> str:
         return self.__class__.__name__

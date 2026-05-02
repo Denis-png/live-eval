@@ -1,3 +1,16 @@
+# ── API keys ────────────────────────────────────────────────
+# Values use ${ENV_VAR} substitution. Copy example.env → .env
+# in the repo root and fill in your keys (or export them in your shell).
+# Generators auto-resolve api_keys[provider]; the claude evaluator picks
+# api_keys.anthropic. Leave entries you don't use blank.
+api_keys:
+  groq:       "${GROQ_API_KEY}"
+  openai:     "${OPENAI_API_KEY}"
+  openrouter: "${OPENROUTER_API_KEY}"
+  mistral:    "${MISTRAL_API_KEY}"
+  anthropic:  "${ANTHROPIC_API_KEY}"
+  google:     "${GOOGLE_API_KEY}"
+
 # ── Dataset ─────────────────────────────────────────────────
 dataset:
   source: huggingface          # huggingface | local
@@ -11,13 +24,14 @@ dataset:
 
 # ── Generation (LLM that creates synthetic corrupted sentences) ──
 generation:
-  provider: "groq"             # groq | openai
-  model: "llama-3.1-8b-instant"
-  api_key: "YOUR_API_KEY_HERE"
-  temperature: 0.5
-  max_tokens: 256                # used by Anthropic (required); ignored by OpenAI-compatible providers
+  provider: "anthropic"        # groq | openai | openrouter | mistral | anthropic | google
+  model: "claude-haiku-4-5"
+  temperature: 1.0             # CoT 3-step prompt benefits from higher T (Denis: 1.0)
+  max_tokens: 1024             # required by Anthropic; ignored by OpenAI-compatible providers
   num_runs: 3                  # repeat N times → outputs mean ± std
   sample_size: 20              # synthetic sentences per run
+  # api_key is auto-resolved from api_keys[provider]; uncomment to override:
+  # api_key: "..."
 
 # ── Task ────────────────────────────────────────────────────
 task:
@@ -29,6 +43,11 @@ task_models:
     type: "t5"
   - name: "prithivida/grammar_error_correcter_v1"
     type: "gec_v1"
+  - name: "grammarly/coedit-large"
+    type: "coedit"
+  - name: "claude-haiku-4-5"
+    type: "claude"
+    # api_key is auto-resolved from api_keys.anthropic
 
 # ── Output ──────────────────────────────────────────────────
 output:
