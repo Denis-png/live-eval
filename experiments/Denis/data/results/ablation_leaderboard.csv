@@ -1,0 +1,5 @@
+config,f0.5,cola_A,cola_B,cola_C,sem_sim,B<A,C>B
+temp_0.3,0.657,0.533,0.533,0.8,0.419,False,True
+instr_concise,0.64,0.533,0.633,0.9,0.585,False,True
+temp_1.0,0.631,0.533,0.6,0.833,0.393,False,True
+instr_detailed,0.572,0.533,0.667,0.867,0.419,False,True

@@ -1,0 +1,4 @@
+dataset,tier,errant_f0.5,cola_A,cola_B,cola_C,bigram_jaccard,pct_memorised,corr_extent,B<A,C>B
+conll14,Test set,0.369,0.72,0.88,0.96,0.031,0.0,0.2,False,True
+fce,Benchmark,0.535,0.8,0.84,0.96,0.045,0.0,0.188,False,True
+c4_200m,General,0.582,0.58,0.68,0.9,0.048,0.02,0.278,False,True
