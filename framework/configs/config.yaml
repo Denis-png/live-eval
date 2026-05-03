@@ -4,12 +4,14 @@
 # Generators auto-resolve api_keys[provider]; the claude evaluator picks
 # api_keys.anthropic. Leave entries you don't use blank.
 api_keys:
-  groq:       "${GROQ_API_KEY}"
-  openai:     "${OPENAI_API_KEY}"
-  openrouter: "${OPENROUTER_API_KEY}"
-  mistral:    "${MISTRAL_API_KEY}"
-  anthropic:  "${ANTHROPIC_API_KEY}"
-  google:     "${GOOGLE_API_KEY}"
+  groq:        "${GROQ_API_KEY}"
+  openai:      "${OPENAI_API_KEY}"
+  openrouter:  "${OPENROUTER_API_KEY}"
+  mistral:     "${MISTRAL_API_KEY}"
+  minimax:     "${MINIMAX_API_KEY}"
+  anthropic:   "${ANTHROPIC_API_KEY}"
+  google:      "${GOOGLE_API_KEY}"
+  huggingface: "${HF_TOKEN}"
 
 # ── Dataset ─────────────────────────────────────────────────
 dataset:
@@ -24,14 +26,28 @@ dataset:
 
 # ── Generation (LLM that creates synthetic corrupted sentences) ──
 generation:
-  provider: "anthropic"        # groq | openai | openrouter | mistral | anthropic | google
-  model: "claude-haiku-4-5"
+  provider: "openrouter"           # groq | openai | openrouter | mistral | minimax | anthropic | google
+  model: "minimax-m2.7"
   temperature: 1.0             # CoT 3-step prompt benefits from higher T (Denis: 1.0)
   max_tokens: 1024             # required by Anthropic; ignored by OpenAI-compatible providers
   num_runs: 3                  # repeat N times → outputs mean ± std
   sample_size: 20              # synthetic sentences per run
+  timeout: 300                 # per-request HTTP timeout in seconds (SDK default: 600)
+  max_retries: 1               # SDK retries on 5xx/429 (SDK default: 2)
   # api_key is auto-resolved from api_keys[provider]; uncomment to override:
   # api_key: "..."
+
+# ── Judge (optional LLM-as-judge that filters bad generations) ──
+# If omitted or enabled=false → judging is skipped.
+# Same shape as `generation`. api_key auto-resolved from api_keys[provider].
+judge:
+  enabled: true
+  provider: "openrouter"
+  model: "minimax-m2.7"
+  temperature: 0
+  max_tokens: 1024
+  timeout: 300
+  max_retries: 1
 
 # ── Task ────────────────────────────────────────────────────
 task:
@@ -45,9 +61,15 @@ task_models:
     type: "gec_v1"
   - name: "grammarly/coedit-large"
     type: "coedit"
-  - name: "claude-haiku-4-5"
-    type: "claude"
-    # api_key is auto-resolved from api_keys.anthropic
+  
+# ── Compute ─────────────────────────────────────────────────
+# Device for HuggingFace models (CoLA scorer, T5/CoEdit evaluators).
+# auto = use GPU only if available AND its compute capability is supported
+#        by the installed PyTorch build (otherwise CPU).
+# cpu  = force CPU.
+# cuda = force GPU (will crash if not supported).
+compute:
+  device: cpu
 
 # ── Output ──────────────────────────────────────────────────
 output:

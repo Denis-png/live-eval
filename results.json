@@ -1,0 +1,140 @@
+{
+  "vennify/t5-base-grammar-correction": {
+    "gleu": {
+      "mean": 0.7584,
+      "std": 0.0325
+    },
+    "errant": {
+      "precision": {
+        "mean": 0.7786,
+        "std": 0.0536
+      },
+      "recall": {
+        "mean": 0.5697,
+        "std": 0.0849
+      },
+      "f0.5": {
+        "mean": 0.7239,
+        "std": 0.0627
+      }
+    },
+    "errant_dist": {
+      "mean": 0.7519,
+      "std": 0.0392
+    },
+    "cola": {
+      "input": {
+        "mean": 0.488,
+        "std": 0.0956
+      },
+      "corrected": {
+        "mean": 0.9248,
+        "std": 0.0254
+      },
+      "delta": {
+        "mean": 0.4368,
+        "std": 0.1094
+      }
+    },
+    "correction_extent": {
+      "mean": 0.4501,
+      "std": 0.0342
+    },
+    "n_edits": {
+      "mean": 2.439,
+      "std": 0.2466
+    }
+  },
+  "prithivida/grammar_error_correcter_v1": {
+    "gleu": {
+      "mean": 0.8137,
+      "std": 0.0302
+    },
+    "errant": {
+      "precision": {
+        "mean": 0.8607,
+        "std": 0.0734
+      },
+      "recall": {
+        "mean": 0.6784,
+        "std": 0.0274
+      },
+      "f0.5": {
+        "mean": 0.8159,
+        "std": 0.0567
+      }
+    },
+    "errant_dist": {
+      "mean": 0.7996,
+      "std": 0.0138
+    },
+    "cola": {
+      "input": {
+        "mean": 0.488,
+        "std": 0.0956
+      },
+      "corrected": {
+        "mean": 0.9608,
+        "std": 0.0554
+      },
+      "delta": {
+        "mean": 0.4727,
+        "std": 0.0401
+      }
+    },
+    "correction_extent": {
+      "mean": 0.4894,
+      "std": 0.0518
+    },
+    "n_edits": {
+      "mean": 2.6983,
+      "std": 0.5216
+    }
+  },
+  "grammarly/coedit-large": {
+    "gleu": {
+      "mean": 0.8357,
+      "std": 0.015
+    },
+    "errant": {
+      "precision": {
+        "mean": 0.8783,
+        "std": 0.018
+      },
+      "recall": {
+        "mean": 0.7172,
+        "std": 0.0318
+      },
+      "f0.5": {
+        "mean": 0.84,
+        "std": 0.0105
+      }
+    },
+    "errant_dist": {
+      "mean": 0.8433,
+      "std": 0.036
+    },
+    "cola": {
+      "input": {
+        "mean": 0.488,
+        "std": 0.0956
+      },
+      "corrected": {
+        "mean": 0.9608,
+        "std": 0.0554
+      },
+      "delta": {
+        "mean": 0.4727,
+        "std": 0.0401
+      }
+    },
+    "correction_extent": {
+      "mean": 0.4781,
+      "std": 0.0413
+    },
+    "n_edits": {
+      "mean": 2.7745,
+      "std": 0.4775
+    }
+  }
+}

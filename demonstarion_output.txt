@@ -1,0 +1,358 @@
+Task     : gec
+Provider : openrouter
+Model    : minimax-m2.7
+Runs     : 3
+Models   : ['vennify/t5-base-grammar-correction', 'prithivida/grammar_error_correcter_v1', 'grammarly/coedit-large']
+Loading dataset: agentlans/grammar-correction ...
+Loaded 50 real samples.
+Judge    : openrouter / minimax-m2.7
+
+==================================================
+RUN 1 / 3
+==================================================
+Generating 20 samples ...
+[1/20] gen 71.2s + judge 13.7s ✓ (Preposition misuse)
+[2/20] gen 38.7s + judge 13.3s ✓ (Article omission)
+[3/20] gen 46.1s + judge 12.8s ✓ (verb form (gerund after preposition))
+[4/20] gen 35.9s + judge 12.6s ✓ (subject‑verb agreement)
+[5/20] gen 62.3s + judge 4.3s ✓ (Verb form error (incorrect imperative usage of “thanks”))
+[6/20] gen 72.3s + judge 2.9s ✓ (article)
+[7/20] gen 82.2s + judge 17.6s ✓ (missing auxiliary verb (be))
+[8/20] gen 58.2s + judge 33.5s — [JUDGE] dropped: The report describes the method of hows the ancien
+[9/20] gen 136.8s + judge 13.1s ✓ (spelling)
+[10/20] gen 25.6s + judge 7.2s ✓ (Subject-verb agreement)
+[11/20] gen 51.8s + judge 5.0s ✓ (Missing preposition ('of') after the gerund phrase (article error))
+[12/20] gen 17.5s + judge 35.2s — [JUDGE] dropped: She didn't studied for the important exam yesterda
+[13/20] gen 21.8s + judge 3.7s ✓ (subject-verb agreement)
+[14/20] gen 109.7s + judge 6.0s ✓ (Verb tense)
+[15/20] gen 36.0s + judge 10.9s ✓ (Subject‑verb agreement (singular subject with plural verb))
+[16/20] gen 270.0s + judge 11.4s ✓ (article (missing article before noun))
+[17/20] gen 51.2s + judge 12.6s ✓ (Wrong verb form (past participle used instead of present participle))
+[18/20] gen 51.8s + judge 2.6s ✓ (Spelling error (misspelling of a verb in -ing form))
+[19/20] gen 14.5s + judge 3.3s ✓ (Spelling)
+[20/20] gen 87.6s + judge 16.0s ✓ (Punctuation (colons, semicolons, mismatched parentheses))
+Generation phase done in 1578.8s.
+Generated 18 synthetic samples (judge dropped: 2, parse failed: 0).
+Verified: 18/18 samples passed.
+Loading model: vennify/t5-base-grammar-correction ...
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████| 260/260 [00:00<00:00, 22704.01it/s]
+The tied weights mapping and config for this model specifies to tie shared.weight to lm_head.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+The tied weights mapping and config for this model specifies to tie shared.weight to encoder.embed_tokens.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+The tied weights mapping and config for this model specifies to tie shared.weight to decoder.embed_tokens.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+Loaded vennify/t5-base-grammar-correction.
+Loading CoLA scorer: textattack/bert-base-uncased-CoLA (device=cpu) ...
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████| 201/201 [00:00<00:00, 22783.43it/s]
+  vennify/t5-base-grammar-correction  gleu: 0.7129
+  vennify/t5-base-grammar-correction  errant: {'precision': 0.7111, 'recall': 0.4507, 'f0.5': 0.6375}
+  vennify/t5-base-grammar-correction  errant_dist: 0.7315
+  vennify/t5-base-grammar-correction  cola: {'input': 0.5556, 'corrected': 0.8889, 'delta': 0.3333}
+  vennify/t5-base-grammar-correction  correction_extent: 0.4904
+  vennify/t5-base-grammar-correction  n_edits: 2.5
+Loading model: prithivida/grammar_error_correcter_v1 ...
+Exception in thread Thread-auto_conversion:
+Traceback (most recent call last):
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/huggingface_hub/utils/_http.py", line 761, in hf_raise_for_status
+    response.raise_for_status()
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '403 Forbidden' for url 'https://huggingface.co/api/models/prithivida/grammar_error_correcter_v1/discussions?p=0'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/threading.py", line 1073, in _bootstrap_inner
+    self.run()
+  File "/usr/lib/python3.12/threading.py", line 1010, in run
+    self._target(*self._args, **self._kwargs)
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/transformers/safetensors_conversion.py", line 117, in auto_conversion
+    raise e
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/transformers/safetensors_conversion.py", line 96, in auto_conversion
+    sha = get_conversion_pr_reference(api, pretrained_model_name_or_path, **cached_file_kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/transformers/safetensors_conversion.py", line 69, in get_conversion_pr_reference
+    pr = previous_pr(api, model_id, pr_title, token=token)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/transformers/safetensors_conversion.py", line 14, in previous_pr
+    for discussion in get_repo_discussions(repo_id=model_id, token=token):
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/huggingface_hub/hf_api.py", line 6954, in get_repo_discussions
+    discussions, has_next = _fetch_discussion_page(page_index=page_index)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/huggingface_hub/hf_api.py", line 6943, in _fetch_discussion_page
+    hf_raise_for_status(resp)
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/huggingface_hub/utils/_http.py", line 849, in hf_raise_for_status
+    raise _format(HfHubHTTPError, message, response) from e
+huggingface_hub.errors.HfHubHTTPError: (Request ID: Root=1-69f79394-14d5e7c7184bed6463108e11;585a8745-43cd-43cd-92cc-3ff80313c794)
+
+403 Forbidden: Discussions are disabled for this repo.
+Cannot access content at: https://huggingface.co/api/models/prithivida/grammar_error_correcter_v1/discussions?p=0.
+Make sure your token has the correct permissions.
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████| 260/260 [00:00<00:00, 14763.88it/s]
+The tied weights mapping and config for this model specifies to tie shared.weight to lm_head.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+The tied weights mapping and config for this model specifies to tie shared.weight to encoder.embed_tokens.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+The tied weights mapping and config for this model specifies to tie shared.weight to decoder.embed_tokens.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+Loaded prithivida/grammar_error_correcter_v1.
+  prithivida/grammar_error_correcter_v1  gleu: 0.7716
+  prithivida/grammar_error_correcter_v1  errant: {'precision': 0.7667, 'recall': 0.6479, 'f0.5': 0.7395}
+  prithivida/grammar_error_correcter_v1  errant_dist: 0.8033
+  prithivida/grammar_error_correcter_v1  cola: {'input': 0.5556, 'corrected': 1.0, 'delta': 0.4444}
+  prithivida/grammar_error_correcter_v1  correction_extent: 0.562
+  prithivida/grammar_error_correcter_v1  n_edits: 3.3333
+Loading model: grammarly/coedit-large ...
+Loading weights: 100%|████████████████████████████████████████████████████████████████████████████████████████████| 558/558 [00:00<00:00, 693.00it/s]
+The tied weights mapping and config for this model specifies to tie shared.weight to lm_head.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+Loaded grammarly/coedit-large.
+  grammarly/coedit-large  gleu: 0.822
+  grammarly/coedit-large  errant: {'precision': 0.8833, 'recall': 0.7465, 'f0.5': 0.8521}
+  grammarly/coedit-large  errant_dist: 0.8892
+  grammarly/coedit-large  cola: {'input': 0.5556, 'corrected': 1.0, 'delta': 0.4444}
+  grammarly/coedit-large  correction_extent: 0.5346
+  grammarly/coedit-large  n_edits: 3.3333
+
+Synthetic data trashed.
+
+==================================================
+RUN 2 / 3
+==================================================
+Generating 20 samples ...
+[1/20] gen 73.8s + judge 2.8s ✓ (Preposition)
+[2/20] gen 21.5s + judge 10.8s ✓ (Missing article)
+[3/20] gen 80.3s + judge 4.3s ✓ (preposition misuse)
+[4/20] gen 15.7s + judge 6.9s ✓ (Subject-verb agreement)
+[5/20] gen 48.9s + judge 6.3s ✓ (Incorrect verb phrase (thanks you instead of thank you))
+[6/20] gen 46.2s + judge 5.0s ✓ (article usage and preposition errors)
+[7/20] failed after 572.5s: expected string or bytes-like object, got 'NoneType'
+[8/20] gen 52.9s + judge 4.3s ✓ (Spelling / Lexical error (incorrect word “hows” instead of “how”))
+[9/20] gen 24.7s + judge 12.6s ✓ (spelling)
+[10/20] gen 11.6s + judge 14.2s ✓ (determiner-noun number agreement)
+[11/20] gen 19.9s + judge 5.7s ✓ (Missing preposition (omission of "of" after article + noun))
+[12/20] gen 29.0s + judge 2.7s ✓ (Subject-verb agreement)
+[13/20] gen 27.3s + judge 14.4s ✓ (Verb form (gerund after “admit to”))
+[14/20] gen 32.8s + judge 2.8s ✓ (Incorrect question formation (redundant infinitive phrase and missing auxiliary inversion, typical L1‑transfer))
+[15/20] gen 40.5s + judge 10.8s ✓ (subject-verb agreement)
+[16/20] gen 102.8s + judge 2.9s ✓ (missing article)
+[17/20] gen 33.1s + judge 8.6s — [JUDGE] dropped: In my town, the passed electricity through the cop
+[18/20] gen 40.4s + judge 5.3s ✓ (Spelling error)
+[19/20] gen 19.9s + judge 4.1s ✓ (spelling)
+[20/20] gen 21.5s + judge 4.5s ✓ (punctuation misuse (extra commas, mismatched parentheses, misuse of hyphens))
+Generation phase done in 1444.2s.
+Generated 18 synthetic samples (judge dropped: 1, parse failed: 0).
+Verified: 18/18 samples passed.
+Loading model: vennify/t5-base-grammar-correction ...
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████| 260/260 [00:00<00:00, 13739.00it/s]
+The tied weights mapping and config for this model specifies to tie shared.weight to lm_head.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+The tied weights mapping and config for this model specifies to tie shared.weight to encoder.embed_tokens.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+The tied weights mapping and config for this model specifies to tie shared.weight to decoder.embed_tokens.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+Loaded vennify/t5-base-grammar-correction.
+  vennify/t5-base-grammar-correction  gleu: 0.7752
+  vennify/t5-base-grammar-correction  errant: {'precision': 0.8421, 'recall': 0.6154, 'f0.5': 0.7843}
+  vennify/t5-base-grammar-correction  errant_dist: 0.8067
+  vennify/t5-base-grammar-correction  cola: {'input': 0.5556, 'corrected': 0.9444, 'delta': 0.3889}
+  vennify/t5-base-grammar-correction  correction_extent: 0.4067
+  vennify/t5-base-grammar-correction  n_edits: 2.1111
+Loading model: prithivida/grammar_error_correcter_v1 ...
+Exception in thread Thread-auto_conversion:
+Traceback (most recent call last):
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/huggingface_hub/utils/_http.py", line 761, in hf_raise_for_status
+    response.raise_for_status()
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '403 Forbidden' for url 'https://huggingface.co/api/models/prithivida/grammar_error_correcter_v1/discussions?p=0'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/threading.py", line 1073, in _bootstrap_inner
+    self.run()
+  File "/usr/lib/python3.12/threading.py", line 1010, in run
+    self._target(*self._args, **self._kwargs)
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/transformers/safetensors_conversion.py", line 117, in auto_conversion
+    raise e
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/transformers/safetensors_conversion.py", line 96, in auto_conversion
+    sha = get_conversion_pr_reference(api, pretrained_model_name_or_path, **cached_file_kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/transformers/safetensors_conversion.py", line 69, in get_conversion_pr_reference
+    pr = previous_pr(api, model_id, pr_title, token=token)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/transformers/safetensors_conversion.py", line 14, in previous_pr
+    for discussion in get_repo_discussions(repo_id=model_id, token=token):
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/huggingface_hub/hf_api.py", line 6954, in get_repo_discussions
+    discussions, has_next = _fetch_discussion_page(page_index=page_index)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/huggingface_hub/hf_api.py", line 6943, in _fetch_discussion_page
+    hf_raise_for_status(resp)
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/huggingface_hub/utils/_http.py", line 849, in hf_raise_for_status
+    raise _format(HfHubHTTPError, message, response) from e
+huggingface_hub.errors.HfHubHTTPError: (Request ID: Root=1-69f79af8-5ba7a82475e837da4d5c158c;1c3dcca6-f1f6-4bc2-ac92-55f814e79311)
+
+403 Forbidden: Discussions are disabled for this repo.
+Cannot access content at: https://huggingface.co/api/models/prithivida/grammar_error_correcter_v1/discussions?p=0.
+Make sure your token has the correct permissions.
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████| 260/260 [00:00<00:00, 12126.58it/s]
+The tied weights mapping and config for this model specifies to tie shared.weight to lm_head.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+The tied weights mapping and config for this model specifies to tie shared.weight to encoder.embed_tokens.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+The tied weights mapping and config for this model specifies to tie shared.weight to decoder.embed_tokens.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+Loaded prithivida/grammar_error_correcter_v1.
+  prithivida/grammar_error_correcter_v1  gleu: 0.8409
+  prithivida/grammar_error_correcter_v1  errant: {'precision': 0.9459, 'recall': 0.6731, 'f0.5': 0.875}
+  prithivida/grammar_error_correcter_v1  errant_dist: 0.7812
+  prithivida/grammar_error_correcter_v1  cola: {'input': 0.5556, 'corrected': 1.0, 'delta': 0.4444}
+  prithivida/grammar_error_correcter_v1  correction_extent: 0.4445
+  prithivida/grammar_error_correcter_v1  n_edits: 2.0556
+Loading model: grammarly/coedit-large ...
+Loading weights: 100%|████████████████████████████████████████████████████████████████████████████████████████████| 558/558 [00:00<00:00, 937.05it/s]
+The tied weights mapping and config for this model specifies to tie shared.weight to lm_head.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+Loaded grammarly/coedit-large.
+  grammarly/coedit-large  gleu: 0.8286
+  grammarly/coedit-large  errant: {'precision': 0.8974, 'recall': 0.6731, 'f0.5': 0.8413}
+  grammarly/coedit-large  errant_dist: 0.8013
+  grammarly/coedit-large  cola: {'input': 0.5556, 'corrected': 1.0, 'delta': 0.4444}
+  grammarly/coedit-large  correction_extent: 0.4371
+  grammarly/coedit-large  n_edits: 2.1667
+
+Synthetic data trashed.
+
+==================================================
+RUN 3 / 3
+==================================================
+Generating 20 samples ...
+[1/20] gen 71.7s + judge 9.5s ✓ (Article misuse (incorrect use of the indefinite article with an uncountable/plural noun))
+[2/20] gen 34.6s + judge 5.1s ✓ (article)
+[3/20] gen 48.9s + judge 15.3s ✓ (Incorrect verb form after preposition (gerund required))
+[4/20] gen 84.1s + judge 8.6s ✓ (Subject-verb agreement)
+[5/20] gen 152.4s + judge 14.1s — [JUDGE] dropped: I thanks my sister for beautiful birthday present.
+[6/20] gen 38.8s + judge 8.5s ✓ (Article usage error (missing indefinite article))
+[7/20] gen 14.9s + judge 9.1s ✓ (missing auxiliary verb "are" and infinitive marker "to")
+[8/20] gen 49.8s + judge 14.7s — [JUDGE] dropped: He discovered the mystery of hows secret tunnel wa
+[9/20] gen 81.8s + judge 5.8s ✓ (Spelling (wrong word))
+[10/20] gen 25.6s + judge 4.1s — [JUDGE] dropped: She bought many shoe for her vacation.
+[11/20] gen 101.4s + judge 8.3s ✓ (Preposition error (missing “of”))
+[12/20] gen 25.2s + judge 5.5s ✓ (subject‑verb agreement)
+[13/20] gen 30.1s + judge 2.4s ✓ (Subject-verb agreement)
+[14/20] gen 20.9s + judge 6.5s ✓ (Auxiliary verb misuse (incorrect combination of “do” and “are” in a question))
+[15/20] gen 36.7s + judge 18.2s ✓ (Subject-verb agreement)
+[16/20] gen 71.3s + judge 13.2s ✓ (Spelling)
+[17/20] gen 79.8s + judge 11.5s ✓ (Verb form error – incorrect use of past participle instead of present participle (plus typical L1‑transfer article omission))
+[18/20] gen 19.4s + judge 8.5s ✓ (Spelling)
+[19/20] gen 28.4s + judge 1.9s ✓ (Spelling)
+[20/20] gen 25.1s + judge 13.2s ✓ (Article misuse (article used without a following noun or incorrectly before a noun))
+Generation phase done in 1224.9s.
+Generated 17 synthetic samples (judge dropped: 3, parse failed: 0).
+Verified: 17/17 samples passed.
+Loading model: vennify/t5-base-grammar-correction ...
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████| 260/260 [00:00<00:00, 10223.30it/s]
+The tied weights mapping and config for this model specifies to tie shared.weight to lm_head.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+The tied weights mapping and config for this model specifies to tie shared.weight to encoder.embed_tokens.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+The tied weights mapping and config for this model specifies to tie shared.weight to decoder.embed_tokens.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+Loaded vennify/t5-base-grammar-correction.
+  vennify/t5-base-grammar-correction  gleu: 0.787
+  vennify/t5-base-grammar-correction  errant: {'precision': 0.7826, 'recall': 0.6429, 'f0.5': 0.75}
+  vennify/t5-base-grammar-correction  errant_dist: 0.7174
+  vennify/t5-base-grammar-correction  cola: {'input': 0.3529, 'corrected': 0.9412, 'delta': 0.5882}
+  vennify/t5-base-grammar-correction  correction_extent: 0.4531
+  vennify/t5-base-grammar-correction  n_edits: 2.7059
+Loading model: prithivida/grammar_error_correcter_v1 ...
+Exception in thread Thread-auto_conversion:
+Traceback (most recent call last):
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/huggingface_hub/utils/_http.py", line 761, in hf_raise_for_status
+    response.raise_for_status()
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '403 Forbidden' for url 'https://huggingface.co/api/models/prithivida/grammar_error_correcter_v1/discussions?p=0'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/threading.py", line 1073, in _bootstrap_inner
+    self.run()
+  File "/usr/lib/python3.12/threading.py", line 1010, in run
+    self._target(*self._args, **self._kwargs)
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/transformers/safetensors_conversion.py", line 117, in auto_conversion
+    raise e
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/transformers/safetensors_conversion.py", line 96, in auto_conversion
+    sha = get_conversion_pr_reference(api, pretrained_model_name_or_path, **cached_file_kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/transformers/safetensors_conversion.py", line 69, in get_conversion_pr_reference
+    pr = previous_pr(api, model_id, pr_title, token=token)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/transformers/safetensors_conversion.py", line 14, in previous_pr
+    for discussion in get_repo_discussions(repo_id=model_id, token=token):
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/huggingface_hub/hf_api.py", line 6954, in get_repo_discussions
+    discussions, has_next = _fetch_discussion_page(page_index=page_index)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/huggingface_hub/hf_api.py", line 6943, in _fetch_discussion_page
+    hf_raise_for_status(resp)
+  File "/srv/code/venvs/tp-venv/lib/python3.12/site-packages/huggingface_hub/utils/_http.py", line 849, in hf_raise_for_status
+    raise _format(HfHubHTTPError, message, response) from e
+huggingface_hub.errors.HfHubHTTPError: (Request ID: Root=1-69f7a25b-5a045189311b36a232ecc125;cd3272b0-1c07-4266-92b5-e7be31b23398)
+
+403 Forbidden: Discussions are disabled for this repo.
+Cannot access content at: https://huggingface.co/api/models/prithivida/grammar_error_correcter_v1/discussions?p=0.
+Make sure your token has the correct permissions.
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████████████████████| 260/260 [00:00<00:00, 12979.74it/s]
+The tied weights mapping and config for this model specifies to tie shared.weight to lm_head.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+The tied weights mapping and config for this model specifies to tie shared.weight to encoder.embed_tokens.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+The tied weights mapping and config for this model specifies to tie shared.weight to decoder.embed_tokens.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+Loaded prithivida/grammar_error_correcter_v1.
+  prithivida/grammar_error_correcter_v1  gleu: 0.8286
+  prithivida/grammar_error_correcter_v1  errant: {'precision': 0.8696, 'recall': 0.7143, 'f0.5': 0.8333}
+  prithivida/grammar_error_correcter_v1  errant_dist: 0.8144
+  prithivida/grammar_error_correcter_v1  cola: {'input': 0.3529, 'corrected': 0.8824, 'delta': 0.5294}
+  prithivida/grammar_error_correcter_v1  correction_extent: 0.4618
+  prithivida/grammar_error_correcter_v1  n_edits: 2.7059
+Loading model: grammarly/coedit-large ...
+Loading weights: 100%|███████████████████████████████████████████████████████████████████████████████████████████| 558/558 [00:00<00:00, 1489.70it/s]
+The tied weights mapping and config for this model specifies to tie shared.weight to lm_head.weight, but both are present in the checkpoints, so we will NOT tie them. You should update the config with `tie_word_embeddings=False` to silence this warning
+Loaded grammarly/coedit-large.
+  grammarly/coedit-large  gleu: 0.8566
+  grammarly/coedit-large  errant: {'precision': 0.8542, 'recall': 0.7321, 'f0.5': 0.8266}
+  grammarly/coedit-large  errant_dist: 0.8393
+  grammarly/coedit-large  cola: {'input': 0.3529, 'corrected': 0.8824, 'delta': 0.5294}
+  grammarly/coedit-large  correction_extent: 0.4625
+  grammarly/coedit-large  n_edits: 2.8235
+
+Synthetic data trashed.
+
+Results saved to results.json
+
+=======================================================
+FINAL RESULTS (mean ± std across runs)
+=======================================================
+
+vennify/t5-base-grammar-correction:
+  gleu: 0.7584 ± 0.0325
+  errant.precision: 0.7786 ± 0.0536
+  errant.recall: 0.5697 ± 0.0849
+  errant.f0.5: 0.7239 ± 0.0627
+  errant_dist: 0.7519 ± 0.0392
+  cola.input: 0.488 ± 0.0956
+  cola.corrected: 0.9248 ± 0.0254
+  cola.delta: 0.4368 ± 0.1094
+  correction_extent: 0.4501 ± 0.0342
+  n_edits: 2.439 ± 0.2466
+
+prithivida/grammar_error_correcter_v1:
+  gleu: 0.8137 ± 0.0302
+  errant.precision: 0.8607 ± 0.0734
+  errant.recall: 0.6784 ± 0.0274
+  errant.f0.5: 0.8159 ± 0.0567
+  errant_dist: 0.7996 ± 0.0138
+  cola.input: 0.488 ± 0.0956
+  cola.corrected: 0.9608 ± 0.0554
+  cola.delta: 0.4727 ± 0.0401
+  correction_extent: 0.4894 ± 0.0518
+  n_edits: 2.6983 ± 0.5216
+
+grammarly/coedit-large:
+  gleu: 0.8357 ± 0.015
+  errant.precision: 0.8783 ± 0.018
+  errant.recall: 0.7172 ± 0.0318
+  errant.f0.5: 0.84 ± 0.0105
+  errant_dist: 0.8433 ± 0.036
+  cola.input: 0.488 ± 0.0956
+  cola.corrected: 0.9608 ± 0.0554
+  cola.delta: 0.4727 ± 0.0401
+  correction_extent: 0.4781 ± 0.0413
+  n_edits: 2.7745 ± 0.4775

@@ -6,3 +6,4 @@ GEC_Pipeline/src/__pycache__/
 .env
 **/__pycache__/
 *.pyc
+experiments/Denis/.pip-cache/

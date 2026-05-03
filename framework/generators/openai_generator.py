@@ -6,6 +6,7 @@ _BASE_URLS = {
     "groq":       "https://api.groq.com/openai/v1",
     "openrouter": "https://openrouter.ai/api/v1",
     "mistral":    "https://api.mistral.ai/v1",
+    # Note: minimax is routed through AnthropicGenerator (Anthropic-compatible API)
     # "openai" is the default — no base_url needed
 }
 
@@ -23,6 +24,8 @@ class OpenAIGenerator(BaseGenerator):
         self.client = OpenAI(
             api_key=config["api_key"],
             base_url=_BASE_URLS.get(config["provider"]),  # None → default OpenAI endpoint
+            timeout=config.get("timeout", 300),       # seconds; SDK default is 600
+            max_retries=config.get("max_retries", 1), # SDK default is 2
         )
 
     def _call_api(self, prompt: str) -> str:

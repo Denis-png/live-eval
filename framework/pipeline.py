@@ -1,4 +1,5 @@
 import json
+import os
 import numpy as np
 from datasets import load_dataset
 from framework.tasks.base_task import BaseTask
@@ -7,21 +8,54 @@ from framework.tasks.base_task import BaseTask
 # ── Generator registry ───────────────────────────────────────
 # Add new providers here as they are implemented.
 
+# Anthropic-compatible providers — use the Anthropic SDK against a custom base_url.
+_ANTHROPIC_BASE_URLS = {
+    "minimax": "https://api.minimax.io/anthropic",
+    # "anthropic" → None (default endpoint)
+}
+
+
 def load_generator(config: dict):
     provider = config["provider"]
     if provider in ("openai", "groq", "openrouter", "mistral"):
         from framework.generators.openai_generator import OpenAIGenerator
         return OpenAIGenerator(config)
-    elif provider == "anthropic":
+    elif provider in ("anthropic", "minimax"):
         from framework.generators.anthropic_generator import AnthropicGenerator
+        if not config.get("base_url") and provider in _ANTHROPIC_BASE_URLS:
+            config = {**config, "base_url": _ANTHROPIC_BASE_URLS[provider]}
         return AnthropicGenerator(config)
     elif provider == "google":
         from framework.generators.google_generator import GoogleGenerator
         return GoogleGenerator(config)
     raise ValueError(
         f"Unknown provider: '{provider}'. "
-        f"Supported: openai, groq, openrouter, mistral, anthropic, google."
+        f"Supported: openai, groq, openrouter, mistral, anthropic, minimax, google."
     )
+
+
+# ── Judge generator ──────────────────────────────────────────
+
+def _build_judge_call(config: dict, main_generator):
+    """
+    Return a callable(prompt: str) -> str for the LLM-as-judge step.
+
+    Resolution order:
+      1. config.judge with enabled != false → load a separate generator
+      2. otherwise → fall back to the main generator (current behavior)
+      3. if config.judge.enabled is false → return None (judging skipped)
+    """
+    judge_cfg = config.get("judge")
+    if judge_cfg is None:
+        return main_generator._call_api
+    if judge_cfg.get("enabled", True) is False:
+        return None
+    if not judge_cfg.get("provider") or not judge_cfg.get("model"):
+        print("[WARN] judge block missing provider/model — falling back to main generator.")
+        return main_generator._call_api
+    print(f"Judge    : {judge_cfg['provider']} / {judge_cfg['model']}")
+    judge_generator = load_generator(judge_cfg)
+    return judge_generator._call_api
 
 
 # ── Task registry ────────────────────────────────────────────
@@ -63,10 +97,16 @@ def load_real_data(config: dict) -> list[dict]:
         )
 
     print(f"Loading dataset: {ds_config['name']} ...")
+    hf_token = (
+        ds_config.get("hf_token")
+        or (config.get("api_keys") or {}).get("huggingface")
+        or os.getenv("HF_TOKEN")
+    )
     dataset = load_dataset(
         ds_config["name"],
         split=ds_config["split"],
         streaming=ds_config.get("streaming", False),
+        token=hf_token or None,
     )
 
     # Configurable field names with schema-detection fallback
@@ -145,6 +185,7 @@ def run_pipeline(config: dict) -> dict:
 
     task       = load_task(config["task"]["name"])
     generator  = load_generator(config["generation"])
+    judge_call = _build_judge_call(config, generator)
     metric_fns = task.get_metric_fns()
 
     all_run_scores = []
@@ -161,7 +202,8 @@ def run_pipeline(config: dict) -> dict:
             error_types=task.get_error_types(),
             prompt_instruction=task.get_prompt_instruction(),
             sample_size=config["generation"]["sample_size"],
-            judge_prompt=task.get_judge_prompt(),
+            judge_prompt=task.get_judge_prompt() if judge_call else None,
+            judge_call=judge_call,
         )
         synthetic = verify(synthetic)
         corrupted_sentences = [item["corrupted"] for item in synthetic]

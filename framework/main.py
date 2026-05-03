@@ -40,10 +40,15 @@ def apply_overrides(config: dict, args) -> dict:
 
 
 def _load_dotenv() -> None:
-    """Best-effort .env loader. No-op if python-dotenv isn't installed."""
+    """Load .env into os.environ. Warns loudly if python-dotenv is missing —
+    silent failures here cause confusing 'empty api_key' errors downstream."""
     try:
         from dotenv import load_dotenv
     except ImportError:
+        print(
+            "[WARN] python-dotenv not installed — .env will be ignored. "
+            "Install with: pip install python-dotenv"
+        )
         return
     load_dotenv()
 
@@ -64,15 +69,22 @@ def _resolve_api_keys(config: dict) -> dict:
     Explicit api_key values already in the config are preserved."""
     api_keys = config.get("api_keys") or {}
 
-    gen = config.get("generation")
-    if gen and not gen.get("api_key"):
-        provider = gen.get("provider")
-        gen["api_key"] = api_keys.get(provider, "")
-        if not gen["api_key"] and provider:
+    def _inject(block: dict, label: str) -> None:
+        if not block or block.get("api_key"):
+            return
+        provider = block.get("provider")
+        block["api_key"] = api_keys.get(provider, "")
+        if not block["api_key"] and provider:
             print(
-                f"[WARN] No API key found for generator provider '{provider}'. "
+                f"[WARN] No API key found for {label} provider '{provider}'. "
                 f"Set {provider.upper()}_API_KEY in .env or override api_keys.{provider}."
             )
+
+    _inject(config.get("generation"), "generator")
+
+    judge = config.get("judge")
+    if judge and judge.get("enabled", True):
+        _inject(judge, "judge")
 
     for model in config.get("task_models") or []:
         if model.get("type") == "claude" and not model.get("api_key"):
@@ -91,6 +103,10 @@ def main():
     config = _expand_env_vars(config)
     config = apply_overrides(config, args)
     config = _resolve_api_keys(config)
+
+    # Propagate compute.device into the env for lazy-loaded metric/evaluator code.
+    device_pref = (config.get("compute") or {}).get("device", "auto")
+    os.environ["FRAMEWORK_DEVICE"] = str(device_pref)
 
     print(f"Task     : {config['task']['name']}")
     print(f"Provider : {config['generation']['provider']}")
