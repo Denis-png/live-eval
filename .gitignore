@@ -1,9 +1,31 @@
-Denis/.env
-Denis/data/
-Denis/.devcontainer
-GEC_Pipeline/.env
-GEC_Pipeline/src/__pycache__/
-.env
-**/__pycache__/
+# ── Python ──────────────────────────────────────────────────
+__pycache__/
 *.pyc
-experiments/Denis/.pip-cache/
+*.egg-info/
+.pytest_cache/
+
+# ── Virtual environments ────────────────────────────────────
+venv/
+.venv/
+
+# ── Data ────────────────────────────────────────────────────
+# Never commit datasets or generated runs — only the folder
+# structure (.gitkeep). Benchmark files go in framework/data/<task>/,
+# archived synthetic runs in framework/data/generated/<task>/.
+# (experiments/Denis/data/ has its own .gitignore with whitelisted plots.)
+framework/data/**
+!framework/data/**/
+!framework/data/**/.gitkeep
+
+# ── Secrets ─────────────────────────────────────────────────
+# Keep example.env as the template; real keys go in .env (never committed).
+.env
+
+# ── Caches & tooling ────────────────────────────────────────
+.pip-cache/
+.devcontainer/
+
+# ── IDE / OS noise ──────────────────────────────────────────
+.idea/
+.vscode/
+.DS_Store

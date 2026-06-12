@@ -104,7 +104,7 @@ def main():
     config = apply_overrides(config, args)
     config = _resolve_api_keys(config)
 
-    # Propagate compute.device into the env for lazy-loaded metric/evaluator code.
+    # Propagate compute.device into the env for lazy-loaded evaluator/model code.
     device_pref = (config.get("compute") or {}).get("device", "auto")
     os.environ["FRAMEWORK_DEVICE"] = str(device_pref)
 
@@ -119,14 +119,14 @@ def main():
     print("\n" + "=" * 55)
     print("FINAL RESULTS (mean ± std across runs)")
     print("=" * 55)
-    for model, metrics in results.items():
+    for model, scores in results.items():
         print(f"\n{model}:")
-        for metric, values in metrics.items():
+        for evaluator, values in scores.items():
             if isinstance(values, dict) and "mean" in values:
-                print(f"  {metric}: {values['mean']} ± {values['std']}")
+                print(f"  {evaluator}: {values['mean']} ± {values['std']}")
             else:
                 for sub, v in values.items():
-                    print(f"  {metric}.{sub}: {v['mean']} ± {v['std']}")
+                    print(f"  {evaluator}.{sub}: {v['mean']} ± {v['std']}")
 
 
 if __name__ == "__main__":

@@ -1,22 +1,22 @@
 # ============================================================
-# Base Evaluator — Abstract Template
+# Base Model — Abstract Template
 # ============================================================
-# This is the base class for all evaluators in the framework.
-# An evaluator takes synthetic data, runs a task model on it,
-# and returns the model's predictions.
+# This is the base class for all task models in the framework.
+# A task model takes synthetic (corrupted) sentences and returns
+# its predictions, which the evaluators then score.
 #
 # Currently implemented:
-#   - GECEvaluator (runs T5 and Gramformer)
+#   - GEC models (T5, GEC v1, CoEdit, Claude)
 #
 # Future additions:
-#   - HateSpeechEvaluator
-#   - SpamEvaluator
+#   - Hate speech models
+#   - Spam models
 # ============================================================
 
 from abc import ABC, abstractmethod
 
 
-class BaseEvaluator(ABC):
+class BaseModel(ABC):
 
     def __init__(self, model_config: dict):
         self.load_model(model_config)

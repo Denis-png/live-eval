@@ -1,4 +1,4 @@
-"""Claude API GEC evaluator (Denis's `haiku` corrector).
+"""Claude API GEC model (Denis's `haiku` corrector).
 
 Uses the same numbered-batch protocol as `experiments/Denis/summary/evaluation.py`
 to amortise the API call cost.
@@ -9,7 +9,7 @@ import time
 
 from anthropic import Anthropic, RateLimitError
 
-from ..base_evaluator import BaseEvaluator
+from ..base_model import BaseModel
 
 _DEFAULT_SYSTEM = (
     "You are a grammatical error corrector. "
@@ -22,7 +22,7 @@ _DEFAULT_SYSTEM = (
 _NUMBERED_RE = re.compile(r"^[0-9]+[.)]")
 
 
-class ClaudeEvaluator(BaseEvaluator):
+class ClaudeModel(BaseModel):
     """Anthropic Claude as a zero-shot GEC corrector."""
 
     def load_model(self, model_config: dict):
@@ -36,7 +36,7 @@ class ClaudeEvaluator(BaseEvaluator):
         api_key = model_config.get("api_key") or os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError(
-                "ClaudeEvaluator requires an API key. Set ANTHROPIC_API_KEY or "
+                "ClaudeModel requires an API key. Set ANTHROPIC_API_KEY or "
                 "task_models[*].api_key in config."
             )
         self.client = Anthropic(api_key=api_key)

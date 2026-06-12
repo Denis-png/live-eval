@@ -22,26 +22,26 @@ class BaseTask(ABC):
         pass
 
     @abstractmethod
-    def get_metrics(self) -> list[str]:
+    def get_evaluators(self) -> list[str]:
         """
-        Metric names to compute for this task.
-        Must match keys returned by get_metric_fns().
+        Evaluator names to compute for this task.
+        Must match keys returned by get_evaluator_fns().
         """
         pass
 
     @abstractmethod
-    def get_metric_fns(self) -> dict:
+    def get_evaluator_fns(self) -> dict:
         """
-        Map of metric name → callable(results: list[dict]) → score.
+        Map of evaluator name → callable(results: list[dict]) → score.
         results dicts contain: original, corrupted, prediction.
         """
         pass
 
     @abstractmethod
-    def get_evaluator(self, model_config: dict):
+    def get_model(self, model_config: dict):
         """
-        Return a BaseEvaluator instance for the given model config.
-        The task owns the mapping from model type to evaluator class.
+        Return a BaseModel instance for the given model config.
+        The task owns the mapping from model type to model class.
         """
         pass
 

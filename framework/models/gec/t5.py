@@ -1,18 +1,17 @@
 import torch
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-from ..base_evaluator import BaseEvaluator
+from transformers import T5Tokenizer, T5ForConditionalGeneration
+from ..base_model import BaseModel
 
 
-class CoEditEvaluator(BaseEvaluator):
-    """Grammarly's CoEdit (e.g. grammarly/coedit-large)."""
+class T5Model(BaseModel):
 
     def load_model(self, model_config: dict):
         print(f"Loading model: {model_config['name']} ...")
-        self.prefix     = model_config.get("prefix", "Fix the grammar of this sentence: ")
-        self.num_beams  = model_config.get("num_beams", 5)
+        self.prefix = model_config.get("prefix", "grammar: ")
+        self.num_beams = model_config.get("num_beams", 5)
         self.max_length = model_config.get("max_length", 128)
-        self.tokenizer  = AutoTokenizer.from_pretrained(model_config["name"])
-        self.model      = AutoModelForSeq2SeqLM.from_pretrained(model_config["name"])
+        self.tokenizer = T5Tokenizer.from_pretrained(model_config["name"])
+        self.model = T5ForConditionalGeneration.from_pretrained(model_config["name"])
         self.model.eval()
         print(f"Loaded {model_config['name']}.")
 

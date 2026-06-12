@@ -72,5 +72,8 @@ compute:
   device: cpu
 
 # ── Output ──────────────────────────────────────────────────
+# Synthetic data from each run is archived (never reused) under
+# generated_data_dir/<task>/ as <session>_run<N>.json.
 output:
   results_path: "results.json"
+  generated_data_dir: "framework/data/generated"

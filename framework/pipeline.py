@@ -1,5 +1,7 @@
 import json
 import os
+from datetime import datetime
+
 import numpy as np
 from datasets import load_dataset
 from framework.tasks.base_task import BaseTask
@@ -155,23 +157,39 @@ def aggregate(all_run_scores: list[dict]) -> dict:
     final = {}
     for model_name in all_run_scores[0]:
         final[model_name] = {}
-        for metric in all_run_scores[0][model_name]:
-            raw = all_run_scores[0][model_name][metric]
+        for evaluator in all_run_scores[0][model_name]:
+            raw = all_run_scores[0][model_name][evaluator]
             if isinstance(raw, dict):
-                final[model_name][metric] = {}
+                final[model_name][evaluator] = {}
                 for sub in raw:
-                    values = [run[model_name][metric][sub] for run in all_run_scores]
-                    final[model_name][metric][sub] = {
+                    values = [run[model_name][evaluator][sub] for run in all_run_scores]
+                    final[model_name][evaluator][sub] = {
                         "mean": round(float(np.mean(values)), 4),
                         "std":  round(float(np.std(values)),  4),
                     }
             else:
-                values = [run[model_name][metric] for run in all_run_scores]
-                final[model_name][metric] = {
+                values = [run[model_name][evaluator] for run in all_run_scores]
+                final[model_name][evaluator] = {
                     "mean": round(float(np.mean(values)), 4),
                     "std":  round(float(np.std(values)),  4),
                 }
     return final
+
+
+# ── Synthetic data archiving ─────────────────────────────────
+
+def save_synthetic_data(synthetic: list[dict], config: dict, task_name: str,
+                        session_id: str, run_idx: int) -> str:
+    """Archive one run's synthetic data under data/generated/<task>/ instead of discarding it."""
+    base_dir = (config.get("output") or {}).get(
+        "generated_data_dir", "framework/data/generated"
+    )
+    out_dir = os.path.join(base_dir, task_name)
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, f"{session_id}_run{run_idx + 1}.json")
+    with open(path, "w") as f:
+        json.dump(synthetic, f, indent=2, ensure_ascii=False)
+    return path
 
 
 # ── Main pipeline ─────────────────────────────────────────────
@@ -180,16 +198,19 @@ def run_pipeline(config: dict) -> dict:
     """
     Run the full GET pipeline (Generate → Evaluate → Trash) N times,
     then aggregate results as mean ± std across runs.
+    "Trash" means the synthetic data is never reused for evaluation —
+    each run is archived under data/generated/ for inspection.
     """
     real_data = load_real_data(config)
 
-    task       = load_task(config["task"]["name"])
-    generator  = load_generator(config["generation"])
-    judge_call = _build_judge_call(config, generator)
-    metric_fns = task.get_metric_fns()
+    task          = load_task(config["task"]["name"])
+    generator     = load_generator(config["generation"])
+    judge_call    = _build_judge_call(config, generator)
+    evaluator_fns = task.get_evaluator_fns()
 
     all_run_scores = []
-    num_runs = config["generation"]["num_runs"]
+    num_runs   = config["generation"]["num_runs"]
+    session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     for run_idx in range(num_runs):
         print(f"\n{'='*50}")
@@ -211,23 +232,25 @@ def run_pipeline(config: dict) -> dict:
         # ── EVALUATE ──────────────────────────────────────
         run_scores = {}
         for model_config in config["task_models"]:
-            evaluator   = task.get_evaluator(model_config)
-            predictions = evaluator.predict(corrupted_sentences)
+            model       = task.get_model(model_config)
+            predictions = model.predict(corrupted_sentences)
             results = [
                 {**item, "prediction": pred}
                 for item, pred in zip(synthetic, predictions)
             ]
             run_scores[model_config["name"]] = {
-                name: metric_fns[name](results) for name in task.get_metrics()
+                name: evaluator_fns[name](results) for name in task.get_evaluators()
             }
             for name, score in run_scores[model_config["name"]].items():
                 print(f"  {model_config['name']}  {name}: {score}")
 
         all_run_scores.append(run_scores)
 
-        # ── TRASH ─────────────────────────────────────────
-        synthetic.clear()
-        print("\nSynthetic data trashed.")
+        # ── TRASH (archive, never reuse) ──────────────────
+        saved_path = save_synthetic_data(
+            synthetic, config, task.get_task_name(), session_id, run_idx
+        )
+        print(f"\nSynthetic data archived to {saved_path}")
 
     # ── AGGREGATE ─────────────────────────────────────────
     final = aggregate(all_run_scores)

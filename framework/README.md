@@ -14,6 +14,10 @@ this framework generates fresh synthetic data on every run.
 This eliminates benchmark contamination and reveals
 how stable a model really is on truly unseen data.
 
+"Trash" means the synthetic data is never reused for evaluation.
+Each run's data is archived under `framework/data/generated/<task>/`
+so it can be inspected later.
+
 ---
 
 ## Project Structure
@@ -25,7 +29,7 @@ how stable a model really is on truly unseen data.
         configs/
             config.yaml          - dataset, generator, task models, output
             tasks/
-                gec.json         - GEC task config (error types, prompts, metrics, model params)
+                gec.json         - GEC task config (error types, prompts, evaluators, model params)
         tasks/
             base_task.py         - abstract task template
             gec/task.py          - Grammatical Error Correction task
@@ -33,11 +37,13 @@ how stable a model really is on truly unseen data.
             openai_generator.py  - OpenAI / Groq / OpenRouter / Mistral (OpenAI-compatible)
             anthropic_generator.py
             google_generator.py
-        evaluators/gec/          - models under evaluation
+        models/gec/              - models under evaluation
             t5.py, gec_v1.py, coedit.py, claude.py
-        metrics/
+        evaluators/              - scoring functions applied to model predictions
             gleu.py              - GLEU score
             gec/                 - errant, errant_dist, cola, correction_extent, n_edits
+        data/
+            generated/           - archived synthetic data, one JSON per run (gitignored)
 
 ---
 
@@ -59,6 +65,7 @@ how stable a model really is on truly unseen data.
    - `task.name`       — `gec` (only task currently implemented)
    - `task_models`     — list of models to evaluate
    - `output.results_path` — where to write results JSON
+   - `output.generated_data_dir` — where each run's synthetic data is archived
 
 ---
 
@@ -88,13 +95,13 @@ Use `--config <path>` to point at a different YAML.
 ## How to Add a New Task
 
 1. Create `framework/tasks/<task>/task.py` subclassing `BaseTask` and
-   implement `get_error_types`, `get_prompt_instruction`, `get_metrics`,
-   `get_metric_fns`, `get_evaluator` (and optionally `get_judge_prompt`).
+   implement `get_error_types`, `get_prompt_instruction`, `get_evaluators`,
+   `get_evaluator_fns`, `get_model` (and optionally `get_judge_prompt`).
 2. Create `framework/configs/tasks/<task>.json` with error types, prompts,
-   metrics list, and per-model inference params.
+   evaluators list, and per-model inference params.
 3. Register the task in `framework/pipeline.py::load_task()`.
-4. Add evaluator classes under `framework/evaluators/<task>/` and metric
-   functions under `framework/metrics/<task>/`.
+4. Add model classes under `framework/models/<task>/` and evaluator
+   functions under `framework/evaluators/<task>/`.
 5. Set `task.name: <task>` in `configs/config.yaml`.
 
 ---
@@ -102,8 +109,12 @@ Use `--config <path>` to point at a different YAML.
 ## Results
 
 Results are written to the path in `output.results_path` (default
-`results.json`) after all runs finish. Each metric reports `mean ± std`
+`results.json`) after all runs finish. Each evaluator reports `mean ± std`
 across runs — high `std` reveals model instability on unseen data.
+
+The synthetic data itself is archived per run under
+`output.generated_data_dir` (default `framework/data/generated/`) as
+`<task>/<session>_run<N>.json`. It is never reused for evaluation.
 
 ---
 
@@ -114,7 +125,7 @@ Hate Speech Detection — planned
 Spam Detection — planned
 Sentiment Analysis — planned
 
-## Current Metrics (GEC)
+## Current Evaluators (GEC)
 
 GLEU — fluency of correction
 ERRANT — precision / recall / F0.5 of edits
