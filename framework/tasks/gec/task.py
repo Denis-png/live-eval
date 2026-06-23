@@ -49,15 +49,11 @@ class GECTask(BaseTask):
         params = self._config["models"].get(model_type, {})
         merged = {**model_config, **params}
 
-        if model_type == "t5":
-            from framework.models.gec.t5 import T5Model
-            return T5Model(merged)
-        elif model_type == "gec_v1":
-            from framework.models.gec.gec_v1 import GecV1Model
-            return GecV1Model(merged)
-        elif model_type == "coedit":
-            from framework.models.gec.coedit import CoEditModel
-            return CoEditModel(merged)
+        if model_type in ("t5", "gec_v1", "coedit"):
+            # All three are prefix-prompted seq2seq models; the prefix and
+            # decoding params come from gec.json["models"][model_type].
+            from framework.models.gec.seq2seq import Seq2SeqModel
+            return Seq2SeqModel(merged)
         elif model_type == "claude":
             from framework.models.gec.claude import ClaudeModel
             return ClaudeModel(merged)

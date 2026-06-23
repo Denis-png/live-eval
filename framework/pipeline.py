@@ -3,7 +3,6 @@ import os
 from datetime import datetime
 
 import numpy as np
-from datasets import load_dataset
 from framework.tasks.base_task import BaseTask
 
 
@@ -49,15 +48,15 @@ def _build_judge_call(config: dict, main_generator):
     """
     judge_cfg = config.get("judge")
     if judge_cfg is None:
-        return main_generator._call_api
+        return main_generator.call_api
     if judge_cfg.get("enabled", True) is False:
         return None
     if not judge_cfg.get("provider") or not judge_cfg.get("model"):
         print("[WARN] judge block missing provider/model — falling back to main generator.")
-        return main_generator._call_api
+        return main_generator.call_api
     print(f"Judge    : {judge_cfg['provider']} / {judge_cfg['model']}")
     judge_generator = load_generator(judge_cfg)
-    return judge_generator._call_api
+    return judge_generator.call_api
 
 
 # ── Task registry ────────────────────────────────────────────
@@ -76,11 +75,15 @@ def load_task(task_name: str) -> BaseTask:
 # ── Dataset loading ──────────────────────────────────────────
 
 def _get_field(row: dict, candidates: list[str]):
-    """Return the first matching field from a dataset row, with fallback."""
+    """Return the first non-empty candidate field from a dataset row.
+
+    Returns None if no candidate matches — callers skip such rows. We do NOT
+    fall back to "the first string column" because that silently pulls in the
+    wrong field on an unexpected schema and corrupts the whole sample set."""
     for key in candidates:
         if key in row and row[key]:
             return row[key]
-    return next((v for v in row.values() if isinstance(v, str) and v), None)
+    return None
 
 
 def load_real_data(config: dict) -> list[dict]:
@@ -97,6 +100,8 @@ def load_real_data(config: dict) -> list[dict]:
             "Local dataset loading is not yet implemented. "
             "Contribute it in pipeline.load_real_data()."
         )
+
+    from datasets import load_dataset  # lazy: keeps pipeline importable without HF deps
 
     print(f"Loading dataset: {ds_config['name']} ...")
     hf_token = (
@@ -128,51 +133,46 @@ def load_real_data(config: dict) -> list[dict]:
     return samples
 
 
-# ── Verification ─────────────────────────────────────────────
-
-def verify(synthetic_data: list[dict]) -> list[dict]:
-    """Filter out generations where the LLM failed to introduce an error."""
-    verified = []
-    for item in synthetic_data:
-        if not item["corrupted"] or not item["original"]:
-            continue
-        if item["corrupted"].strip() == item["original"].strip():
-            print("[SKIP] Unchanged sentence.")
-            continue
-        if len(item["corrupted"].split()) < 3:
-            print("[SKIP] Too short.")
-            continue
-        verified.append(item)
-    print(f"Verified: {len(verified)}/{len(synthetic_data)} samples passed.")
-    return verified
-
-
 # ── Aggregation ──────────────────────────────────────────────
+
+def _mean_std(values: list[float]) -> dict:
+    """Mean ± sample std (ddof=1) across runs. Std is 0.0 for a single run
+    rather than NaN. Sample std is the right estimator when treating the runs
+    as a sample of the model's behaviour on unseen data."""
+    std = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
+    return {"mean": round(float(np.mean(values)), 4), "std": round(std, 4)}
+
 
 def aggregate(all_run_scores: list[dict]) -> dict:
     """
     Compute mean ± std across N runs.
     High std reveals model instability on unseen data (see Paulreich 2025, p.8).
+
+    Robust to heterogeneous runs: a model or evaluator that is missing from
+    some runs is aggregated over only the runs where it is present, instead of
+    raising KeyError off run 0.
     """
+    model_names = {m for run in all_run_scores for m in run}
     final = {}
-    for model_name in all_run_scores[0]:
+    for model_name in model_names:
         final[model_name] = {}
-        for evaluator in all_run_scores[0][model_name]:
-            raw = all_run_scores[0][model_name][evaluator]
-            if isinstance(raw, dict):
-                final[model_name][evaluator] = {}
-                for sub in raw:
-                    values = [run[model_name][evaluator][sub] for run in all_run_scores]
-                    final[model_name][evaluator][sub] = {
-                        "mean": round(float(np.mean(values)), 4),
-                        "std":  round(float(np.std(values)),  4),
-                    }
-            else:
-                values = [run[model_name][evaluator] for run in all_run_scores]
+        evaluators = {
+            ev for run in all_run_scores for ev in run.get(model_name, {})
+        }
+        for evaluator in evaluators:
+            present = [
+                run[model_name][evaluator]
+                for run in all_run_scores
+                if model_name in run and evaluator in run[model_name]
+            ]
+            if isinstance(present[0], dict):
+                subkeys = {sub for raw in present for sub in raw}
                 final[model_name][evaluator] = {
-                    "mean": round(float(np.mean(values)), 4),
-                    "std":  round(float(np.std(values)),  4),
+                    sub: _mean_std([raw[sub] for raw in present if sub in raw])
+                    for sub in subkeys
                 }
+            else:
+                final[model_name][evaluator] = _mean_std(present)
     return final
 
 
@@ -226,7 +226,6 @@ def run_pipeline(config: dict) -> dict:
             judge_prompt=task.get_judge_prompt() if judge_call else None,
             judge_call=judge_call,
         )
-        synthetic = verify(synthetic)
         corrupted_sentences = [item["corrupted"] for item in synthetic]
 
         # ── EVALUATE ──────────────────────────────────────
@@ -255,8 +254,9 @@ def run_pipeline(config: dict) -> dict:
     # ── AGGREGATE ─────────────────────────────────────────
     final = aggregate(all_run_scores)
 
-    with open(config["output"]["results_path"], "w") as f:
+    results_path = (config.get("output") or {}).get("results_path", "results.json")
+    with open(results_path, "w") as f:
         json.dump(final, f, indent=2)
-    print(f"\nResults saved to {config['output']['results_path']}")
+    print(f"\nResults saved to {results_path}")
 
     return final

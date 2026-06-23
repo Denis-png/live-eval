@@ -26,15 +26,16 @@ def parse_args():
 
 def apply_overrides(config: dict, args) -> dict:
     """Apply CLI flags on top of YAML config. Only overrides keys that were explicitly passed."""
-    if args.task:
+    # Use `is not None` so falsy-but-valid overrides (e.g. --runs 0) still apply.
+    if args.task is not None:
         config["task"]["name"] = args.task
-    if args.provider:
+    if args.provider is not None:
         config["generation"]["provider"] = args.provider
-    if args.model:
+    if args.model is not None:
         config["generation"]["model"] = args.model
-    if args.runs:
+    if args.runs is not None:
         config["generation"]["num_runs"] = args.runs
-    if args.sample_size:
+    if args.sample_size is not None:
         config["generation"]["sample_size"] = args.sample_size
     return config
 

@@ -46,16 +46,18 @@ class BaseGenerator(ABC):
     ) -> list[dict]:
         """
         Generate synthetic corrupted sentences with optional LLM-as-judge filter.
-        Loop is shared across all providers — only _call_api() differs.
+        Loop is shared across all providers — only call_api() differs.
 
         Args:
             real_samples:        list of {"incorrect": ..., "correct": ...}
-            error_types:         legacy hint list; the model identifies the type itself
+            error_types:         fallback labels used only when the model's CoT
+                                 output omits an "Error type:" line. Also offered
+                                 to templates via the optional {error_type} field.
             prompt_instruction:  CoT template with a {sentence} placeholder
             sample_size:         number of synthetic samples to produce
             judge_prompt:        optional LLM-as-judge template with {sentence}, {correction}
             judge_call:          callable(prompt) → str for the judge. If None and
-                                 judge_prompt is set, falls back to self._call_api.
+                                 judge_prompt is set, falls back to self.call_api.
 
         Returns:
             list of {"original": <LLM gold>, "corrupted": ..., "error_type": ...}
@@ -64,7 +66,7 @@ class BaseGenerator(ABC):
         samples = real_samples[:sample_size]
         judge_dropped = 0
         parse_failed = 0
-        judge_fn = judge_call or self._call_api
+        judge_fn = judge_call or self.call_api
 
         total = len(samples)
         run_start = time.monotonic()
@@ -77,7 +79,7 @@ class BaseGenerator(ABC):
             )
             t0 = time.monotonic()
             try:
-                raw = self._call_api(prompt)
+                raw = self.call_api(prompt)
                 gen_dt = time.monotonic() - t0
                 error_type, corrupted, gold = _parse_generation(raw)
                 if not corrupted or not gold:
@@ -86,6 +88,9 @@ class BaseGenerator(ABC):
                     continue
                 if corrupted.strip() == gold.strip():
                     print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] identical corrupted/gold", flush=True)
+                    continue
+                if len(corrupted.split()) < 3:
+                    print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] too short: {corrupted!r}", flush=True)
                     continue
 
                 judge_dt = 0.0
@@ -121,6 +126,9 @@ class BaseGenerator(ABC):
         return synthetic
 
     @abstractmethod
-    def _call_api(self, prompt: str) -> str:
-        """Send a single prompt string, return the response string."""
+    def call_api(self, prompt: str) -> str:
+        """Send a single prompt string, return the response string.
+
+        Public on purpose: the pipeline reuses a generator's call_api as the
+        LLM-as-judge callable (see pipeline._build_judge_call)."""
         pass

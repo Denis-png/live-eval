@@ -63,7 +63,8 @@ task_models:
     type: "coedit"
   
 # ── Compute ─────────────────────────────────────────────────
-# Device for HuggingFace models (CoLA scorer, T5/CoEdit evaluators).
+# Device for HuggingFace/torch models (CoLA scorer + the seq2seq GEC
+# models under evaluation: t5, gec_v1, coedit).
 # auto = use GPU only if available AND its compute capability is supported
 #        by the installed PyTorch build (otherwise CPU).
 # cpu  = force CPU.

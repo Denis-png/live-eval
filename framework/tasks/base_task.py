@@ -17,7 +17,8 @@ class BaseTask(ABC):
     def get_prompt_instruction(self) -> str:
         """
         Prompt template for the generator LLM.
-        Must contain {error_type} and {sentence} placeholders.
+        Must contain a {sentence} placeholder; may optionally use {error_type}
+        (the generator always passes both to str.format).
         """
         pass
 
@@ -53,5 +54,11 @@ class BaseTask(ABC):
         """
         return None
 
+    @abstractmethod
     def get_task_name(self) -> str:
-        return self.__class__.__name__
+        """
+        Short lowercase task identifier, matching configs/tasks/<name>.json and
+        the data/generated/<name>/ archive dir (e.g. "gec"). Must be overridden
+        — do NOT derive from the class name, which would drift from the config.
+        """
+        pass
