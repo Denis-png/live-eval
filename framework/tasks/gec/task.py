@@ -27,6 +27,24 @@ class GECTask(BaseTask):
     def get_judge_prompt(self) -> str | None:
         return self._config.get("judge_prompt")
 
+    def get_inverse_prompt(self) -> str | None:
+        return self._config.get("inverse_prompt")
+
+    def get_inverse_judge_prompt(self) -> str | None:
+        return self._config.get("inverse_judge_prompt")
+
+    def get_error_descriptions(self) -> dict[str, str]:
+        """Build human phrases for each supported ERRANT type by composing the
+        operation prefix (M/U/R) with the category. E.g. 'R:VERB:TENSE' ->
+        'use a wrong verb tense'."""
+        ops  = self._config["errant_operations"]
+        cats = self._config["errant_categories"]
+        out = {}
+        for t in self._config["errant_supported_types"]:
+            op, _, cat = t.partition(":")  # 'R:VERB:TENSE' -> ('R', ':', 'VERB:TENSE')
+            out[t] = f"{ops[op]} {cats[cat]}"
+        return out
+
     def get_evaluator_fns(self) -> dict:
         from framework.evaluators.gleu import compute_gleu
         from framework.evaluators.gec.errant import compute_errant
