@@ -233,6 +233,39 @@ def save_synthetic_data(synthetic: list[dict], config: dict, task_name: str,
     return path
 
 
+# ── Generation dispatch ───────────────────────────────────────
+
+def _run_generation(generator, task, config, real_data, error_dist, judge_call):
+    """Dispatch to forward or inverse generation based on generation.mode.
+    Both return the same {"original", "corrupted", "error_type"} contract."""
+    gen_cfg = config["generation"]
+    mode = gen_cfg.get("mode", "forward")
+    sample_size = gen_cfg["sample_size"]
+
+    if mode == "inverse":
+        inverse_cfg = gen_cfg.get("inverse") or {}
+        return generator.generate_inverse(
+            real_samples=real_data,
+            inverse_prompt=task.get_inverse_prompt(),
+            error_descriptions=task.get_error_descriptions(),
+            type_dist=error_dist["type_dist"],
+            count_dist=error_dist["count_dist"],
+            sample_size=sample_size,
+            source_field=inverse_cfg.get("source_field", "correct"),
+            judge_prompt=task.get_inverse_judge_prompt() if judge_call else None,
+            judge_call=judge_call,
+        )
+
+    return generator.generate(
+        real_samples=real_data,
+        error_types=task.get_error_types(),
+        prompt_instruction=task.get_prompt_instruction(),
+        sample_size=sample_size,
+        judge_prompt=task.get_judge_prompt() if judge_call else None,
+        judge_call=judge_call,
+    )
+
+
 # ── Main pipeline ─────────────────────────────────────────────
 
 def run_pipeline(config: dict) -> dict:
@@ -249,6 +282,12 @@ def run_pipeline(config: dict) -> dict:
     judge_call    = _build_judge_call(config, generator)
     evaluator_fns = task.get_evaluator_fns()
 
+    mode = config["generation"].get("mode", "forward")
+    error_dist = (
+        load_error_distribution(config, real_data, task)
+        if mode == "inverse" else None
+    )
+
     all_run_scores = []
     num_runs   = config["generation"]["num_runs"]
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -259,13 +298,8 @@ def run_pipeline(config: dict) -> dict:
         print(f"{'='*50}")
 
         # ── GENERATE ──────────────────────────────────────
-        synthetic = generator.generate(
-            real_samples=real_data,
-            error_types=task.get_error_types(),
-            prompt_instruction=task.get_prompt_instruction(),
-            sample_size=config["generation"]["sample_size"],
-            judge_prompt=task.get_judge_prompt() if judge_call else None,
-            judge_call=judge_call,
+        synthetic = _run_generation(
+            generator, task, config, real_data, error_dist, judge_call
         )
         corrupted_sentences = [item["corrupted"] for item in synthetic]
 

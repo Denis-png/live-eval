@@ -26,6 +26,7 @@ dataset:
 
 # ── Generation (LLM that creates synthetic corrupted sentences) ──
 generation:
+  mode: "forward"                  # forward | inverse  (forward = existing behaviour)
   provider: "openrouter"           # groq | openai | openrouter | mistral | minimax | anthropic | google
   model: "minimax-m2.7"
   temperature: 1.0             # CoT 3-step prompt benefits from higher T (Denis: 1.0)
@@ -36,6 +37,13 @@ generation:
   max_retries: 1               # SDK retries on 5xx/429 (SDK default: 2)
   # api_key is auto-resolved from api_keys[provider]; uncomment to override:
   # api_key: "..."
+  # ── Inverse mode (only read when mode == inverse) ──
+  # Corrupt a known-clean sentence according to an error distribution.
+  inverse:
+    source_field: "correct"        # dataset field holding the clean source text
+    placeholder_distribution:      # TEMP — replaced by the preprocessing module later
+      count_mean: 1.5              # Poisson mean for errors-per-sentence
+      count_max: 5                 # clamp errors-per-sentence to [1, count_max]
 
 # ── Judge (optional LLM-as-judge that filters bad generations) ──
 # If omitted or enabled=false → judging is skipped.
