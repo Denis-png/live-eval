@@ -9,6 +9,40 @@ _GENERATED_RE    = re.compile(r"(?im)^\s*Generated:\s*(.+?)\s*$")
 _GROUND_TRUTH_RE = re.compile(r"(?im)^\s*Ground\s*truth:\s*(.+?)\s*$")
 _REDUNDANCY_RE   = re.compile(r"(?im)^\s*Redundancy:\s*(trivial|valid)\b")
 _CORRECTION_RE   = re.compile(r"(?im)^\s*Correction:\s*(correct|incorrect)\b")
+_CORRUPTED_RE = re.compile(r"(?im)^\s*Corrupted:\s*(.+?)\s*$")
+
+
+def _parse_inverse(raw: str) -> str | None:
+    """Pull the corrupted sentence out of an inverse-mode `Corrupted:` response."""
+    m = _CORRUPTED_RE.search(raw)
+    return m.group(1).strip() if m else None
+
+
+def _sample_categories(
+    type_dist: dict[str, float],
+    count_dist: dict[int, float],
+    rng,
+) -> list[str]:
+    """Sample a count n ~ count_dist, then n category keys ~ type_dist.
+
+    Sampling is without replacement when n <= len(type_dist) (distinct
+    categories), and with replacement otherwise (n exceeds available keys).
+    `rng` is an injected random.Random for deterministic tests."""
+    counts = list(count_dist.keys())
+    n = rng.choices(counts, weights=[count_dist[c] for c in counts], k=1)[0]
+
+    keys = list(type_dist.keys())
+    weights = [type_dist[k] for k in keys]
+    if n > len(keys):
+        return rng.choices(keys, weights=weights, k=n)
+
+    chosen: list[str] = []
+    pool, pool_w = keys[:], weights[:]
+    for _ in range(n):
+        idx = rng.choices(range(len(pool)), weights=pool_w, k=1)[0]
+        chosen.append(pool.pop(idx))
+        pool_w.pop(idx)
+    return chosen
 
 
 def _parse_generation(raw: str) -> tuple[str | None, str | None, str | None]:
