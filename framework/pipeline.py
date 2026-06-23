@@ -1,4 +1,5 @@
 import json
+import math
 import os
 from datetime import datetime
 
@@ -131,6 +132,46 @@ def load_real_data(config: dict) -> list[dict]:
 
     print(f"Loaded {len(samples)} real samples.")
     return samples
+
+
+# ── Error distribution (PLACEHOLDER seam) ────────────────────
+# NOTE: This is a temporary placeholder. The real benchmark-preprocessing
+# module (separate work) will replace load_error_distribution's body to compute
+# the empirical error distribution from `real_data`. The signature is fixed so
+# the generator/task layers never change.
+
+def _poisson_pmf(mean: float, n_min: int = 1, n_max: int = 5) -> dict[int, float]:
+    """Normalized Poisson PMF restricted to n in [n_min, n_max]."""
+    raw = {
+        n: (mean ** n) * math.exp(-mean) / math.factorial(n)
+        for n in range(n_min, n_max + 1)
+    }
+    total = sum(raw.values()) or 1.0
+    return {n: p / total for n, p in raw.items()}
+
+
+def load_error_distribution(config: dict, real_data: list[dict], task) -> dict:
+    """Return {"type_dist": {key: prob}, "count_dist": {n: prob}} for inverse mode.
+
+    PLACEHOLDER: uniform type distribution over the task's category vocabulary and
+    a Poisson errors-per-sentence distribution. `real_data` is unused for now —
+    kept in the signature for the future preprocessing module."""
+    pd_cfg = (
+        ((config.get("generation") or {}).get("inverse") or {})
+        .get("placeholder_distribution") or {}
+    )
+    keys = list(task.get_error_descriptions().keys())
+    if not keys:
+        raise ValueError(
+            "Inverse mode requires task.get_error_descriptions() to be non-empty."
+        )
+    type_dist = {k: 1 / len(keys) for k in keys}
+    count_dist = _poisson_pmf(
+        mean=pd_cfg.get("count_mean", 1.5),
+        n_min=1,
+        n_max=pd_cfg.get("count_max", 5),
+    )
+    return {"type_dist": type_dist, "count_dist": count_dist}
 
 
 # ── Aggregation ──────────────────────────────────────────────
