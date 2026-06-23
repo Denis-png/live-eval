@@ -30,4 +30,6 @@ framework/data/**
 .vscode/
 .DS_Store
 
+# ── Documentation & other noise ─────────────────────────────
 docs
+.superpowers
