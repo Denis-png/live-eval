@@ -67,5 +67,13 @@ class GECTask(BaseTask):
                 f"Add it to configs/tasks/gec.json and tasks/gec/task.py."
             )
 
+    def parse_row(self, row: dict) -> dict | None:
+        # Try common field name variants for incorrect and correct sentences.
+        incorrect = row.get("input") or row.get("text") or row.get("incorrect")
+        correct   = row.get("output") or row.get("correct") or row.get("target")
+        if not incorrect or not correct:
+            return None
+        return {"incorrect": incorrect, "correct": correct}
+
     def get_task_name(self) -> str:
         return "gec"

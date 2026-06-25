@@ -43,6 +43,7 @@ class BaseGenerator(ABC):
         sample_size: int,
         judge_prompt: str | None = None,
         judge_call: Callable[[str], str] | None = None,
+        request_delay: float = 0.0,
     ) -> list[dict]:
         """
         Generate synthetic corrupted sentences with optional LLM-as-judge filter.
@@ -56,6 +57,8 @@ class BaseGenerator(ABC):
             judge_prompt:        optional LLM-as-judge template with {sentence}, {correction}
             judge_call:          callable(prompt) → str for the judge. If None and
                                  judge_prompt is set, falls back to self._call_api.
+            request_delay:       seconds to sleep after each successful request to
+                                 respect provider TPM rate limits (default: 0).
 
         Returns:
             list of {"original": <LLM gold>, "corrupted": ..., "error_type": ...}
@@ -107,6 +110,10 @@ class BaseGenerator(ABC):
                 })
                 suffix = f" + judge {judge_dt:.1f}s" if judge_prompt else ""
                 print(f"[{i}/{total}] gen {gen_dt:.1f}s{suffix} ✓ ({error_type or fallback_type})", flush=True)
+
+                # Throttle requests to stay within provider rate limits (e.g. Groq TPM cap).
+                if request_delay > 0:
+                    time.sleep(request_delay)
             except Exception as e:
                 dt = time.monotonic() - t0
                 print(f"[{i}/{total}] failed after {dt:.1f}s: {e}", flush=True)
