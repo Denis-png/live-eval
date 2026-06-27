@@ -60,10 +60,6 @@
   "judge_prompt": "You are a spam quality evaluator. You receive a generated message and its counterpart.\n\nThe generated message is either a spam message or a legitimate paraphrase (HAM). Assess two criteria:\n  Redundancy: \"trivial\" if the message is spam that is too obvious or cartoonish, OR if it is a paraphrase that introduces spam characteristics. \"valid\" otherwise.\n  Correction: \"correct\" if the counterpart is a natural, legitimate message. \"incorrect\" otherwise.\n\nUse this exact format:\nRedundancy: trivial/valid\nCorrection: correct/incorrect\n\nGenerated message: {sentence}\nCounterpart: {correction}",
   "evaluators": ["accuracy", "precision", "recall", "f1"],
   "models": {
-    "bert_tiny": {
-      "max_length": 128,
-      "label_map": {"LABEL_0": "HAM", "LABEL_1": "SPAM"}
-    },
     "roberta": {
       "max_length": 128,
       "label_map": {"LABEL_0": "HAM", "LABEL_1": "SPAM"}

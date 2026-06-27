@@ -45,10 +45,7 @@ class SpamTask(BaseTask):
         params = self._config["models"].get(model_type, {})
         merged = {**model_config, **params}
 
-        if model_type == "bert_tiny":
-            from framework.models.spam.bert_tiny import BertTinySpamModel
-            return BertTinySpamModel(merged)
-        elif model_type == "roberta":
+        if model_type == "roberta":
             from framework.models.spam.roberta import RobertaSpamModel
             return RobertaSpamModel(merged)
         else:

@@ -56,8 +56,8 @@ task:
 
 # ── Task Models (models under evaluation) ───────────────────
 task_models:
-  - name: "mrm8488/bert-tiny-finetuned-sms-spam-detection"
-    type: "bert_tiny"
+  - name: "mshenoda/roberta-spam"
+    type: "roberta"
   - name: "mariagrandury/roberta-base-finetuned-sms-spam-detection"
     type: "roberta"
 
