@@ -33,11 +33,13 @@ class SpamTask(BaseTask):
         from framework.evaluators.classification.precision import compute_precision
         from framework.evaluators.classification.recall import compute_recall
         from framework.evaluators.classification.f1 import compute_f1
+        from framework.evaluators.classification.fpr import compute_fpr
         return {
             "accuracy":  compute_accuracy,
             "precision": functools.partial(compute_precision, positive_label="SPAM"),
             "recall":    functools.partial(compute_recall, positive_label="SPAM"),
             "f1":        functools.partial(compute_f1, positive_label="SPAM"),
+            "fpr":       functools.partial(compute_fpr, positive_label="SPAM"),
         }
 
     def get_model(self, model_config: dict):

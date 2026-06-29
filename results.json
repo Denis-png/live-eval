@@ -1,38 +1,46 @@
 {
   "mshenoda/roberta-spam": {
     "accuracy": {
-      "mean": 0.8095,
-      "std": 0.0466
+      "mean": 0.8071,
+      "std": 0.0714
     },
     "precision": {
-      "mean": 1.0,
-      "std": 0.0
+      "mean": 0.9802,
+      "std": 0.0141
     },
     "recall": {
-      "mean": 0.7854,
-      "std": 0.0325
+      "mean": 0.7813,
+      "std": 0.0841
     },
     "f1": {
-      "mean": 0.8795,
-      "std": 0.0203
+      "mean": 0.8669,
+      "std": 0.049
+    },
+    "fpr": {
+      "mean": 0.1037,
+      "std": 0.0818
     }
   },
   "mariagrandury/roberta-base-finetuned-sms-spam-detection": {
     "accuracy": {
-      "mean": 0.7684,
-      "std": 0.0481
+      "mean": 0.8148,
+      "std": 0.0185
     },
     "precision": {
-      "mean": 0.9406,
-      "std": 0.0633
+      "mean": 0.934,
+      "std": 0.0125
     },
     "recall": {
-      "mean": 0.7851,
-      "std": 0.057
+      "mean": 0.8321,
+      "std": 0.0053
     },
     "f1": {
-      "mean": 0.8529,
-      "std": 0.0364
+      "mean": 0.8801,
+      "std": 0.0082
+    },
+    "fpr": {
+      "mean": 0.2957,
+      "std": 0.104
     }
   }
 }

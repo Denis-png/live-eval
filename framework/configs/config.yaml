@@ -31,7 +31,7 @@ generation:
   temperature: 1.0 # CoT 3-step prompt benefits from higher T (Denis: 1.0)
   max_tokens: 1024 # required by Anthropic; ignored by OpenAI-compatible providers
   num_runs: 3 # repeat N times → outputs mean ± std
-  sample_size: 50 # synthetic sentences per run
+  sample_size: 60 # synthetic sentences per run
   timeout: 300 # per-request HTTP timeout in seconds (SDK default: 600)
   max_retries: 1 # SDK retries on 5xx/429 (SDK default: 2)
   request_delay: 10 # seconds to sleep between requests to respect provider TPM limits

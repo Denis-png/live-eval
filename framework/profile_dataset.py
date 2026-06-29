@@ -115,12 +115,19 @@ def _profile_spam(config: dict[str, Any], output: str) -> str:
     output_path = save_profile_json(profile, output)
     labels = profile["label_distribution"]
 
+    signals = profile.get("spam_signals", {})
     print("\nSpam dataset profile summary")
-    print("=" * 28)
+    print("=" * 40)
     print(f"Samples    : {profile['num_samples']}")
     print(f"HAM count  : {labels.get('HAM', 0)}")
     print(f"SPAM count : {labels.get('SPAM', 0)}")
-    print(f"Output     : {output_path}")
+    print()
+    print("Spam signals (fraction of texts per label):")
+    for label, stats in signals.items():
+        print(f"  {label}:")
+        for signal, rate in stats.items():
+            print(f"    {signal:<16}: {rate:.2%}")
+    print(f"\nOutput     : {output_path}")
     return output_path
 
 

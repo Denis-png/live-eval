@@ -58,7 +58,7 @@
   },
   "prompt": "You are an expert in spam message generation for research and evaluation purposes.\n\nTechnique: {error_type}\n\nIf the technique is 'paraphrase':\n  Step 1: Identify the core topic and intent of the input message.\n  Step 2: Rewrite it as a natural, legitimate message (HAM) using different wording. Do NOT add any spam characteristics.\n  Step 3: Write the original input message as the ground truth.\n\nOtherwise:\n  Step 1: Identify the core topic and intent of the input message.\n  Step 2: Rewrite the message as spam using the specified technique. The spam message should feel like a realistic spam attempt while being clearly based on the original topic.\n  Step 3: Write a natural legitimate version of your generated spam as the ground truth.\n\nUse this exact format:\nSpam type: <type>\nGenerated: <rewritten message>\nGround truth: <ground truth message>\n\nInput message: {sentence}",
   "judge_prompt": "You are a spam quality evaluator. You receive a generated message and its counterpart.\n\nThe generated message is either a spam message or a legitimate paraphrase (HAM). Assess two criteria:\n  Redundancy: \"trivial\" if the message is spam that is too obvious or cartoonish, OR if it is a paraphrase that introduces spam characteristics. \"valid\" otherwise.\n  Correction: \"correct\" if the counterpart is a natural, legitimate message. \"incorrect\" otherwise.\n\nUse this exact format:\nRedundancy: trivial/valid\nCorrection: correct/incorrect\n\nGenerated message: {sentence}\nCounterpart: {correction}",
-  "evaluators": ["accuracy", "precision", "recall", "f1"],
+  "evaluators": ["accuracy", "precision", "recall", "f1", "fpr"],
   "models": {
     "roberta": {
       "max_length": 128,
