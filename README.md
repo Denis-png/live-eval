@@ -127,39 +127,28 @@ Set `generation.mode` in the config:
 | Task | forward | inverse |
 |------|:-------:|:-------:|
 | GEC  | ✅ | ✅ (ERRANT-profiled distribution) |
-| Spam | ✅ | ❌ not implemented |
+| Spam | ✅ | ✅ (spam-signal-profiled distribution) |
 
-> `mode: inverse` + `task: spam` will **fail fast** — `SpamTask` has no inverse prompt
-> or error vocabulary, so `load_error_distribution` raises `ValueError`. Adding inverse
-> spam requires an `inverse_prompt` + `error_descriptions` (and ideally a profiler) on
-> the spam task; the generator/pipeline layers already support it.
+> Inverse spam injects an empirically-profiled mix of spam **signals** (link,
+> money, ALL-CAPS, urgency, keywords) into legitimate (HAM) messages, and also
+> scores each clean source as a HAM negative so precision/recall/f1/fpr stay
+> meaningful. Set `generation.inverse.source_field: "incorrect"` (the HAM text).
 
 ---
 
 ## Comparing Generation Models (same benchmark sample)
 
-A single invocation runs **one** generation model `num_runs` times over one fixed sample
-and reports mean ± std. To compare **different generation models on the same sample**,
-run the pipeline once per model. Because sampling is deterministic (first N rows), each
-invocation evaluates the identical benchmark sample.
-
-**Important:** `output.results_path` is overwritten on every invocation. Give each model
-its own output file (or config) so results are not clobbered:
+Use the multi-model driver to run several generation models over the identical
+sample in one command:
 
     cd live-eval
+    # add a `generation_models:` list to your config (see config.yaml comments)
+    python -m scripts.compare_models --config framework/configs/config.yaml
 
-    # Model A
-    python -m framework.main --task gec --provider anthropic \
-        --model claude-haiku-4-5 --runs 3 --sample-size 20 \
-        --config framework/configs/config.yaml       # writes output.results_path from YAML
-
-    # Model B — use a separate config whose output.results_path differs
-    python -m framework.main --config framework/configs/config.gpt.yaml
-
-Keep `task`, `dataset.*`, `generation.mode`, and both `sample_size` values identical
-across the invocations so every model is scored on the same sentences. The per-run
-synthetic data for each model is archived under
-`output.generated_data_dir/<task>/<session>_run<N>.json` for later inspection.
+It writes one `results/<task>_<mode>_<provider>_<model>.json` per model, a combined
+`results/comparison_<task>_<mode>.json`, and prints a comparison table. The same
+benchmark sample is guaranteed by deterministic first-N sampling, so keep
+`dataset.*`, `generation.mode`, and both `sample_size` values constant across entries.
 
 ---
 
@@ -192,7 +181,7 @@ The synthetic data itself is archived per run under
 ## Current Tasks
 
 GEC (Grammatical Error Correction) — implemented (forward + inverse)
-Spam Detection — implemented (forward only)
+Spam Detection — implemented (forward + inverse)
 Hate Speech Detection — planned
 Sentiment Analysis — planned
 
