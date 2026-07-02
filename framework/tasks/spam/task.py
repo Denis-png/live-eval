@@ -99,6 +99,21 @@ class SpamTask(BaseTask):
             return "HAM"
         return "SPAM"
 
+    def get_eval_samples(self, synthetic: list[dict]) -> list[dict]:
+        """Score the corrupted message, and for genuine SPAM items also score the
+        clean source as a HAM negative so precision/recall/f1/fpr stay meaningful."""
+        out = []
+        for item in synthetic:
+            label = self.get_label(item)
+            out.append({**item, "text": item["corrupted"], "label": label})
+            original = item.get("original")
+            if label == "SPAM" and original and original.strip() != item["corrupted"].strip():
+                out.append({
+                    "text": original, "label": "HAM", "error_type": "clean",
+                    "corrupted": original, "original": original,
+                })
+        return out
+
     def parse_row(self, row: dict) -> dict | None:
         # Skip spam rows — the generator needs legitimate (HAM) messages as input.
         if str(row.get("label", "")).lower() in ("spam", "1"):

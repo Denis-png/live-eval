@@ -306,21 +306,18 @@ def run_pipeline(config: dict) -> dict:
         synthetic = _run_generation(
             generator, task, config, real_data, error_dist, judge_call
         )
-        corrupted_sentences = [item["corrupted"] for item in synthetic]
-
         # ── EVALUATE ──────────────────────────────────────
+        eval_samples = task.get_eval_samples(synthetic)
+        texts = [s["text"] for s in eval_samples]
+
         run_scores = {}
         for model_config in config["task_models"]:
             model       = task.get_model(model_config)
-            predictions = model.predict(corrupted_sentences)
-            results = []
-            for item, pred in zip(synthetic, predictions):
-                result = {**item, "prediction": pred}
-                # Let the task inject a ground-truth label if needed (e.g. for classification tasks).
-                label = task.get_label(result)
-                if label is not None:
-                    result["label"] = label
-                results.append(result)
+            predictions = model.predict(texts)
+            results = [
+                {**s, "prediction": pred}
+                for s, pred in zip(eval_samples, predictions)
+            ]
             run_scores[model_config["name"]] = {
                 name: evaluator_fns[name](results) for name in task.get_evaluators()
             }

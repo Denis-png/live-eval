@@ -97,6 +97,20 @@ class BaseTask(ABC):
         """
         return None
 
+    def get_eval_samples(self, synthetic: list[dict]) -> list[dict]:
+        """Expand generated items into rows to classify/score. Each row carries a
+        "text" field (the model input). Default: one row per item scoring the
+        corrupted text, with the ground-truth "label" from get_label when present.
+        Classification tasks may override to add negatives (see SpamTask)."""
+        out = []
+        for item in synthetic:
+            sample = {**item, "text": item["corrupted"]}
+            label = self.get_label(sample)
+            if label is not None:
+                sample["label"] = label
+            out.append(sample)
+        return out
+
     @abstractmethod
     def parse_row(self, row: dict) -> dict | None:
         """
