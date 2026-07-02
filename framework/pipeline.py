@@ -249,6 +249,13 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call):
 
     if mode == "inverse":
         inverse_cfg = gen_cfg.get("inverse") or {}
+        source_field = inverse_cfg.get("source_field", "correct")
+        if real_data and not any(item.get(source_field) for item in real_data):
+            raise ValueError(
+                f"Inverse mode: source_field '{source_field}' is missing or empty on "
+                f"all {len(real_data)} real samples. Set generation.inverse.source_field "
+                f"to a field the task produces (spam: 'incorrect', gec: 'correct')."
+            )
         return generator.generate_inverse(
             real_samples=real_data,
             inverse_prompt=task.get_inverse_prompt(),
@@ -256,7 +263,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call):
             type_dist=error_dist["type_dist"],
             count_dist=error_dist["count_dist"],
             sample_size=sample_size,
-            source_field=inverse_cfg.get("source_field", "correct"),
+            source_field=source_field,
             judge_prompt=task.get_inverse_judge_prompt() if judge_call else None,
             judge_call=judge_call,
         )

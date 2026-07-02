@@ -5,7 +5,6 @@ unmodified pipeline once per entry, writing a per-model results file, then a
 combined comparison file and a printed table. The same-sample guarantee comes
 from the framework's deterministic first-N sampling (dataset.* held constant).
 """
-import argparse
 import copy
 import json
 import os
@@ -14,7 +13,6 @@ import re
 import yaml
 
 from framework.main import (
-    DEFAULT_CONFIG,
     _expand_env_vars,
     _load_dotenv,
     _resolve_api_keys,

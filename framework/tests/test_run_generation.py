@@ -56,6 +56,25 @@ class RunGenerationTests(unittest.TestCase):
         out = _run_generation(gen, FakeTask(), config, _REAL, None, judge_call=None)
         self.assertEqual(len(out), 1)
 
+    def test_inverse_raises_when_source_field_missing_from_all_samples(self):
+        """_run_generation must raise ValueError if the configured source_field is
+        absent from every real sample — prevents silent zero-output runs (e.g.
+        mode=inverse, task=spam, but source_field left at the 'correct' default)."""
+        gen = FakeGenerator([])  # generate_inverse should never be reached
+        config = {
+            "generation": {
+                "mode": "inverse",
+                "sample_size": 5,
+                "inverse": {"source_field": "correct"},
+            }
+        }
+        # Only 'incorrect' key present — no 'correct' key on any sample
+        data_without_correct = [{"incorrect": "x y z"}]
+        with self.assertRaises(ValueError) as ctx:
+            _run_generation(gen, FakeTask(), config, data_without_correct, _DIST, judge_call=None)
+        self.assertIn("source_field", str(ctx.exception))
+        self.assertIn("correct", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -31,11 +31,11 @@ so it can be inspected later.
             tasks/
                 gec.json         - GEC task config (error types, prompts, evaluators, model params)
             tasks/
-                spam.json        - Spam task config (forward only — no inverse keys)
+                spam.json        - Spam task config (forward + inverse)
         tasks/
             base_task.py         - abstract task template
             gec/task.py          - Grammatical Error Correction task (forward + inverse)
-            spam/task.py         - Spam Detection task (forward only)
+            spam/task.py         - Spam Detection task (forward + inverse)
         generators/              - LLM that creates synthetic corrupted sentences
             base_generator.py    - shared generate()/generate_inverse() loop
             openai_generator.py  - OpenAI / Groq / OpenRouter / Mistral (OpenAI-compatible)
@@ -43,6 +43,7 @@ so it can be inspected later.
             google_generator.py
         profiling/               - empirical error-distribution profilers (inverse mode)
             errant_distribution.py  - ERRANT-based GEC error distribution
+            spam_distribution.py  - spam-signal-based spam error distribution
         models/gec/              - GEC models under evaluation
             seq2seq.py (t5/gec_v1/coedit), claude.py
         models/spam/             - Spam models under evaluation
@@ -122,7 +123,7 @@ Set `generation.mode` in the config:
   corrupted variant, choosing an error type itself. Supported by **GEC and Spam**.
 - **`inverse`** — the generator corrupts a known-clean source (`inverse.source_field`)
   according to an **empirical error distribution** profiled from the real data, so the
-  injected error mix matches the benchmark. Supported by **GEC only** (see matrix below).
+  injected error mix matches the benchmark. Supported by **GEC and Spam** (see matrix below).
 
 | Task | forward | inverse |
 |------|:-------:|:-------:|
