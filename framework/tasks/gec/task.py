@@ -89,5 +89,14 @@ class GECTask(BaseTask):
             return None
         return {"incorrect": incorrect, "correct": correct}
 
+    def profile_error_distribution(self, real_data, count_max=5, annotator=None):
+        """Empirical inverse-mode distribution: ERRANT-annotate real
+        incorrect->correct pairs, keeping only this task's supported edit types."""
+        from framework.profiling.errant_distribution import profile_error_distribution
+        supported = set(self.get_error_descriptions().keys())
+        return profile_error_distribution(
+            real_data, supported, count_max=count_max, annotator=annotator
+        )
+
     def get_task_name(self) -> str:
         return "gec"
