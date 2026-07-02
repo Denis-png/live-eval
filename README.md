@@ -30,18 +30,28 @@ so it can be inspected later.
             config.yaml          - dataset, generator, task models, output
             tasks/
                 gec.json         - GEC task config (error types, prompts, evaluators, model params)
+            tasks/
+                spam.json        - Spam task config (forward + inverse)
         tasks/
             base_task.py         - abstract task template
-            gec/task.py          - Grammatical Error Correction task
+            gec/task.py          - Grammatical Error Correction task (forward + inverse)
+            spam/task.py         - Spam Detection task (forward + inverse)
         generators/              - LLM that creates synthetic corrupted sentences
+            base_generator.py    - shared generate()/generate_inverse() loop
             openai_generator.py  - OpenAI / Groq / OpenRouter / Mistral (OpenAI-compatible)
-            anthropic_generator.py
+            anthropic_generator.py  - Anthropic / MiniMax (Anthropic-compatible)
             google_generator.py
-        models/gec/              - models under evaluation
-            t5.py, gec_v1.py, coedit.py, claude.py
+        profiling/               - empirical error-distribution profilers (inverse mode)
+            errant_distribution.py  - ERRANT-based GEC error distribution
+            spam_distribution.py  - spam-signal-based spam error distribution
+        models/gec/              - GEC models under evaluation
+            seq2seq.py (t5/gec_v1/coedit), claude.py
+        models/spam/             - Spam models under evaluation
+            roberta.py, bert_tiny.py
         evaluators/              - scoring functions applied to model predictions
             gleu.py              - GLEU score
             gec/                 - errant, errant_dist, cola, correction_extent, n_edits
+            classification/      - accuracy, precision, recall, f1, fpr (spam)
         data/
             generated/           - archived synthetic data, one JSON per run (gitignored)
 
@@ -60,12 +70,21 @@ so it can be inspected later.
    you evaluate Claude as a task model).
 
 3. Edit `framework/configs/config.yaml`:
-   - `dataset`         — HuggingFace dataset name + split + sample size
-   - `generation`      — generator provider, model, temperature, num_runs, sample_size
-   - `task.name`       — `gec` (only task currently implemented)
+   - `dataset`         — HuggingFace dataset name + split + `sample_size` (size of the
+                         pool loaded from the benchmark)
+   - `generation`      — `mode` (forward | inverse), generator provider, model,
+                         temperature, `num_runs`, `sample_size` (samples actually
+                         used per run; must be ≤ `dataset.sample_size`)
+   - `task.name`       — `gec` or `spam`
    - `task_models`     — list of models to evaluate
-   - `output.results_path` — where to write results JSON
+   - `output.results_path` — where to write results JSON (overwritten each invocation —
+                         see "Comparing generation models" below)
    - `output.generated_data_dir` — where each run's synthetic data is archived
+
+   > Sampling is deterministic: `load_real_data` takes the first `dataset.sample_size`
+   > matching rows (no shuffle/seed). As long as `dataset.name/split/sample_size` are
+   > unchanged, every invocation sees the **same benchmark sample** — which is what makes
+   > cross-model comparison fair.
 
 ---
 
@@ -89,6 +108,48 @@ Use `--config <path>` to point at a different YAML.
 
 > Note: `python framework/main.py` will NOT work — `framework` must be
 > importable as a package, so use `python -m framework.main`.
+
+> CLI flags currently cover `--task/--provider/--model/--runs/--sample-size`
+> only. There is **no** flag for `output.results_path`, `generation.mode`, or the
+> judge — set those in the YAML (or a per-run `--config`).
+
+---
+
+## Generation Modes
+
+Set `generation.mode` in the config:
+
+- **`forward`** (default) — the generator rewrites each source sentence into a
+  corrupted variant, choosing an error type itself. Supported by **GEC and Spam**.
+- **`inverse`** — the generator corrupts a known-clean source (`inverse.source_field`)
+  according to an **empirical error distribution** profiled from the real data, so the
+  injected error mix matches the benchmark. Supported by **GEC and Spam** (see matrix below).
+
+| Task | forward | inverse |
+|------|:-------:|:-------:|
+| GEC  | ✅ | ✅ (ERRANT-profiled distribution) |
+| Spam | ✅ | ✅ (spam-signal-profiled distribution) |
+
+> Inverse spam injects an empirically-profiled mix of spam **signals** (link,
+> money, ALL-CAPS, urgency, keywords) into legitimate (HAM) messages, and also
+> scores each clean source as a HAM negative so precision/recall/f1/fpr stay
+> meaningful. Set `generation.inverse.source_field: "incorrect"` (the HAM text).
+
+---
+
+## Comparing Generation Models (same benchmark sample)
+
+Use the multi-model driver to run several generation models over the identical
+sample in one command:
+
+    cd live-eval
+    # add a `generation_models:` list to your config (see config.yaml comments)
+    python -m scripts.compare_models --config framework/configs/config.yaml
+
+It writes one `results/<task>_<mode>_<provider>_<model>.json` per model, a combined
+`results/comparison_<task>_<mode>.json`, and prints a comparison table. The same
+benchmark sample is guaranteed by deterministic first-N sampling, so keep
+`dataset.*`, `generation.mode`, and both `sample_size` values constant across entries.
 
 ---
 
@@ -120,9 +181,9 @@ The synthetic data itself is archived per run under
 
 ## Current Tasks
 
-GEC (Grammatical Error Correction) — implemented
+GEC (Grammatical Error Correction) — implemented (forward + inverse)
+Spam Detection — implemented (forward + inverse)
 Hate Speech Detection — planned
-Spam Detection — planned
 Sentiment Analysis — planned
 
 ## Current Evaluators (GEC)
@@ -133,3 +194,9 @@ errant_dist — distribution of edit categories
 CoLA — linguistic acceptability of the prediction
 correction_extent — how much of the input was edited
 n_edits — raw edit count
+
+## Current Evaluators (Spam)
+
+accuracy — overall correct classification rate
+precision / recall / f1 — computed with SPAM as the positive label
+fpr — false-positive rate (legitimate messages flagged as spam)

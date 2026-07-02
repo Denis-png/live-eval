@@ -2,6 +2,10 @@ import json
 import os
 import functools
 from ..base_task import BaseTask
+from framework.profiling.spam_profiler import (
+    DEFAULT_SPAM_DATASET,
+    DEFAULT_SPAM_SPLIT,
+)
 
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "configs", "tasks", "spam.json")
 
@@ -24,6 +28,39 @@ class SpamTask(BaseTask):
 
     def get_judge_prompt(self) -> str | None:
         return self._config.get("judge_prompt")
+
+    def get_inverse_prompt(self) -> str | None:
+        return self._config.get("inverse_prompt")
+
+    def get_inverse_judge_prompt(self) -> str | None:
+        return self._config.get("inverse_judge_prompt")
+
+    def get_error_descriptions(self) -> dict[str, str]:
+        return self._config.get("inverse_error_descriptions", {})
+
+    def profile_error_distribution(self, real_data, count_max=5, config=None):
+        """Empirical inverse-mode distribution over spam signals. real_data is
+        HAM-only (parse_row drops SPAM), so load the SPAM subset separately via
+        the spam profiler and count which signals fire per SPAM message."""
+        from framework.profiling import spam_profiler
+        from framework.profiling.spam_distribution import profile_spam_distribution
+
+        cfg = config or {}
+        ds = cfg.get("dataset") or {}
+        inv = ((cfg.get("generation") or {}).get("inverse") or {})
+        hf_token = ds.get("hf_token") or (cfg.get("api_keys") or {}).get("huggingface")
+
+        kwargs = {
+            "sample_size": inv.get("profile_size", 200),
+            "streaming": ds.get("streaming", False),
+            "hf_token": hf_token,
+            "dataset_name": ds.get("name") or DEFAULT_SPAM_DATASET,
+            "split": ds.get("split") or DEFAULT_SPAM_SPLIT,
+        }
+        rows = spam_profiler.load_spam_rows(**kwargs)
+        spam_rows = [r for r in rows if r["label"] == "SPAM"]
+        supported = set(self.get_error_descriptions().keys())
+        return profile_spam_distribution(spam_rows, supported, count_max=count_max)
 
     def get_evaluators(self) -> list[str]:
         return self._config["evaluators"]
@@ -61,6 +98,21 @@ class SpamTask(BaseTask):
         if result.get("error_type") == "paraphrase":
             return "HAM"
         return "SPAM"
+
+    def get_eval_samples(self, synthetic: list[dict]) -> list[dict]:
+        """Score the corrupted message, and for genuine SPAM items also score the
+        clean source as a HAM negative so precision/recall/f1/fpr stay meaningful."""
+        out = []
+        for item in synthetic:
+            label = self.get_label(item)
+            out.append({**item, "text": item["corrupted"], "label": label})
+            original = item.get("original")
+            if label == "SPAM" and original and original.strip() != item["corrupted"].strip():
+                out.append({
+                    "text": original, "label": "HAM", "error_type": "clean",
+                    "corrupted": original, "original": original,
+                })
+        return out
 
     def parse_row(self, row: dict) -> dict | None:
         # Skip spam rows — the generator needs legitimate (HAM) messages as input.

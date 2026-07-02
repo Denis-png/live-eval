@@ -73,10 +73,11 @@ class BaseTask(ABC):
         return {}
 
     def profile_error_distribution(self, real_data: list[dict],
-                                   count_max: int = 5) -> dict | None:
-        """Empirical inverse-mode error distribution derived from real_data,
-        keyed on get_error_descriptions() vocabulary. Return None to fall back
-        to the placeholder distribution (default: no empirical profiler)."""
+                                   count_max: int = 5, config: dict | None = None) -> dict | None:
+        """Empirical inverse-mode error distribution derived from real_data (and
+        optionally the run `config`, e.g. to load an auxiliary subset), keyed on
+        get_error_descriptions() vocabulary. Return None to fall back to the
+        placeholder distribution (default: no empirical profiler)."""
         return None
 
     @abstractmethod
@@ -95,6 +96,20 @@ class BaseTask(ABC):
         Return None for tasks that don't require a label (e.g. GEC).
         """
         return None
+
+    def get_eval_samples(self, synthetic: list[dict]) -> list[dict]:
+        """Expand generated items into rows to classify/score. Each row carries a
+        "text" field (the model input). Default: one row per item scoring the
+        corrupted text, with the ground-truth "label" from get_label when present.
+        Classification tasks may override to add negatives (see SpamTask)."""
+        out = []
+        for item in synthetic:
+            sample = {**item, "text": item["corrupted"]}
+            label = self.get_label(sample)
+            if label is not None:
+                sample["label"] = label
+            out.append(sample)
+        return out
 
     @abstractmethod
     def parse_row(self, row: dict) -> dict | None:

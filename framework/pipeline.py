@@ -161,7 +161,7 @@ def load_error_distribution(config: dict, real_data: list[dict], task) -> dict:
     )
     count_max = pd_cfg.get("count_max", 5)
 
-    empirical = task.profile_error_distribution(real_data, count_max=count_max)
+    empirical = task.profile_error_distribution(real_data, count_max=count_max, config=config)
     if empirical:
         return empirical
 
@@ -249,6 +249,13 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call):
 
     if mode == "inverse":
         inverse_cfg = gen_cfg.get("inverse") or {}
+        source_field = inverse_cfg.get("source_field", "correct")
+        if real_data and not any(item.get(source_field) for item in real_data):
+            raise ValueError(
+                f"Inverse mode: source_field '{source_field}' is missing or empty on "
+                f"all {len(real_data)} real samples. Set generation.inverse.source_field "
+                f"to a field the task produces (spam: 'incorrect', gec: 'correct')."
+            )
         return generator.generate_inverse(
             real_samples=real_data,
             inverse_prompt=task.get_inverse_prompt(),
@@ -256,7 +263,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call):
             type_dist=error_dist["type_dist"],
             count_dist=error_dist["count_dist"],
             sample_size=sample_size,
-            source_field=inverse_cfg.get("source_field", "correct"),
+            source_field=source_field,
             judge_prompt=task.get_inverse_judge_prompt() if judge_call else None,
             judge_call=judge_call,
         )
@@ -306,21 +313,18 @@ def run_pipeline(config: dict) -> dict:
         synthetic = _run_generation(
             generator, task, config, real_data, error_dist, judge_call
         )
-        corrupted_sentences = [item["corrupted"] for item in synthetic]
-
         # ── EVALUATE ──────────────────────────────────────
+        eval_samples = task.get_eval_samples(synthetic)
+        texts = [s["text"] for s in eval_samples]
+
         run_scores = {}
         for model_config in config["task_models"]:
             model       = task.get_model(model_config)
-            predictions = model.predict(corrupted_sentences)
-            results = []
-            for item, pred in zip(synthetic, predictions):
-                result = {**item, "prediction": pred}
-                # Let the task inject a ground-truth label if needed (e.g. for classification tasks).
-                label = task.get_label(result)
-                if label is not None:
-                    result["label"] = label
-                results.append(result)
+            predictions = model.predict(texts)
+            results = [
+                {**s, "prediction": pred}
+                for s, pred in zip(eval_samples, predictions)
+            ]
             run_scores[model_config["name"]] = {
                 name: evaluator_fns[name](results) for name in task.get_evaluators()
             }
