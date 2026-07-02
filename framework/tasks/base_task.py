@@ -72,6 +72,13 @@ class BaseTask(ABC):
         Return {} if the task does not support inverse generation."""
         return {}
 
+    def profile_error_distribution(self, real_data: list[dict],
+                                   count_max: int = 5) -> dict | None:
+        """Empirical inverse-mode error distribution derived from real_data,
+        keyed on get_error_descriptions() vocabulary. Return None to fall back
+        to the placeholder distribution (default: no empirical profiler)."""
+        return None
+
     @abstractmethod
     def get_task_name(self) -> str:
         """

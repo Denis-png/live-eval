@@ -151,13 +151,20 @@ def _poisson_pmf(mean: float, n_min: int = 1, n_max: int = 5) -> dict[int, float
 def load_error_distribution(config: dict, real_data: list[dict], task) -> dict:
     """Return {"type_dist": {key: prob}, "count_dist": {n: prob}} for inverse mode.
 
-    PLACEHOLDER: uniform type distribution over the task's category vocabulary and
-    a Poisson errors-per-sentence distribution. `real_data` is unused for now —
-    kept in the signature for the future preprocessing module."""
+    Delegates to task.profile_error_distribution to derive an empirical
+    distribution from real_data. Falls back to a uniform type distribution over
+    the task's category vocabulary plus a Poisson errors-per-sentence
+    distribution when the task has no empirical profiler or too little data."""
     pd_cfg = (
         ((config.get("generation") or {}).get("inverse") or {})
         .get("placeholder_distribution") or {}
     )
+    count_max = pd_cfg.get("count_max", 5)
+
+    empirical = task.profile_error_distribution(real_data, count_max=count_max)
+    if empirical:
+        return empirical
+
     keys = list(task.get_error_descriptions().keys())
     if not keys:
         raise ValueError(
@@ -167,7 +174,7 @@ def load_error_distribution(config: dict, real_data: list[dict], task) -> dict:
     count_dist = _poisson_pmf(
         mean=pd_cfg.get("count_mean", 1.5),
         n_min=1,
-        n_max=pd_cfg.get("count_max", 5),
+        n_max=count_max,
     )
     return {"type_dist": type_dist, "count_dist": count_dist}
 
