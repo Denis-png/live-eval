@@ -24,3 +24,14 @@ class ProfileSpamDistributionTests(unittest.TestCase):
     def test_skips_rows_with_no_signal_and_clamps_count(self):
         rows = [{"text": "just a normal message here"}] * 10  # no signals
         self.assertIsNone(profile_spam_distribution(rows, _CATS))
+
+    def test_clamps_signals_per_row_to_count_max(self):
+        # Text fires multiple signals (5 total): phishing_link, money_promise,
+        # excessive_caps, urgency, spam_keywords. With count_max=2, clamping occurs.
+        text = "WIN $500 FREE money click http://x.com NOW!"
+        rows = [{"text": text}] * 6  # 6 rows to exceed min_rows=5
+        dist = profile_spam_distribution(rows, _CATS, count_max=2)
+        # Verify clamping: max key in count_dist must be <= count_max
+        self.assertLessEqual(max(dist["count_dist"].keys()), 2)
+        # Verify count_dist sums to ~1.0 (probability distribution)
+        self.assertAlmostEqual(sum(dist["count_dist"].values()), 1.0)
