@@ -1,0 +1,68 @@
+{
+  "error_types": [
+    "urgency_phrase",
+    "fake_offer",
+    "phishing_link",
+    "money_promise",
+    "lottery_scam",
+    "account_verification_scam",
+    "excessive_capitalization",
+    "suspicious_sender_claim",
+    "paraphrase",
+    "paraphrase"
+  ],
+  "error_type_examples": {
+    "urgency_phrase": "Act now! This offer expires in 24 hours — don't miss out!",
+    "fake_offer": "Congratulations! You have been selected for a FREE gift. Claim it today!",
+    "phishing_link": "Your account has been compromised. Click here immediately to secure it: http://secure-login-now.com",
+    "money_promise": "We will transfer $5,000,000 to your bank account. All we need is your details.",
+    "lottery_scam": "You have won the international lottery! Your winning ticket number is 4921-X.",
+    "account_verification_scam": "Your PayPal account will be suspended unless you verify your identity within 12 hours.",
+    "excessive_capitalization": "FREE MONEY WAITING FOR YOU!!! CLICK NOW TO CLAIM YOUR PRIZE!!!",
+    "suspicious_sender_claim": "I am the attorney of a deceased billionaire who has left you an inheritance of $2.3 million.",
+    "paraphrase": "Hey, just checking if we're still on for the meeting tomorrow at 3pm."
+  },
+  "few_shot_examples": {
+    "urgency_phrase": [
+      {"ham": "We are having a sale this weekend at our store.", "spam": "URGENT: Sale ends TONIGHT — rush to our store before it's too late or lose the deal FOREVER!"},
+      {"ham": "Our new product will be available next month.", "spam": "Last chance! Our product sells out in hours — order NOW before it's gone forever!"}
+    ],
+    "fake_offer": [
+      {"ham": "Thank you for being a loyal customer.", "spam": "Congratulations! As our valued customer, you have been randomly selected to receive a FREE iPhone. Claim it now!"},
+      {"ham": "We appreciate your feedback on our service.", "spam": "You have been chosen! Submit your feedback today and receive a FREE $500 gift card instantly!"}
+    ],
+    "phishing_link": [
+      {"ham": "Please log in to your account to check your recent orders.", "spam": "Your account has been locked due to suspicious activity. Restore access immediately: http://account-restore-secure.com/login"},
+      {"ham": "We have updated our privacy policy.", "spam": "Action required: Your account will be deleted unless you confirm your details here: http://privacy-update-required.net"}
+    ],
+    "money_promise": [
+      {"ham": "We would like to discuss a business partnership with you.", "spam": "I represent a group of investors who wish to transfer $8,500,000 to a trusted partner. You will receive 30% for your assistance."},
+      {"ham": "Our company is looking for new investment opportunities.", "spam": "A dying businessman has left $12,000,000 unclaimed. As his distant relative, you are entitled to the full sum. Contact us immediately."}
+    ],
+    "lottery_scam": [
+      {"ham": "Thank you for participating in our customer survey.", "spam": "Dear participant, your survey entry has won you the grand prize of $250,000 in the Global Customer Lottery. Claim now!"},
+      {"ham": "We are glad you attended our annual event.", "spam": "Your attendance at our event has entered you into a lucky draw. You have WON $50,000! Reply to collect your winnings."}
+    ],
+    "account_verification_scam": [
+      {"ham": "We wanted to let you know about updates to your account settings.", "spam": "ALERT: Your bank account has been flagged for unusual activity. Verify your identity within 6 hours or your account will be permanently closed."},
+      {"ham": "Please review the terms and conditions of your subscription.", "spam": "Your Netflix subscription will be cancelled due to a billing issue. Update your payment details immediately to avoid interruption: http://netflix-billing-fix.com"}
+    ],
+    "excessive_capitalization": [
+      {"ham": "We have a new range of products available in our online shop.", "spam": "WE HAVE THE BEST PRODUCTS EVER!!! BUY NOW AND GET 90% OFF!!! LIMITED TIME ONLY!!! DON'T MISS THIS!!!"},
+      {"ham": "Join our newsletter to stay updated on our latest news.", "spam": "JOIN NOW!!! GET FREE MONEY EVERY MONTH!!! THOUSANDS ALREADY EARNING!!! SIGN UP TODAY!!!"}
+    ],
+    "suspicious_sender_claim": [
+      {"ham": "I am writing to introduce our consulting services to your company.", "spam": "I am the personal secretary of the late Dr. James Williams, a former oil tycoon who passed away leaving $4.2 million unclaimed. I need your help to transfer this sum."},
+      {"ham": "We are reaching out regarding a potential collaboration opportunity.", "spam": "I am a senior official at the Central Bank of Nigeria. We have $15 million frozen in an account and require a foreign partner to release the funds. You will receive 40%."}
+    ]
+  },
+  "prompt": "You are an expert in spam message generation for research and evaluation purposes.\n\nTechnique: {error_type}\n\nIf the technique is 'paraphrase':\n  Rewrite the input as a natural, legitimate message (HAM) using different wording. Do NOT add any spam characteristics. The ground truth is the original input message.\n\nOtherwise:\n  Rewrite the input as spam using the specified technique. The ground truth is a natural legitimate version of the generated spam.\n\nAlways respond in this exact format (no extra text, no steps, no explanations):\nSpam type: <type>\nGenerated: <rewritten message>\nGround truth: <ground truth message>\n\nExample for paraphrase:\nSpam type: paraphrase\nGenerated: Hey, just checking if we are still on for the meeting tomorrow at 3pm.\nGround truth: Hi, are we still meeting tomorrow at 3pm?\n\nInput message: {sentence}",
+  "judge_prompt": "You are a spam quality evaluator. You receive a generated message and its counterpart.\n\nThe generated message is either a spam message or a legitimate paraphrase (HAM). Assess two criteria:\n  Redundancy: \"trivial\" if the message is spam that is too obvious or cartoonish, OR if it is a paraphrase that introduces spam characteristics. \"valid\" otherwise.\n  Correction: \"correct\" if the counterpart is a natural, legitimate message. \"incorrect\" otherwise.\n\nUse this exact format:\nRedundancy: trivial/valid\nCorrection: correct/incorrect\n\nGenerated message: {sentence}\nCounterpart: {correction}",
+  "evaluators": ["accuracy", "precision", "recall", "f1", "fpr"],
+  "models": {
+    "roberta": {
+      "max_length": 128,
+      "label_map": {"LABEL_0": "HAM", "LABEL_1": "SPAM"}
+    }
+  }
+}

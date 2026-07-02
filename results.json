@@ -1,140 +1,46 @@
 {
-  "vennify/t5-base-grammar-correction": {
-    "gleu": {
-      "mean": 0.7584,
-      "std": 0.0325
+  "mshenoda/roberta-spam": {
+    "accuracy": {
+      "mean": 0.7916,
+      "std": 0.0434
     },
-    "errant": {
-      "precision": {
-        "mean": 0.7786,
-        "std": 0.0536
-      },
-      "recall": {
-        "mean": 0.5697,
-        "std": 0.0849
-      },
-      "f0.5": {
-        "mean": 0.7239,
-        "std": 0.0627
-      }
+    "precision": {
+      "mean": 0.9677,
+      "std": 0.0256
     },
-    "errant_dist": {
-      "mean": 0.7519,
-      "std": 0.0392
+    "recall": {
+      "mean": 0.7669,
+      "std": 0.0544
     },
-    "cola": {
-      "input": {
-        "mean": 0.488,
-        "std": 0.0956
-      },
-      "corrected": {
-        "mean": 0.9248,
-        "std": 0.0254
-      },
-      "delta": {
-        "mean": 0.4368,
-        "std": 0.1094
-      }
+    "f1": {
+      "mean": 0.8541,
+      "std": 0.0306
     },
-    "correction_extent": {
-      "mean": 0.4501,
-      "std": 0.0342
-    },
-    "n_edits": {
-      "mean": 2.439,
-      "std": 0.2466
+    "fpr": {
+      "mean": 0.0847,
+      "std": 0.0612
     }
   },
-  "prithivida/grammar_error_correcter_v1": {
-    "gleu": {
-      "mean": 0.8137,
-      "std": 0.0302
+  "mariagrandury/roberta-base-finetuned-sms-spam-detection": {
+    "accuracy": {
+      "mean": 0.8124,
+      "std": 0.0327
     },
-    "errant": {
-      "precision": {
-        "mean": 0.8607,
-        "std": 0.0734
-      },
-      "recall": {
-        "mean": 0.6784,
-        "std": 0.0274
-      },
-      "f0.5": {
-        "mean": 0.8159,
-        "std": 0.0567
-      }
+    "precision": {
+      "mean": 0.9344,
+      "std": 0.0589
     },
-    "errant_dist": {
-      "mean": 0.7996,
-      "std": 0.0138
+    "recall": {
+      "mean": 0.8253,
+      "std": 0.0443
     },
-    "cola": {
-      "input": {
-        "mean": 0.488,
-        "std": 0.0956
-      },
-      "corrected": {
-        "mean": 0.9608,
-        "std": 0.0554
-      },
-      "delta": {
-        "mean": 0.4727,
-        "std": 0.0401
-      }
+    "f1": {
+      "mean": 0.8742,
+      "std": 0.0265
     },
-    "correction_extent": {
-      "mean": 0.4894,
-      "std": 0.0518
-    },
-    "n_edits": {
-      "mean": 2.6983,
-      "std": 0.5216
-    }
-  },
-  "grammarly/coedit-large": {
-    "gleu": {
-      "mean": 0.8357,
-      "std": 0.015
-    },
-    "errant": {
-      "precision": {
-        "mean": 0.8783,
-        "std": 0.018
-      },
-      "recall": {
-        "mean": 0.7172,
-        "std": 0.0318
-      },
-      "f0.5": {
-        "mean": 0.84,
-        "std": 0.0105
-      }
-    },
-    "errant_dist": {
-      "mean": 0.8433,
-      "std": 0.036
-    },
-    "cola": {
-      "input": {
-        "mean": 0.488,
-        "std": 0.0956
-      },
-      "corrected": {
-        "mean": 0.9608,
-        "std": 0.0554
-      },
-      "delta": {
-        "mean": 0.4727,
-        "std": 0.0401
-      }
-    },
-    "correction_extent": {
-      "mean": 0.4781,
-      "std": 0.0413
-    },
-    "n_edits": {
-      "mean": 2.7745,
-      "std": 0.4775
+    "fpr": {
+      "mean": 0.1931,
+      "std": 0.1472
     }
   }
 }

@@ -55,3 +55,23 @@ class BaseTask(ABC):
 
     def get_task_name(self) -> str:
         return self.__class__.__name__
+    
+    def get_label(self, result: dict) -> str | None:
+        """
+        Return the ground-truth label for a result dict.
+        Override in classification tasks to supply the correct label.
+        Return None for tasks that don't require a label (e.g. GEC).
+        """
+        return None
+
+    @abstractmethod
+    def parse_row(self, row: dict) -> dict | None:
+        """
+        Parse a single raw dataset row into a sample dict.
+        Return None to skip the row (e.g. wrong label, missing fields).
+        The pipeline collects non-None results up to sample_size.
+
+        GEC example:  maps to {"incorrect": ..., "correct": ...}
+        Spam example: filters HAM rows, maps to {"incorrect": ...}
+        """
+        pass

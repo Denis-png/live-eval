@@ -67,6 +67,9 @@ def load_task(task_name: str) -> BaseTask:
     if task_name == "gec":
         from framework.tasks.gec.task import GECTask
         return GECTask()
+    elif task_name == "spam":
+        from framework.tasks.spam.task import SpamTask
+        return SpamTask()
     raise ValueError(
         f"Unknown task: '{task_name}'. "
         f"Register it in pipeline.load_task() and add configs/tasks/{task_name}.json."
@@ -83,11 +86,11 @@ def _get_field(row: dict, candidates: list[str]):
     return next((v for v in row.values() if isinstance(v, str) and v), None)
 
 
-def load_real_data(config: dict) -> list[dict]:
+def load_real_data(config: dict, task: BaseTask) -> list[dict]:
     """
-    Load real sentences from a HuggingFace dataset or local file.
+    Load real samples from a HuggingFace dataset or local file.
     Supports streaming (set dataset.streaming: true) for large datasets.
-    Field names are auto-detected with configurable overrides.
+    Field parsing and row filtering is delegated to task.parse_row().
     """
     ds_config = config["dataset"]
     sample_size = ds_config["sample_size"]
@@ -111,18 +114,13 @@ def load_real_data(config: dict) -> list[dict]:
         token=hf_token or None,
     )
 
-    # Configurable field names with schema-detection fallback
-    input_field   = ds_config.get("input_field",   "input")
-    correct_field = ds_config.get("correct_field", "output")
-
     samples = []
-    for i, row in enumerate(dataset):
-        if i >= sample_size:
+    for row in dataset:
+        parsed = task.parse_row(row)
+        if parsed is not None:
+            samples.append(parsed)
+        if len(samples) >= sample_size:
             break
-        incorrect = _get_field(row, [input_field,   "input", "text", "incorrect"])
-        correct   = _get_field(row, [correct_field, "output", "correct", "target"])
-        if incorrect and correct:
-            samples.append({"incorrect": incorrect, "correct": correct})
 
     print(f"Loaded {len(samples)} real samples.")
     return samples
@@ -187,7 +185,7 @@ def save_synthetic_data(synthetic: list[dict], config: dict, task_name: str,
     out_dir = os.path.join(base_dir, task_name)
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"{session_id}_run{run_idx + 1}.json")
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(synthetic, f, indent=2, ensure_ascii=False)
     return path
 
@@ -201,9 +199,8 @@ def run_pipeline(config: dict) -> dict:
     "Trash" means the synthetic data is never reused for evaluation —
     each run is archived under data/generated/ for inspection.
     """
-    real_data = load_real_data(config)
-
     task          = load_task(config["task"]["name"])
+    real_data     = load_real_data(config, task)
     generator     = load_generator(config["generation"])
     judge_call    = _build_judge_call(config, generator)
     evaluator_fns = task.get_evaluator_fns()
@@ -225,6 +222,7 @@ def run_pipeline(config: dict) -> dict:
             sample_size=config["generation"]["sample_size"],
             judge_prompt=task.get_judge_prompt() if judge_call else None,
             judge_call=judge_call,
+            request_delay=config["generation"].get("request_delay", 0.0),
         )
         synthetic = verify(synthetic)
         corrupted_sentences = [item["corrupted"] for item in synthetic]
@@ -234,10 +232,14 @@ def run_pipeline(config: dict) -> dict:
         for model_config in config["task_models"]:
             model       = task.get_model(model_config)
             predictions = model.predict(corrupted_sentences)
-            results = [
-                {**item, "prediction": pred}
-                for item, pred in zip(synthetic, predictions)
-            ]
+            results = []
+            for item, pred in zip(synthetic, predictions):
+                result = {**item, "prediction": pred}
+                # Let the task inject a ground-truth label if needed (e.g. for classification tasks).
+                label = task.get_label(result)
+                if label is not None:
+                    result["label"] = label
+                results.append(result)
             run_scores[model_config["name"]] = {
                 name: evaluator_fns[name](results) for name in task.get_evaluators()
             }
@@ -255,7 +257,7 @@ def run_pipeline(config: dict) -> dict:
     # ── AGGREGATE ─────────────────────────────────────────
     final = aggregate(all_run_scores)
 
-    with open(config["output"]["results_path"], "w") as f:
+    with open(config["output"]["results_path"], "w", encoding="utf-8") as f:
         json.dump(final, f, indent=2)
     print(f"\nResults saved to {config['output']['results_path']}")
 
