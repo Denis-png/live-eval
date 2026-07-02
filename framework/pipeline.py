@@ -161,7 +161,7 @@ def load_error_distribution(config: dict, real_data: list[dict], task) -> dict:
     )
     count_max = pd_cfg.get("count_max", 5)
 
-    empirical = task.profile_error_distribution(real_data, count_max=count_max)
+    empirical = task.profile_error_distribution(real_data, count_max=count_max, config=config)
     if empirical:
         return empirical
 

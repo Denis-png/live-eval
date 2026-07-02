@@ -73,10 +73,11 @@ class BaseTask(ABC):
         return {}
 
     def profile_error_distribution(self, real_data: list[dict],
-                                   count_max: int = 5) -> dict | None:
-        """Empirical inverse-mode error distribution derived from real_data,
-        keyed on get_error_descriptions() vocabulary. Return None to fall back
-        to the placeholder distribution (default: no empirical profiler)."""
+                                   count_max: int = 5, config: dict | None = None) -> dict | None:
+        """Empirical inverse-mode error distribution derived from real_data (and
+        optionally the run `config`, e.g. to load an auxiliary subset), keyed on
+        get_error_descriptions() vocabulary. Return None to fall back to the
+        placeholder distribution (default: no empirical profiler)."""
         return None
 
     @abstractmethod

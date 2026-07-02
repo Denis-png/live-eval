@@ -9,13 +9,13 @@ class FakeTask:
     def get_error_descriptions(self):
         return {"R:VERB:TENSE": "use a wrong verb tense", "M:DET": "omit a required article"}
 
-    def profile_error_distribution(self, real_data, count_max=5):
+    def profile_error_distribution(self, real_data, count_max=5, config=None):
         return None
 
 
 class EmpiricalTask(FakeTask):
     """Returns a canned empirical distribution."""
-    def profile_error_distribution(self, real_data, count_max=5):
+    def profile_error_distribution(self, real_data, count_max=5, config=None):
         return {"type_dist": {"R:VERB:TENSE": 1.0}, "count_dist": {1: 1.0}}
 
 
@@ -68,6 +68,18 @@ class LoadErrorDistributionTests(unittest.TestCase):
 
     def test_base_default_profile_returns_none(self):
         self.assertIsNone(MinimalTask().profile_error_distribution([]))
+
+    def test_forwards_config_to_task_profiler(self):
+        seen = {}
+
+        class RecordingTask(FakeTask):
+            def profile_error_distribution(self, real_data, count_max=5, config=None):
+                seen["config"] = config
+                return {"type_dist": {"R:VERB:TENSE": 1.0}, "count_dist": {1: 1.0}}
+
+        cfg = self._config()
+        load_error_distribution(cfg, [], RecordingTask())
+        self.assertIs(seen["config"], cfg)
 
 
 if __name__ == "__main__":
