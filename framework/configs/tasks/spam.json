@@ -57,6 +57,15 @@
     ]
   },
   "prompt": "You are an expert in spam message generation for research and evaluation purposes.\n\nTechnique: {error_type}\n\nIf the technique is 'paraphrase':\n  Rewrite the input as a natural, legitimate message (HAM) using different wording. Do NOT add any spam characteristics. The ground truth is the original input message.\n\nOtherwise:\n  Rewrite the input as spam using the specified technique. The ground truth is a natural legitimate version of the generated spam.\n\nAlways respond in this exact format (no extra text, no steps, no explanations):\nSpam type: <type>\nGenerated: <rewritten message>\nGround truth: <ground truth message>\n\nExample for paraphrase:\nSpam type: paraphrase\nGenerated: Hey, just checking if we are still on for the meeting tomorrow at 3pm.\nGround truth: Hi, are we still meeting tomorrow at 3pm?\n\nInput message: {sentence}",
+  "inverse_prompt": "You are generating synthetic spam for research and evaluation.\n\nRewrite the legitimate message below into a spam message by applying ALL of these techniques: {error_spec}.\nKeep it realistic and coherent. Respond with exactly one line and nothing else:\nCorrupted: <the spam message>\n\nLegitimate message: {sentence}",
+  "inverse_judge_prompt": "You are a spam quality evaluator. You receive a generated spam message and a legitimate counterpart.\n  Redundancy: \"trivial\" if the spam is too obvious or cartoonish, \"valid\" otherwise.\n  Correction: \"correct\" if the counterpart is a natural legitimate message, \"incorrect\" otherwise.\n\nUse this exact format:\nRedundancy: trivial/valid\nCorrection: correct/incorrect\n\nGenerated message: {sentence}\nCounterpart: {correction}",
+  "inverse_error_descriptions": {
+    "phishing_link": "insert a suspicious link or URL",
+    "money_promise": "promise or demand a specific amount of money",
+    "excessive_caps": "shout using ALL-CAPS words",
+    "urgency": "add exclamation-heavy urgency",
+    "spam_keywords": "work in classic spam keywords such as free, win, prize, or claim"
+  },
   "judge_prompt": "You are a spam quality evaluator. You receive a generated message and its counterpart.\n\nThe generated message is either a spam message or a legitimate paraphrase (HAM). Assess two criteria:\n  Redundancy: \"trivial\" if the message is spam that is too obvious or cartoonish, OR if it is a paraphrase that introduces spam characteristics. \"valid\" otherwise.\n  Correction: \"correct\" if the counterpart is a natural, legitimate message. \"incorrect\" otherwise.\n\nUse this exact format:\nRedundancy: trivial/valid\nCorrection: correct/incorrect\n\nGenerated message: {sentence}\nCounterpart: {correction}",
   "evaluators": ["accuracy", "precision", "recall", "f1", "fpr"],
   "models": {
