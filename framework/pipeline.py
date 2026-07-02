@@ -1,9 +1,9 @@
 import json
+import math
 import os
 from datetime import datetime
 
 import numpy as np
-from datasets import load_dataset
 from framework.tasks.base_task import BaseTask
 
 
@@ -49,15 +49,15 @@ def _build_judge_call(config: dict, main_generator):
     """
     judge_cfg = config.get("judge")
     if judge_cfg is None:
-        return main_generator._call_api
+        return main_generator.call_api
     if judge_cfg.get("enabled", True) is False:
         return None
     if not judge_cfg.get("provider") or not judge_cfg.get("model"):
         print("[WARN] judge block missing provider/model — falling back to main generator.")
-        return main_generator._call_api
+        return main_generator.call_api
     print(f"Judge    : {judge_cfg['provider']} / {judge_cfg['model']}")
     judge_generator = load_generator(judge_cfg)
-    return judge_generator._call_api
+    return judge_generator.call_api
 
 
 # ── Task registry ────────────────────────────────────────────
@@ -79,11 +79,15 @@ def load_task(task_name: str) -> BaseTask:
 # ── Dataset loading ──────────────────────────────────────────
 
 def _get_field(row: dict, candidates: list[str]):
-    """Return the first matching field from a dataset row, with fallback."""
+    """Return the first non-empty candidate field from a dataset row.
+
+    Returns None if no candidate matches — callers skip such rows. We do NOT
+    fall back to "the first string column" because that silently pulls in the
+    wrong field on an unexpected schema and corrupts the whole sample set."""
     for key in candidates:
         if key in row and row[key]:
             return row[key]
-    return next((v for v in row.values() if isinstance(v, str) and v), None)
+    return None
 
 
 def load_real_data(config: dict, task: BaseTask) -> list[dict]:
@@ -100,6 +104,8 @@ def load_real_data(config: dict, task: BaseTask) -> list[dict]:
             "Local dataset loading is not yet implemented. "
             "Contribute it in pipeline.load_real_data()."
         )
+
+    from datasets import load_dataset  # lazy: keeps pipeline importable without HF deps
 
     print(f"Loading dataset: {ds_config['name']} ...")
     hf_token = (
@@ -126,51 +132,86 @@ def load_real_data(config: dict, task: BaseTask) -> list[dict]:
     return samples
 
 
-# ── Verification ─────────────────────────────────────────────
+# ── Error distribution (PLACEHOLDER seam) ────────────────────
+# NOTE: This is a temporary placeholder. The real benchmark-preprocessing
+# module (separate work) will replace load_error_distribution's body to compute
+# the empirical error distribution from `real_data`. The signature is fixed so
+# the generator/task layers never change.
 
-def verify(synthetic_data: list[dict]) -> list[dict]:
-    """Filter out generations where the LLM failed to introduce an error."""
-    verified = []
-    for item in synthetic_data:
-        if not item["corrupted"] or not item["original"]:
-            continue
-        if item["corrupted"].strip() == item["original"].strip():
-            print("[SKIP] Unchanged sentence.")
-            continue
-        if len(item["corrupted"].split()) < 3:
-            print("[SKIP] Too short.")
-            continue
-        verified.append(item)
-    print(f"Verified: {len(verified)}/{len(synthetic_data)} samples passed.")
-    return verified
+def _poisson_pmf(mean: float, n_min: int = 1, n_max: int = 5) -> dict[int, float]:
+    """Normalized Poisson PMF restricted to n in [n_min, n_max]."""
+    raw = {
+        n: (mean ** n) * math.exp(-mean) / math.factorial(n)
+        for n in range(n_min, n_max + 1)
+    }
+    total = sum(raw.values()) or 1.0
+    return {n: p / total for n, p in raw.items()}
+
+
+def load_error_distribution(config: dict, real_data: list[dict], task) -> dict:
+    """Return {"type_dist": {key: prob}, "count_dist": {n: prob}} for inverse mode.
+
+    PLACEHOLDER: uniform type distribution over the task's category vocabulary and
+    a Poisson errors-per-sentence distribution. `real_data` is unused for now —
+    kept in the signature for the future preprocessing module."""
+    pd_cfg = (
+        ((config.get("generation") or {}).get("inverse") or {})
+        .get("placeholder_distribution") or {}
+    )
+    keys = list(task.get_error_descriptions().keys())
+    if not keys:
+        raise ValueError(
+            "Inverse mode requires task.get_error_descriptions() to be non-empty."
+        )
+    type_dist = {k: 1 / len(keys) for k in keys}
+    count_dist = _poisson_pmf(
+        mean=pd_cfg.get("count_mean", 1.5),
+        n_min=1,
+        n_max=pd_cfg.get("count_max", 5),
+    )
+    return {"type_dist": type_dist, "count_dist": count_dist}
 
 
 # ── Aggregation ──────────────────────────────────────────────
+
+def _mean_std(values: list[float]) -> dict:
+    """Mean ± sample std (ddof=1) across runs. Std is 0.0 for a single run
+    rather than NaN. Sample std is the right estimator when treating the runs
+    as a sample of the model's behaviour on unseen data."""
+    std = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
+    return {"mean": round(float(np.mean(values)), 4), "std": round(std, 4)}
+
 
 def aggregate(all_run_scores: list[dict]) -> dict:
     """
     Compute mean ± std across N runs.
     High std reveals model instability on unseen data (see Paulreich 2025, p.8).
+
+    Robust to heterogeneous runs: a model or evaluator that is missing from
+    some runs is aggregated over only the runs where it is present, instead of
+    raising KeyError off run 0.
     """
+    model_names = {m for run in all_run_scores for m in run}
     final = {}
-    for model_name in all_run_scores[0]:
+    for model_name in model_names:
         final[model_name] = {}
-        for evaluator in all_run_scores[0][model_name]:
-            raw = all_run_scores[0][model_name][evaluator]
-            if isinstance(raw, dict):
-                final[model_name][evaluator] = {}
-                for sub in raw:
-                    values = [run[model_name][evaluator][sub] for run in all_run_scores]
-                    final[model_name][evaluator][sub] = {
-                        "mean": round(float(np.mean(values)), 4),
-                        "std":  round(float(np.std(values)),  4),
-                    }
-            else:
-                values = [run[model_name][evaluator] for run in all_run_scores]
+        evaluators = {
+            ev for run in all_run_scores for ev in run.get(model_name, {})
+        }
+        for evaluator in evaluators:
+            present = [
+                run[model_name][evaluator]
+                for run in all_run_scores
+                if model_name in run and evaluator in run[model_name]
+            ]
+            if isinstance(present[0], dict):
+                subkeys = {sub for raw in present for sub in raw}
                 final[model_name][evaluator] = {
-                    "mean": round(float(np.mean(values)), 4),
-                    "std":  round(float(np.std(values)),  4),
+                    sub: _mean_std([raw[sub] for raw in present if sub in raw])
+                    for sub in subkeys
                 }
+            else:
+                final[model_name][evaluator] = _mean_std(present)
     return final
 
 
@@ -190,6 +231,40 @@ def save_synthetic_data(synthetic: list[dict], config: dict, task_name: str,
     return path
 
 
+# ── Generation dispatch ───────────────────────────────────────
+
+def _run_generation(generator, task, config, real_data, error_dist, judge_call):
+    """Dispatch to forward or inverse generation based on generation.mode.
+    Both return the same {"original", "corrupted", "error_type"} contract."""
+    gen_cfg = config["generation"]
+    mode = gen_cfg.get("mode", "forward")
+    sample_size = gen_cfg["sample_size"]
+
+    if mode == "inverse":
+        inverse_cfg = gen_cfg.get("inverse") or {}
+        return generator.generate_inverse(
+            real_samples=real_data,
+            inverse_prompt=task.get_inverse_prompt(),
+            error_descriptions=task.get_error_descriptions(),
+            type_dist=error_dist["type_dist"],
+            count_dist=error_dist["count_dist"],
+            sample_size=sample_size,
+            source_field=inverse_cfg.get("source_field", "correct"),
+            judge_prompt=task.get_inverse_judge_prompt() if judge_call else None,
+            judge_call=judge_call,
+        )
+
+    return generator.generate(
+        real_samples=real_data,
+        error_types=task.get_error_types(),
+        prompt_instruction=task.get_prompt_instruction(),
+        sample_size=sample_size,
+        judge_prompt=task.get_judge_prompt() if judge_call else None,
+        judge_call=judge_call,
+        request_delay=gen_cfg.get("request_delay", 0.0),
+    )
+
+
 # ── Main pipeline ─────────────────────────────────────────────
 
 def run_pipeline(config: dict) -> dict:
@@ -205,6 +280,12 @@ def run_pipeline(config: dict) -> dict:
     judge_call    = _build_judge_call(config, generator)
     evaluator_fns = task.get_evaluator_fns()
 
+    mode = config["generation"].get("mode", "forward")
+    error_dist = (
+        load_error_distribution(config, real_data, task)
+        if mode == "inverse" else None
+    )
+
     all_run_scores = []
     num_runs   = config["generation"]["num_runs"]
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -215,16 +296,9 @@ def run_pipeline(config: dict) -> dict:
         print(f"{'='*50}")
 
         # ── GENERATE ──────────────────────────────────────
-        synthetic = generator.generate(
-            real_samples=real_data,
-            error_types=task.get_error_types(),
-            prompt_instruction=task.get_prompt_instruction(),
-            sample_size=config["generation"]["sample_size"],
-            judge_prompt=task.get_judge_prompt() if judge_call else None,
-            judge_call=judge_call,
-            request_delay=config["generation"].get("request_delay", 0.0),
+        synthetic = _run_generation(
+            generator, task, config, real_data, error_dist, judge_call
         )
-        synthetic = verify(synthetic)
         corrupted_sentences = [item["corrupted"] for item in synthetic]
 
         # ── EVALUATE ──────────────────────────────────────
@@ -257,8 +331,9 @@ def run_pipeline(config: dict) -> dict:
     # ── AGGREGATE ─────────────────────────────────────────
     final = aggregate(all_run_scores)
 
-    with open(config["output"]["results_path"], "w", encoding="utf-8") as f:
+    results_path = (config.get("output") or {}).get("results_path", "results.json")
+    with open(results_path, "w", encoding="utf-8") as f:
         json.dump(final, f, indent=2)
-    print(f"\nResults saved to {config['output']['results_path']}")
+    print(f"\nResults saved to {results_path}")
 
     return final

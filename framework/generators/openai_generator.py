@@ -28,7 +28,7 @@ class OpenAIGenerator(BaseGenerator):
             max_retries=config.get("max_retries", 1), # SDK default is 2
         )
 
-    def _call_api(self, prompt: str) -> str:
+    def call_api(self, prompt: str) -> str:
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],

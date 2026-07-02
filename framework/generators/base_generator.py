@@ -9,6 +9,40 @@ _GENERATED_RE    = re.compile(r"(?im)^\s*Generated:\s*(.+?)\s*$")
 _GROUND_TRUTH_RE = re.compile(r"(?im)^\s*Ground\s*truth:\s*(.+?)\s*$")
 _REDUNDANCY_RE   = re.compile(r"(?im)^\s*Redundancy:\s*(trivial|valid)\b")
 _CORRECTION_RE   = re.compile(r"(?im)^\s*Correction:\s*(correct|incorrect)\b")
+_CORRUPTED_RE = re.compile(r"(?im)^\s*Corrupted:\s*(.+?)\s*$")
+
+
+def _parse_inverse(raw: str) -> str | None:
+    """Pull the corrupted sentence out of an inverse-mode `Corrupted:` response."""
+    m = _CORRUPTED_RE.search(raw)
+    return m.group(1).strip() if m else None
+
+
+def _sample_categories(
+    type_dist: dict[str, float],
+    count_dist: dict[int, float],
+    rng,
+) -> list[str]:
+    """Sample a count n ~ count_dist, then n category keys ~ type_dist.
+
+    Sampling is without replacement when n <= len(type_dist) (distinct
+    categories), and with replacement otherwise (n exceeds available keys).
+    `rng` is an injected random.Random for deterministic tests."""
+    counts = list(count_dist.keys())
+    n = rng.choices(counts, weights=[count_dist[c] for c in counts], k=1)[0]
+
+    keys = list(type_dist.keys())
+    weights = [type_dist[k] for k in keys]
+    if n > len(keys):
+        return rng.choices(keys, weights=weights, k=n)
+
+    chosen: list[str] = []
+    pool, pool_w = keys[:], weights[:]
+    for _ in range(n):
+        idx = rng.choices(range(len(pool)), weights=pool_w, k=1)[0]
+        chosen.append(pool.pop(idx))
+        pool_w.pop(idx)
+    return chosen
 
 
 def _parse_generation(raw: str) -> tuple[str | None, str | None, str | None]:
@@ -47,16 +81,18 @@ class BaseGenerator(ABC):
     ) -> list[dict]:
         """
         Generate synthetic corrupted sentences with optional LLM-as-judge filter.
-        Loop is shared across all providers — only _call_api() differs.
+        Loop is shared across all providers — only call_api() differs.
 
         Args:
             real_samples:        list of {"incorrect": ..., "correct": ...}
-            error_types:         legacy hint list; the model identifies the type itself
+            error_types:         fallback labels used only when the model's CoT
+                                 output omits an "Error type:" line. Also offered
+                                 to templates via the optional {error_type} field.
             prompt_instruction:  CoT template with a {sentence} placeholder
             sample_size:         number of synthetic samples to produce
             judge_prompt:        optional LLM-as-judge template with {sentence}, {correction}
             judge_call:          callable(prompt) → str for the judge. If None and
-                                 judge_prompt is set, falls back to self._call_api.
+                                 judge_prompt is set, falls back to self.call_api.
             request_delay:       seconds to sleep after each successful request to
                                  respect provider TPM rate limits (default: 0).
 
@@ -67,7 +103,7 @@ class BaseGenerator(ABC):
         samples = real_samples[:sample_size]
         judge_dropped = 0
         parse_failed = 0
-        judge_fn = judge_call or self._call_api
+        judge_fn = judge_call or self.call_api
 
         total = len(samples)
         run_start = time.monotonic()
@@ -80,7 +116,7 @@ class BaseGenerator(ABC):
             )
             t0 = time.monotonic()
             try:
-                raw = self._call_api(prompt)
+                raw = self.call_api(prompt)
                 gen_dt = time.monotonic() - t0
                 error_type, corrupted, gold = _parse_generation(raw)
                 if not corrupted or not gold:
@@ -89,6 +125,9 @@ class BaseGenerator(ABC):
                     continue
                 if corrupted.strip() == gold.strip():
                     print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] identical corrupted/gold", flush=True)
+                    continue
+                if len(corrupted.split()) < 3:
+                    print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] too short: {corrupted!r}", flush=True)
                     continue
 
                 judge_dt = 0.0
@@ -127,7 +166,111 @@ class BaseGenerator(ABC):
         )
         return synthetic
 
+    def generate_inverse(
+        self,
+        real_samples: list[dict],
+        inverse_prompt: str,
+        error_descriptions: dict[str, str],
+        type_dist: dict[str, float],
+        count_dist: dict[int, float],
+        sample_size: int,
+        source_field: str = "correct",
+        judge_prompt: str | None = None,
+        judge_call: Callable[[str], str] | None = None,
+        rng=None,
+    ) -> list[dict]:
+        """Inverse generation: corrupt a known-clean source sentence according to
+        an injected error distribution. Task-agnostic — `type_dist` keys are opaque
+        strings rendered to human text via `error_descriptions`.
+
+        Args:
+            real_samples:       list of dicts; `source_field` holds the clean text.
+            inverse_prompt:     template with {sentence} (clean text) and {error_spec}.
+            error_descriptions: category_key -> human phrase, for building {error_spec}.
+            type_dist:          {category_key: prob}, injected (placeholder for now).
+            count_dist:         {n: prob}, errors-per-sentence, injected.
+            sample_size:        number of source sentences to process.
+            source_field:       which dataset field is the clean source (default "correct").
+            judge_prompt:       optional inverse judge template with {sentence}, {correction}.
+            judge_call:         callable(prompt) -> str for the judge.
+            rng:                injected random.Random for deterministic sampling.
+
+        Returns:
+            list of {"original": <clean source>, "corrupted": ..., "error_type": ...}
+        """
+        rng = rng or random.Random()
+        synthetic = []
+        samples = real_samples[:sample_size]
+        judge_dropped = 0
+        parse_failed = 0
+        judge_fn = judge_call or self.call_api
+
+        total = len(samples)
+        run_start = time.monotonic()
+        print(f"Generating {total} samples (inverse) ...", flush=True)
+
+        for i, item in enumerate(samples, 1):
+            gold = item.get(source_field)
+            if not gold:
+                print(f"[{i}/{total}] [SKIP] missing source field {source_field!r}", flush=True)
+                parse_failed += 1
+                continue
+
+            keys = _sample_categories(type_dist, count_dist, rng)
+            error_spec = "; ".join(error_descriptions.get(k, k) for k in keys)
+            prompt = inverse_prompt.format(sentence=gold, error_spec=error_spec)
+
+            t0 = time.monotonic()
+            try:
+                raw = self.call_api(prompt)
+                gen_dt = time.monotonic() - t0
+                corrupted = _parse_inverse(raw)
+                if not corrupted:
+                    print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] parse failed: {raw[:60]!r}", flush=True)
+                    parse_failed += 1
+                    continue
+                if corrupted.strip() == gold.strip():
+                    print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] identical corrupted/gold", flush=True)
+                    continue
+                if len(corrupted.split()) < 3:
+                    print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] too short: {corrupted!r}", flush=True)
+                    continue
+
+                judge_dt = 0.0
+                if judge_prompt:
+                    t1 = time.monotonic()
+                    judge_raw = judge_fn(
+                        judge_prompt.format(sentence=corrupted, correction=gold)
+                    )
+                    judge_dt = time.monotonic() - t1
+                    if not _judgement_passes(judge_raw):
+                        print(f"[{i}/{total}] gen {gen_dt:.1f}s + judge {judge_dt:.1f}s — [JUDGE] dropped: {corrupted[:50]}", flush=True)
+                        judge_dropped += 1
+                        continue
+
+                synthetic.append({
+                    "original":   gold,
+                    "corrupted":  corrupted,
+                    "error_type": ", ".join(keys),
+                })
+                suffix = f" + judge {judge_dt:.1f}s" if judge_prompt else ""
+                print(f"[{i}/{total}] gen {gen_dt:.1f}s{suffix} ✓ ({', '.join(keys)})", flush=True)
+            except Exception as e:
+                dt = time.monotonic() - t0
+                print(f"[{i}/{total}] failed after {dt:.1f}s: {e}", flush=True)
+
+        total_dt = time.monotonic() - run_start
+        print(f"Generation phase done in {total_dt:.1f}s.")
+        print(
+            f"Generated {len(synthetic)} synthetic samples (inverse) "
+            f"(judge dropped: {judge_dropped}, parse failed: {parse_failed})."
+        )
+        return synthetic
+
     @abstractmethod
-    def _call_api(self, prompt: str) -> str:
-        """Send a single prompt string, return the response string."""
+    def call_api(self, prompt: str) -> str:
+        """Send a single prompt string, return the response string.
+
+        Public on purpose: the pipeline reuses a generator's call_api as the
+        LLM-as-judge callable (see pipeline._build_judge_call)."""
         pass

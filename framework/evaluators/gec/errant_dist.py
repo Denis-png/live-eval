@@ -5,7 +5,7 @@ whether the model fixes the right *types* of errors, regardless of where.
 """
 from collections import Counter
 
-from ._errant_shared import annotator
+from ._errant_shared import annotate_results
 
 
 def _edit_type_dist(edit_lists) -> dict[str, float]:
@@ -27,11 +27,7 @@ def _f05(hyp: dict, ref: dict) -> float:
 def compute_errant_dist(results: list[dict]) -> float:
     if not results:
         return 0.0
-    hyp_edits, ref_edits = [], []
-    for item in results:
-        src  = annotator.parse(item["corrupted"])
-        ref  = annotator.parse(item["original"])
-        pred = annotator.parse(item["prediction"])
-        hyp_edits.append(annotator.annotate(src, pred))
-        ref_edits.append(annotator.annotate(src, ref))
+    anns = annotate_results(results)
+    hyp_edits = [a["pred_edits"] for a in anns]
+    ref_edits = [a["ref_edits"] for a in anns]
     return round(_f05(_edit_type_dist(hyp_edits), _edit_type_dist(ref_edits)), 4)

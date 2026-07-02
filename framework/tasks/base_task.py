@@ -17,7 +17,8 @@ class BaseTask(ABC):
     def get_prompt_instruction(self) -> str:
         """
         Prompt template for the generator LLM.
-        Must contain {error_type} and {sentence} placeholders.
+        Must contain a {sentence} placeholder; may optionally use {error_type}
+        (the generator always passes both to str.format).
         """
         pass
 
@@ -53,9 +54,33 @@ class BaseTask(ABC):
         """
         return None
 
+    def get_inverse_prompt(self) -> str | None:
+        """Inverse-mode prompt template. Must contain {sentence} (the clean source
+        text) and {error_spec} (human description of the errors to inject).
+        Return None if the task does not support inverse generation."""
+        return None
+
+    def get_inverse_judge_prompt(self) -> str | None:
+        """Optional inverse-mode judge template with {sentence} and {correction}
+        placeholders. Return None to disable judging in inverse mode."""
+        return None
+
+    def get_error_descriptions(self) -> dict[str, str]:
+        """Map of corruption category key -> short human phrase, used to render
+        {error_spec} for the inverse prompt. The keys also define the category
+        vocabulary the (placeholder) error distribution samples over.
+        Return {} if the task does not support inverse generation."""
+        return {}
+
+    @abstractmethod
     def get_task_name(self) -> str:
-        return self.__class__.__name__
-    
+        """
+        Short lowercase task identifier, matching configs/tasks/<name>.json and
+        the data/generated/<name>/ archive dir (e.g. "gec"). Must be overridden
+        — do NOT derive from the class name, which would drift from the config.
+        """
+        pass
+
     def get_label(self, result: dict) -> str | None:
         """
         Return the ground-truth label for a result dict.
