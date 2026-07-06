@@ -17,6 +17,12 @@ framework/data/**
 !framework/data/**/
 !framework/data/**/.gitkeep
 
+# ── Run artifacts ───────────────────────────────────────────
+# Results files are build artifacts, rewritten on every run —
+# committing them keeps the working tree permanently dirty.
+results.json
+results/
+
 # ── Secrets ─────────────────────────────────────────────────
 # Keep example.env as the template; real keys go in .env (never committed).
 .env

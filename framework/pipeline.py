@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import sys
 from datetime import datetime
 
 import numpy as np
@@ -40,20 +41,25 @@ def load_generator(config: dict):
 
 def _build_judge_call(config: dict, main_generator):
     """
-    Return a callable(prompt: str) -> str for the LLM-as-judge step.
+    Return a callable(prompt: str) -> str for the LLM-as-judge step,
+    or None when judging is skipped.
 
-    Resolution order:
-      1. config.judge with enabled != false → load a separate generator
-      2. otherwise → fall back to the main generator (current behavior)
-      3. if config.judge.enabled is false → return None (judging skipped)
+    Judging is opt-in (matches the config.yaml comment):
+      1. no judge block, or judge.enabled == false → None (judging skipped)
+      2. judge block with provider+model → load a separate judge generator
+      3. judge block enabled but missing provider/model → warn and fall back
+         to the main generator (the user explicitly asked for judging)
     """
     judge_cfg = config.get("judge")
-    if judge_cfg is None:
-        return main_generator.call_api
+    if not judge_cfg:
+        return None
     if judge_cfg.get("enabled", True) is False:
         return None
     if not judge_cfg.get("provider") or not judge_cfg.get("model"):
-        print("[WARN] judge block missing provider/model — falling back to main generator.")
+        print(
+            "[WARN] judge block missing provider/model — falling back to main generator.",
+            file=sys.stderr,
+        )
         return main_generator.call_api
     print(f"Judge    : {judge_cfg['provider']} / {judge_cfg['model']}")
     judge_generator = load_generator(judge_cfg)
@@ -238,6 +244,50 @@ def save_synthetic_data(synthetic: list[dict], config: dict, task_name: str,
     return path
 
 
+# ── Results writing (with provenance) ────────────────────────
+
+def _build_meta(config: dict, runs_completed: int,
+                effective_samples_per_run: list[int]) -> dict:
+    """Provenance block written next to the scores: what produced this file.
+
+    `partial` is True while runs are still outstanding — results files are
+    (re)written after every run so an interrupted session keeps the runs it
+    already paid for."""
+    gen = config["generation"]
+    ds = config.get("dataset") or {}
+    judge = config.get("judge") or {}
+    judge_active = bool(judge) and judge.get("enabled", True) is not False
+    num_runs = gen["num_runs"]
+    return {
+        "created": datetime.now().isoformat(timespec="seconds"),
+        "task": config["task"]["name"],
+        "mode": gen.get("mode", "forward"),
+        "provider": gen["provider"],
+        "model": gen["model"],
+        "num_runs": num_runs,
+        "runs_completed": runs_completed,
+        "partial": runs_completed < num_runs,
+        "dataset": {
+            "name": ds.get("name"),
+            "split": ds.get("split"),
+            "sample_size": ds.get("sample_size"),
+        },
+        "generation_sample_size": gen.get("sample_size"),
+        "effective_samples_per_run": effective_samples_per_run,
+        "judge": (
+            {"provider": judge.get("provider"), "model": judge.get("model")}
+            if judge_active else None
+        ),
+    }
+
+
+def _write_results(final: dict, config: dict, meta: dict) -> str:
+    results_path = (config.get("output") or {}).get("results_path", "results.json")
+    with open(results_path, "w", encoding="utf-8") as f:
+        json.dump({"meta": meta, "results": final}, f, indent=2)
+    return results_path
+
+
 # ── Generation dispatch ───────────────────────────────────────
 
 def _run_generation(generator, task, config, real_data, error_dist, judge_call):
@@ -256,7 +306,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call):
                 f"all {len(real_data)} real samples. Set generation.inverse.source_field "
                 f"to a field the task produces (spam: 'incorrect', gec: 'correct')."
             )
-        return generator.generate_inverse(
+        synthetic = generator.generate_inverse(
             real_samples=real_data,
             inverse_prompt=task.get_inverse_prompt(),
             error_descriptions=task.get_error_descriptions(),
@@ -266,17 +316,27 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call):
             source_field=source_field,
             judge_prompt=task.get_inverse_judge_prompt() if judge_call else None,
             judge_call=judge_call,
+            request_delay=gen_cfg.get("request_delay", 0.0),
+        )
+    else:
+        synthetic = generator.generate(
+            real_samples=real_data,
+            error_types=task.get_error_types(),
+            prompt_instruction=task.get_prompt_instruction(),
+            sample_size=sample_size,
+            judge_prompt=task.get_judge_prompt() if judge_call else None,
+            judge_call=judge_call,
+            request_delay=gen_cfg.get("request_delay", 0.0),
         )
 
-    return generator.generate(
-        real_samples=real_data,
-        error_types=task.get_error_types(),
-        prompt_instruction=task.get_prompt_instruction(),
-        sample_size=sample_size,
-        judge_prompt=task.get_judge_prompt() if judge_call else None,
-        judge_call=judge_call,
-        request_delay=gen_cfg.get("request_delay", 0.0),
-    )
+    if not synthetic:
+        raise RuntimeError(
+            f"Generation produced 0 usable samples out of {sample_size} requested "
+            f"({mode} mode). Scoring an empty set would report misleading 0.0 "
+            f"metrics. Check the [SKIP]/failed lines above — typical causes: bad "
+            f"API key, wrong model name, or unparseable model output."
+        )
+    return synthetic
 
 
 # ── Main pipeline ─────────────────────────────────────────────
@@ -301,6 +361,7 @@ def run_pipeline(config: dict) -> dict:
     )
 
     all_run_scores = []
+    effective_samples = []
     num_runs   = config["generation"]["num_runs"]
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -332,6 +393,7 @@ def run_pipeline(config: dict) -> dict:
                 print(f"  {model_config['name']}  {name}: {score}")
 
         all_run_scores.append(run_scores)
+        effective_samples.append(len(eval_samples))
 
         # ── TRASH (archive, never reuse) ──────────────────
         saved_path = save_synthetic_data(
@@ -339,12 +401,13 @@ def run_pipeline(config: dict) -> dict:
         )
         print(f"\nSynthetic data archived to {saved_path}")
 
-    # ── AGGREGATE ─────────────────────────────────────────
-    final = aggregate(all_run_scores)
+        # ── AGGREGATE (incrementally: a crash in run N keeps runs 1..N-1) ──
+        final = aggregate(all_run_scores)
+        meta = _build_meta(config, runs_completed=run_idx + 1,
+                           effective_samples_per_run=effective_samples)
+        results_path = _write_results(final, config, meta)
+        if run_idx + 1 < num_runs:
+            print(f"Partial results (run {run_idx + 1}/{num_runs}) saved to {results_path}")
 
-    results_path = (config.get("output") or {}).get("results_path", "results.json")
-    with open(results_path, "w", encoding="utf-8") as f:
-        json.dump(final, f, indent=2)
     print(f"\nResults saved to {results_path}")
-
     return final
