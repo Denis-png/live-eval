@@ -25,6 +25,7 @@ so it can be inspected later.
     framework/
         main.py                  - entry point
         pipeline.py              - GET loop (Generate, Evaluate, Trash)
+        data_loading.py          - dataset source resolution + local file loaders (m2/csv/tsv)
         requirements.txt         - Python dependencies
         configs/
             config.yaml          - dataset, generator, task models, output
@@ -70,8 +71,21 @@ so it can be inspected later.
    you evaluate Claude as a task model).
 
 3. Edit `framework/configs/config.yaml`:
-   - `dataset`         — HuggingFace dataset name + split + `sample_size` (size of the
-                         pool loaded from the benchmark)
+   - `dataset`         — `source` (huggingface | local) + `sample_size` (size of the
+                         pool loaded from the benchmark). Per-source settings live in
+                         nested blocks that can both stay filled in — switching source
+                         is a one-field change:
+
+         dataset:
+           source: local            # huggingface | local
+           sample_size: 300
+           huggingface: {name: "deysi/spam-detection-dataset", split: "train"}
+           local: {path: "framework/data/spam/sms_spam_ham_300.csv", format: csv}
+
+     Local formats: `m2` (GEC benchmarks like FCE/CoNLL-14, annotator 0's edits),
+     `csv`, `tsv` (header row, fields matched by the task's `parse_row`, e.g.
+     `label`/`text` for spam). `format` is optional when the file extension says it.
+     For inverse spam, SPAM-signal profiling also reads the local file.
    - `generation`      — `mode` (forward | inverse), generator provider, model,
                          temperature, `num_runs`, `sample_size` (samples actually
                          used per run; must be ≤ `dataset.sample_size`)
@@ -82,9 +96,9 @@ so it can be inspected later.
    - `output.generated_data_dir` — where each run's synthetic data is archived
 
    > Sampling is deterministic: `load_real_data` takes the first `dataset.sample_size`
-   > matching rows (no shuffle/seed). As long as `dataset.name/split/sample_size` are
-   > unchanged, every invocation sees the **same benchmark sample** — which is what makes
-   > cross-model comparison fair.
+   > matching rows (no shuffle/seed). As long as the dataset settings (source, HF
+   > name/split or local path, `sample_size`) are unchanged, every invocation sees the
+   > **same benchmark sample** — which is what makes cross-model comparison fair.
 
 ---
 

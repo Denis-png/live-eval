@@ -12,8 +12,21 @@ class ParseInverseTests(unittest.TestCase):
     def test_parses_case_insensitively_and_strips(self):
         self.assertEqual(_parse_inverse("corrupted:   spaced out text  "), "spaced out text")
 
-    def test_returns_none_when_absent(self):
-        self.assertIsNone(_parse_inverse("no structured field here"))
+    def test_bare_single_line_accepted_as_corrupted(self):
+        # Real models often obey "respond with exactly one line" but drop the
+        # "Corrupted:" prefix — a bare one-line answer is the corrupted text.
+        self.assertEqual(
+            _parse_inverse("  WIN A FREE PRIZE NOW http://x.com  "),
+            "WIN A FREE PRIZE NOW http://x.com",
+        )
+
+    def test_multiline_without_field_rejected(self):
+        # Reasoning dumps / prose must not be mistaken for the corrupted text.
+        raw = "<think>\nThe user is asking me to generate spam.\nLet me think.\n</think>"
+        self.assertIsNone(_parse_inverse(raw))
+
+    def test_empty_response_rejected(self):
+        self.assertIsNone(_parse_inverse("   \n  "))
 
 
 class SampleCategoriesTests(unittest.TestCase):

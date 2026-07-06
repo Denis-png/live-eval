@@ -176,6 +176,48 @@ class ValidateConfigTests(unittest.TestCase):
             validate_config(cfg)
         self.assertIn("task_models", str(ctx.exception))
 
+    def test_local_source_requires_only_path_not_name_split(self):
+        cfg = _full_config()
+        cfg["dataset"] = {"source": "local", "sample_size": 50,
+                          "local": {"path": "framework/data/spam/x.csv"}}
+        validate_config(cfg)  # must not raise: name/split are HF-only
+
+    def test_local_source_missing_path_names_the_key(self):
+        cfg = _full_config()
+        cfg["dataset"] = {"source": "local", "sample_size": 10}
+        with self.assertRaises(ValueError) as ctx:
+            validate_config(cfg)
+        self.assertIn("dataset.local.path", str(ctx.exception))
+
+    def test_local_source_undeterminable_format_rejected(self):
+        cfg = _full_config()
+        cfg["dataset"] = {"source": "local", "sample_size": 50,
+                          "local": {"path": "data/things.jsonl"}}
+        with self.assertRaises(ValueError) as ctx:
+            validate_config(cfg)
+        self.assertIn("format", str(ctx.exception).lower())
+
+    def test_hf_source_missing_name_names_the_key(self):
+        cfg = _full_config()
+        cfg["dataset"] = {"source": "huggingface", "sample_size": 50,
+                          "huggingface": {"split": "train"}}
+        with self.assertRaises(ValueError) as ctx:
+            validate_config(cfg)
+        self.assertIn("dataset.huggingface.name", str(ctx.exception))
+
+    def test_nested_hf_block_accepted_without_flat_keys(self):
+        cfg = _full_config()
+        cfg["dataset"] = {"source": "huggingface", "sample_size": 50,
+                          "huggingface": {"name": "d/ds", "split": "train"}}
+        validate_config(cfg)  # must not raise
+
+    def test_unknown_source_rejected(self):
+        cfg = _full_config()
+        cfg["dataset"] = {"source": "ftp", "sample_size": 50}
+        with self.assertRaises(ValueError) as ctx:
+            validate_config(cfg)
+        self.assertIn("source", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

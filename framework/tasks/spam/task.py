@@ -45,19 +45,32 @@ class SpamTask(BaseTask):
         from framework.profiling import spam_profiler
         from framework.profiling.spam_distribution import profile_spam_distribution
 
-        cfg = config or {}
-        ds = cfg.get("dataset") or {}
-        inv = ((cfg.get("generation") or {}).get("inverse") or {})
-        hf_token = ds.get("hf_token") or (cfg.get("api_keys") or {}).get("huggingface")
+        from framework.data_loading import iter_local_rows, resolve_dataset_config
 
-        kwargs = {
-            "sample_size": inv.get("profile_size", 200),
-            "streaming": ds.get("streaming", False),
-            "hf_token": hf_token,
-            "dataset_name": ds.get("name") or DEFAULT_SPAM_DATASET,
-            "split": ds.get("split") or DEFAULT_SPAM_SPLIT,
-        }
-        rows = spam_profiler.load_spam_rows(**kwargs)
+        cfg = config or {}
+        ds = resolve_dataset_config(cfg.get("dataset") or {})
+        inv = ((cfg.get("generation") or {}).get("inverse") or {})
+        profile_size = inv.get("profile_size", 200)
+
+        if ds["source"] == "local":
+            # Profile SPAM signals from the same local file the run evaluates
+            # against (parse_row drops SPAM rows, so re-read the raw file).
+            rows = []
+            for raw in iter_local_rows(ds["path"], ds["format"]):
+                parsed = spam_profiler.normalize_spam_row(raw)
+                if parsed is not None:
+                    rows.append(parsed)
+                if len(rows) >= profile_size:
+                    break
+        else:
+            hf_token = ds.get("hf_token") or (cfg.get("api_keys") or {}).get("huggingface")
+            rows = spam_profiler.load_spam_rows(
+                sample_size=profile_size,
+                streaming=ds.get("streaming", False),
+                hf_token=hf_token,
+                dataset_name=ds.get("name") or DEFAULT_SPAM_DATASET,
+                split=ds.get("split") or DEFAULT_SPAM_SPLIT,
+            )
         spam_rows = [r for r in rows if r["label"] == "SPAM"]
         supported = set(self.get_error_descriptions().keys())
         return profile_spam_distribution(spam_rows, supported, count_max=count_max)

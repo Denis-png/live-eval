@@ -62,10 +62,16 @@ def apply_overrides(config: dict, args) -> dict:
 def validate_config(config: dict) -> None:
     """Check required keys and cross-field invariants up front, with errors that
     name the offending config path — instead of a raw KeyError traceback deep
-    inside the pipeline."""
+    inside the pipeline. Dataset requirements depend on dataset.source."""
+    from framework.data_loading import (
+        SUPPORTED_LOCAL_FORMATS,
+        infer_format,
+        resolve_dataset_config,
+    )
+
     required = {
         "task": ["name"],
-        "dataset": ["name", "split", "sample_size"],
+        "dataset": ["sample_size"],
         "generation": ["provider", "model", "num_runs", "sample_size"],
     }
     problems = []
@@ -79,6 +85,26 @@ def validate_config(config: dict) -> None:
         )
     if not config.get("task_models"):
         problems.append("'task_models' must be a non-empty list of models to evaluate")
+
+    if isinstance(config.get("dataset"), dict):
+        ds = resolve_dataset_config(config["dataset"])
+        if ds["source"] == "local":
+            if not ds["path"]:
+                problems.append("missing key 'dataset.local.path' (required for source: local)")
+            elif (ds["format"] or infer_format(ds["path"])) not in SUPPORTED_LOCAL_FORMATS:
+                problems.append(
+                    f"cannot determine local dataset format for '{ds['path']}' — set "
+                    f"'dataset.local.format' to one of: {', '.join(SUPPORTED_LOCAL_FORMATS)}"
+                )
+        elif ds["source"] == "huggingface":
+            if not ds["name"]:
+                problems.append("missing key 'dataset.huggingface.name' (required for source: huggingface)")
+            if not ds["split"]:
+                problems.append("missing key 'dataset.huggingface.split' (required for source: huggingface)")
+        else:
+            problems.append(
+                f"'dataset.source' must be 'huggingface' or 'local' (got '{ds['source']}')"
+            )
 
     if not problems:
         gen, ds = config["generation"], config["dataset"]

@@ -13,9 +13,19 @@ _CORRUPTED_RE = re.compile(r"(?im)^\s*Corrupted:\s*(.+?)\s*$")
 
 
 def _parse_inverse(raw: str) -> str | None:
-    """Pull the corrupted sentence out of an inverse-mode `Corrupted:` response."""
+    """Pull the corrupted sentence out of an inverse-mode `Corrupted:` response.
+
+    Falls back to accepting a bare single-line response: real models often obey
+    the prompt's "respond with exactly one line" but drop the "Corrupted:"
+    prefix. Multiline output without the field (reasoning dumps, prose) is
+    still rejected."""
     m = _CORRUPTED_RE.search(raw)
-    return m.group(1).strip() if m else None
+    if m:
+        return m.group(1).strip()
+    text = (raw or "").strip()
+    if text and "\n" not in text:
+        return text
+    return None
 
 
 def _sample_categories(
