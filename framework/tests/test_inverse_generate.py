@@ -48,7 +48,10 @@ class GenerateInverseTests(unittest.TestCase):
         self.assertIn("use a wrong verb tense", gen.calls[0])
 
     def test_skips_parse_failure(self):
-        (out, _) = self._run(["no corrupted line here"])
+        # Multiline output without a Corrupted: field (e.g. a reasoning dump)
+        # is unparseable. A bare SINGLE line is now accepted as the corrupted
+        # text — models often obey "one line" but drop the prefix.
+        (out, _) = self._run(["<think>\nreasoning dump\nwithout the field\n</think>"])
         self.assertEqual(out, [])
 
     def test_skips_identical_corrupted_and_gold(self):

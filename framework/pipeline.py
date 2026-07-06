@@ -5,6 +5,7 @@ import sys
 from datetime import datetime
 
 import numpy as np
+from framework.data_loading import iter_local_rows, resolve_dataset_config
 from framework.tasks.base_task import BaseTask
 
 
@@ -98,36 +99,35 @@ def _get_field(row: dict, candidates: list[str]):
 
 def load_real_data(config: dict, task: BaseTask) -> list[dict]:
     """
-    Load real samples from a HuggingFace dataset or local file.
-    Supports streaming (set dataset.streaming: true) for large datasets.
+    Load real samples from a HuggingFace dataset or a local file
+    (m2 / csv / tsv — see data_loading.iter_local_rows).
+    Supports streaming (dataset.huggingface.streaming: true) for large datasets.
     Field parsing and row filtering is delegated to task.parse_row().
     """
-    ds_config = config["dataset"]
+    ds_config = resolve_dataset_config(config["dataset"])
     sample_size = ds_config["sample_size"]
 
-    if ds_config.get("source", "huggingface") == "local":
-        raise NotImplementedError(
-            "Local dataset loading is not yet implemented. "
-            "Contribute it in pipeline.load_real_data()."
+    if ds_config["source"] == "local":
+        print(f"Loading local dataset: {ds_config['path']} ...")
+        rows = iter_local_rows(ds_config["path"], ds_config["format"])
+    else:
+        from datasets import load_dataset  # lazy: keeps pipeline importable without HF deps
+
+        print(f"Loading dataset: {ds_config['name']} ...")
+        hf_token = (
+            ds_config.get("hf_token")
+            or (config.get("api_keys") or {}).get("huggingface")
+            or os.getenv("HF_TOKEN")
+        )
+        rows = load_dataset(
+            ds_config["name"],
+            split=ds_config["split"],
+            streaming=ds_config["streaming"],
+            token=hf_token or None,
         )
 
-    from datasets import load_dataset  # lazy: keeps pipeline importable without HF deps
-
-    print(f"Loading dataset: {ds_config['name']} ...")
-    hf_token = (
-        ds_config.get("hf_token")
-        or (config.get("api_keys") or {}).get("huggingface")
-        or os.getenv("HF_TOKEN")
-    )
-    dataset = load_dataset(
-        ds_config["name"],
-        split=ds_config["split"],
-        streaming=ds_config.get("streaming", False),
-        token=hf_token or None,
-    )
-
     samples = []
-    for row in dataset:
+    for row in rows:
         parsed = task.parse_row(row)
         if parsed is not None:
             samples.append(parsed)
@@ -254,10 +254,17 @@ def _build_meta(config: dict, runs_completed: int,
     (re)written after every run so an interrupted session keeps the runs it
     already paid for."""
     gen = config["generation"]
-    ds = config.get("dataset") or {}
+    ds = resolve_dataset_config(config.get("dataset") or {})
     judge = config.get("judge") or {}
     judge_active = bool(judge) and judge.get("enabled", True) is not False
     num_runs = gen["num_runs"]
+    if ds["source"] == "local":
+        dataset_meta = {"source": "local", "path": ds["path"],
+                        "format": ds["format"] or None,
+                        "sample_size": ds["sample_size"]}
+    else:
+        dataset_meta = {"source": "huggingface", "name": ds["name"],
+                        "split": ds["split"], "sample_size": ds["sample_size"]}
     return {
         "created": datetime.now().isoformat(timespec="seconds"),
         "task": config["task"]["name"],
@@ -267,11 +274,7 @@ def _build_meta(config: dict, runs_completed: int,
         "num_runs": num_runs,
         "runs_completed": runs_completed,
         "partial": runs_completed < num_runs,
-        "dataset": {
-            "name": ds.get("name"),
-            "split": ds.get("split"),
-            "sample_size": ds.get("sample_size"),
-        },
+        "dataset": dataset_meta,
         "generation_sample_size": gen.get("sample_size"),
         "effective_samples_per_run": effective_samples_per_run,
         "judge": (

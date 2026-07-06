@@ -14,34 +14,38 @@ api_keys:
   huggingface: "${HF_TOKEN}"
 
 # ── Dataset ─────────────────────────────────────────────────
+# Switch between sources by flipping `source` — both blocks can stay
+# filled in; only the one matching `source` is read.
 dataset:
-  source: huggingface # huggingface | local
-  name: "deysi/spam-detection-dataset"
-  split: "train"
-  sample_size: 50
-  streaming: false # set true for large HuggingFace datasets
-  # For local datasets (source: local):
-  # local_path: data/gec/fce.m2
-  # format: m2                 # m2 | csv | tsv
+  source: local # huggingface | local
+  sample_size: 300 # size of the benchmark pool loaded from the source
+  huggingface:
+    name: "deysi/spam-detection-dataset"
+    split: "train"
+    streaming: false # set true for large datasets
+  local:
+    path: "framework/data/spam/sms_spam_ham_300.csv"
+    format: csv # m2 | csv | tsv (optional — inferred from the extension)
+    # e.g. for GEC:  path: framework/data/gec/fce.m2   (format: m2)
 
 # ── Generation (LLM that creates synthetic corrupted sentences) ──
 generation:
-  mode: "forward"                  # forward | inverse  (forward = existing behaviour)
+  mode: "inverse"                  # forward | inverse  (forward = existing behaviour)
   provider: "openrouter"           # groq | openai | openrouter | mistral | minimax | anthropic | google
   model: "minimax-m3"
   temperature: 1.0             # CoT 3-step prompt benefits from higher T
   max_tokens: 1024             # required by Anthropic; ignored by OpenAI-compatible providers
   num_runs: 3                  # repeat N times → outputs mean ± std
-  sample_size: 20              # synthetic sentences per run
+  sample_size: 300             # synthetic sentences per run
   timeout: 300                 # per-request HTTP timeout in seconds (SDK default: 600)
-  max_retries: 1               # SDK retries on 5xx/429 (SDK default: 2)
+  max_retries: 2               # SDK retries on 5xx/429 (SDK default: 2)
   request_delay: 10            # seconds to sleep between requests to respect provider TPM limits
   # api_key is auto-resolved from api_keys[provider]; uncomment to override:
   # api_key: "..."
   # ── Inverse mode (only read when mode == inverse) ──
   # Corrupt a known-clean sentence according to an error distribution.
   inverse:
-    source_field: "correct"        # dataset field holding the clean source text
+    source_field: "incorrect"        # dataset field holding the clean source text
                                    #   gec: "correct" | spam: "incorrect" (the HAM message)
     profile_size: 200              # raw rows scanned to profile the empirical error
                                    #   distribution (spam: SPAM signal rates)
@@ -89,7 +93,7 @@ compute:
 # rewritten after every run, so an interrupted session keeps completed runs
 # (meta.partial is true until the last run finishes).
 output:
-  results_path: "results.json"
+  results_path: "framework/data/results/spam_inverse_results.json"
   generated_data_dir: "framework/data/generated"
 
 # ── Multi-model comparison (read only by scripts/compare_models.py) ──
