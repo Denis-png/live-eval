@@ -28,8 +28,8 @@ dataset:
 generation:
   mode: "forward"                  # forward | inverse  (forward = existing behaviour)
   provider: "openrouter"           # groq | openai | openrouter | mistral | minimax | anthropic | google
-  model: "minimax-m2.7"
-  temperature: 1.0             # CoT 3-step prompt benefits from higher T (Denis: 1.0)
+  model: "minimax-m3"
+  temperature: 1.0             # CoT 3-step prompt benefits from higher T
   max_tokens: 1024             # required by Anthropic; ignored by OpenAI-compatible providers
   num_runs: 3                  # repeat N times → outputs mean ± std
   sample_size: 20              # synthetic sentences per run
@@ -85,6 +85,9 @@ compute:
 # ── Output ──────────────────────────────────────────────────
 # Synthetic data from each run is archived (never reused) under
 # generated_data_dir/<task>/ as <session>_run<N>.json.
+# The results file is {"meta": <provenance>, "results": <scores>} and is
+# rewritten after every run, so an interrupted session keeps completed runs
+# (meta.partial is true until the last run finishes).
 output:
   results_path: "results.json"
   generated_data_dir: "framework/data/generated"

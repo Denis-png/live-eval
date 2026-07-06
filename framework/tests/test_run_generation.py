@@ -1,6 +1,8 @@
 import random
 import unittest
+from unittest import mock
 
+import framework.generators.base_generator as base_generator
 from framework.generators.base_generator import BaseGenerator
 from framework.pipeline import _run_generation
 
@@ -55,6 +57,28 @@ class RunGenerationTests(unittest.TestCase):
         config = {"generation": {"sample_size": 5}}
         out = _run_generation(gen, FakeTask(), config, _REAL, None, judge_call=None)
         self.assertEqual(len(out), 1)
+
+    def test_raises_when_generation_yields_zero_samples(self):
+        """A run with 0 usable samples must abort, not flow into evaluation —
+        otherwise evaluators score an empty set as 0.0 and a bad API key
+        masquerades as a legitimate all-zero results file."""
+        gen = FakeGenerator(["complete garbage the parser cannot use"])
+        config = {"generation": {"mode": "forward", "sample_size": 5}}
+        with self.assertRaises(RuntimeError) as ctx:
+            _run_generation(gen, FakeTask(), config, _REAL, None, judge_call=None)
+        self.assertIn("0 usable samples", str(ctx.exception))
+
+    def test_inverse_mode_honors_request_delay(self):
+        """generation.request_delay must throttle inverse mode too — it silently
+        applied only to forward mode before."""
+        gen = FakeGenerator(["Corrupted: He go to school daily."])
+        config = {"generation": {"mode": "inverse", "sample_size": 5,
+                                 "request_delay": 7,
+                                 "inverse": {"source_field": "correct"}}}
+        with mock.patch.object(base_generator.time, "sleep") as fake_sleep:
+            out = _run_generation(gen, FakeTask(), config, _REAL, _DIST, judge_call=None)
+        self.assertEqual(len(out), 1)
+        fake_sleep.assert_called_once_with(7)
 
     def test_inverse_raises_when_source_field_missing_from_all_samples(self):
         """_run_generation must raise ValueError if the configured source_field is

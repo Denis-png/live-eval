@@ -35,6 +35,29 @@ class PerModelConfigTests(unittest.TestCase):
             )
 
 
+class ParseCompareArgsTests(unittest.TestCase):
+    """compare_models must own its CLI: per-model provider/model come from the
+    generation_models list, so accepting --provider/--model (as main.py's parser
+    does) silently leaked a CLI provider into entries that omitted one."""
+
+    def test_rejects_provider_flag(self):
+        with self.assertRaises(SystemExit):
+            cm.parse_compare_args(["--provider", "openai"])
+
+    def test_rejects_model_flag(self):
+        with self.assertRaises(SystemExit):
+            cm.parse_compare_args(["--model", "gpt"])
+
+    def test_accepts_sample_shaping_flags(self):
+        args = cm.parse_compare_args(
+            ["--config", "c.yaml", "--task", "spam", "--runs", "2", "--sample-size", "9"]
+        )
+        self.assertEqual(args.config, "c.yaml")
+        self.assertEqual(args.task, "spam")
+        self.assertEqual(args.runs, 2)
+        self.assertEqual(args.sample_size, 9)
+
+
 class RunComparisonTests(unittest.TestCase):
     def test_runs_each_model_and_writes_combined(self):
         with tempfile.TemporaryDirectory() as d:

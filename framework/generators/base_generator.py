@@ -178,6 +178,7 @@ class BaseGenerator(ABC):
         judge_prompt: str | None = None,
         judge_call: Callable[[str], str] | None = None,
         rng=None,
+        request_delay: float = 0.0,
     ) -> list[dict]:
         """Inverse generation: corrupt a known-clean source sentence according to
         an injected error distribution. Task-agnostic — `type_dist` keys are opaque
@@ -194,6 +195,8 @@ class BaseGenerator(ABC):
             judge_prompt:       optional inverse judge template with {sentence}, {correction}.
             judge_call:         callable(prompt) -> str for the judge.
             rng:                injected random.Random for deterministic sampling.
+            request_delay:      seconds to sleep after each successful request to
+                                respect provider TPM rate limits (default: 0).
 
         Returns:
             list of {"original": <clean source>, "corrupted": ..., "error_type": ...}
@@ -255,6 +258,10 @@ class BaseGenerator(ABC):
                 })
                 suffix = f" + judge {judge_dt:.1f}s" if judge_prompt else ""
                 print(f"[{i}/{total}] gen {gen_dt:.1f}s{suffix} ✓ ({', '.join(keys)})", flush=True)
+
+                # Throttle requests to stay within provider rate limits (e.g. Groq TPM cap).
+                if request_delay > 0:
+                    time.sleep(request_delay)
             except Exception as e:
                 dt = time.monotonic() - t0
                 print(f"[{i}/{total}] failed after {dt:.1f}s: {e}", flush=True)

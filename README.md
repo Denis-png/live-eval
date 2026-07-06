@@ -99,19 +99,24 @@ CLI flags override values in `config.yaml`:
 
     python -m framework.main \
         --task gec \
+        --mode inverse \
         --provider anthropic \
         --model claude-haiku-4-5 \
         --runs 3 \
-        --sample-size 20
+        --sample-size 20 \
+        --output results.json \
+        --no-judge
 
-Use `--config <path>` to point at a different YAML.
+Use `--config <path>` to point at a different YAML. `--judge/--no-judge`
+toggles the LLM-as-judge filter; `--output` sets `output.results_path`.
 
 > Note: `python framework/main.py` will NOT work — `framework` must be
 > importable as a package, so use `python -m framework.main`.
 
-> CLI flags currently cover `--task/--provider/--model/--runs/--sample-size`
-> only. There is **no** flag for `output.results_path`, `generation.mode`, or the
-> judge — set those in the YAML (or a per-run `--config`).
+The config is validated up front: missing required keys, `num_runs < 1`,
+`generation.sample_size > dataset.sample_size`, an unknown `generation.mode`,
+or a missing API key for the selected provider all abort before any API call
+with an error naming the offending config path.
 
 ---
 
@@ -151,6 +156,11 @@ It writes one `results/<task>_<mode>_<provider>_<model>.json` per model, a combi
 benchmark sample is guaranteed by deterministic first-N sampling, so keep
 `dataset.*`, `generation.mode`, and both `sample_size` values constant across entries.
 
+The driver accepts only sample-shaping flags (`--config/--task/--runs/--sample-size`);
+`--provider/--model` are rejected because per-model provider/model come from the
+`generation_models` list. API keys for **all** listed providers are checked before
+the first model runs.
+
 ---
 
 ## How to Add a New Task
@@ -170,8 +180,22 @@ benchmark sample is guaranteed by deterministic first-N sampling, so keep
 ## Results
 
 Results are written to the path in `output.results_path` (default
-`results.json`) after all runs finish. Each evaluator reports `mean ± std`
-across runs — high `std` reveals model instability on unseen data.
+`results.json`). The file has two top-level keys:
+
+- `meta` — provenance: timestamp, task, mode, generator provider/model,
+  dataset, sample sizes, the number of samples actually **scored** per run
+  (after generation skips/judging, plus any task-added negatives — e.g. spam's
+  HAM negatives), and the judge used (or `null`). `meta.partial` is `true`
+  while runs are still outstanding.
+- `results` — per-model scores; each evaluator reports `mean ± std` across
+  runs — high `std` reveals model instability on unseen data.
+
+The file is rewritten after **every** run, so a crash or Ctrl-C in run N
+keeps the aggregated results of runs 1..N-1. A run that generates zero usable
+samples aborts instead of writing misleading all-zero scores.
+
+The LLM-as-judge filter is **opt-in**: no `judge:` block (or
+`judge.enabled: false`) means judging is skipped.
 
 The synthetic data itself is archived per run under
 `output.generated_data_dir` (default `framework/data/generated/`) as
