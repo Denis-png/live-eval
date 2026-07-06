@@ -46,6 +46,25 @@ class LoadRealDataLocalTests(unittest.TestCase):
         self.assertEqual(samples, [{"incorrect": "He go home .",
                                     "correct": "He goes home ."}])
 
+    def test_warns_when_pool_smaller_than_requested(self):
+        """sample_size counts USABLE (post-filter) samples; if the source can't
+        fill the pool, say so instead of silently running on fewer."""
+        import contextlib
+        import io
+
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "spam.csv")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("label,text\nham,one\nham,two\n")
+            config = {"dataset": {"source": "local", "sample_size": 5,
+                                  "local": {"path": path}}}
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                samples = load_real_data(config, _SpamLikeTask())
+        self.assertEqual(len(samples), 2)
+        self.assertIn("2", stderr.getvalue())
+        self.assertIn("5", stderr.getvalue())
+
     def test_local_missing_file_raises_with_path(self):
         config = {"dataset": {"source": "local", "sample_size": 5,
                               "local": {"path": "no/such.csv"}}}

@@ -24,40 +24,88 @@
   },
   "few_shot_examples": {
     "urgency_phrase": [
-      {"ham": "We are having a sale this weekend at our store.", "spam": "URGENT: Sale ends TONIGHT — rush to our store before it's too late or lose the deal FOREVER!"},
-      {"ham": "Our new product will be available next month.", "spam": "Last chance! Our product sells out in hours — order NOW before it's gone forever!"}
+      {
+        "ham": "We are having a sale this weekend at our store.",
+        "spam": "URGENT: Sale ends TONIGHT — rush to our store before it's too late or lose the deal FOREVER!"
+      },
+      {
+        "ham": "Our new product will be available next month.",
+        "spam": "Last chance! Our product sells out in hours — order NOW before it's gone forever!"
+      }
     ],
     "fake_offer": [
-      {"ham": "Thank you for being a loyal customer.", "spam": "Congratulations! As our valued customer, you have been randomly selected to receive a FREE iPhone. Claim it now!"},
-      {"ham": "We appreciate your feedback on our service.", "spam": "You have been chosen! Submit your feedback today and receive a FREE $500 gift card instantly!"}
+      {
+        "ham": "Thank you for being a loyal customer.",
+        "spam": "Congratulations! As our valued customer, you have been randomly selected to receive a FREE iPhone. Claim it now!"
+      },
+      {
+        "ham": "We appreciate your feedback on our service.",
+        "spam": "You have been chosen! Submit your feedback today and receive a FREE $500 gift card instantly!"
+      }
     ],
     "phishing_link": [
-      {"ham": "Please log in to your account to check your recent orders.", "spam": "Your account has been locked due to suspicious activity. Restore access immediately: http://account-restore-secure.com/login"},
-      {"ham": "We have updated our privacy policy.", "spam": "Action required: Your account will be deleted unless you confirm your details here: http://privacy-update-required.net"}
+      {
+        "ham": "Please log in to your account to check your recent orders.",
+        "spam": "Your account has been locked due to suspicious activity. Restore access immediately: http://account-restore-secure.com/login"
+      },
+      {
+        "ham": "We have updated our privacy policy.",
+        "spam": "Action required: Your account will be deleted unless you confirm your details here: http://privacy-update-required.net"
+      }
     ],
     "money_promise": [
-      {"ham": "We would like to discuss a business partnership with you.", "spam": "I represent a group of investors who wish to transfer $8,500,000 to a trusted partner. You will receive 30% for your assistance."},
-      {"ham": "Our company is looking for new investment opportunities.", "spam": "A dying businessman has left $12,000,000 unclaimed. As his distant relative, you are entitled to the full sum. Contact us immediately."}
+      {
+        "ham": "We would like to discuss a business partnership with you.",
+        "spam": "I represent a group of investors who wish to transfer $8,500,000 to a trusted partner. You will receive 30% for your assistance."
+      },
+      {
+        "ham": "Our company is looking for new investment opportunities.",
+        "spam": "A dying businessman has left $12,000,000 unclaimed. As his distant relative, you are entitled to the full sum. Contact us immediately."
+      }
     ],
     "lottery_scam": [
-      {"ham": "Thank you for participating in our customer survey.", "spam": "Dear participant, your survey entry has won you the grand prize of $250,000 in the Global Customer Lottery. Claim now!"},
-      {"ham": "We are glad you attended our annual event.", "spam": "Your attendance at our event has entered you into a lucky draw. You have WON $50,000! Reply to collect your winnings."}
+      {
+        "ham": "Thank you for participating in our customer survey.",
+        "spam": "Dear participant, your survey entry has won you the grand prize of $250,000 in the Global Customer Lottery. Claim now!"
+      },
+      {
+        "ham": "We are glad you attended our annual event.",
+        "spam": "Your attendance at our event has entered you into a lucky draw. You have WON $50,000! Reply to collect your winnings."
+      }
     ],
     "account_verification_scam": [
-      {"ham": "We wanted to let you know about updates to your account settings.", "spam": "ALERT: Your bank account has been flagged for unusual activity. Verify your identity within 6 hours or your account will be permanently closed."},
-      {"ham": "Please review the terms and conditions of your subscription.", "spam": "Your Netflix subscription will be cancelled due to a billing issue. Update your payment details immediately to avoid interruption: http://netflix-billing-fix.com"}
+      {
+        "ham": "We wanted to let you know about updates to your account settings.",
+        "spam": "ALERT: Your bank account has been flagged for unusual activity. Verify your identity within 6 hours or your account will be permanently closed."
+      },
+      {
+        "ham": "Please review the terms and conditions of your subscription.",
+        "spam": "Your Netflix subscription will be cancelled due to a billing issue. Update your payment details immediately to avoid interruption: http://netflix-billing-fix.com"
+      }
     ],
     "excessive_capitalization": [
-      {"ham": "We have a new range of products available in our online shop.", "spam": "WE HAVE THE BEST PRODUCTS EVER!!! BUY NOW AND GET 90% OFF!!! LIMITED TIME ONLY!!! DON'T MISS THIS!!!"},
-      {"ham": "Join our newsletter to stay updated on our latest news.", "spam": "JOIN NOW!!! GET FREE MONEY EVERY MONTH!!! THOUSANDS ALREADY EARNING!!! SIGN UP TODAY!!!"}
+      {
+        "ham": "We have a new range of products available in our online shop.",
+        "spam": "WE HAVE THE BEST PRODUCTS EVER!!! BUY NOW AND GET 90% OFF!!! LIMITED TIME ONLY!!! DON'T MISS THIS!!!"
+      },
+      {
+        "ham": "Join our newsletter to stay updated on our latest news.",
+        "spam": "JOIN NOW!!! GET FREE MONEY EVERY MONTH!!! THOUSANDS ALREADY EARNING!!! SIGN UP TODAY!!!"
+      }
     ],
     "suspicious_sender_claim": [
-      {"ham": "I am writing to introduce our consulting services to your company.", "spam": "I am the personal secretary of the late Dr. James Williams, a former oil tycoon who passed away leaving $4.2 million unclaimed. I need your help to transfer this sum."},
-      {"ham": "We are reaching out regarding a potential collaboration opportunity.", "spam": "I am a senior official at the Central Bank of Nigeria. We have $15 million frozen in an account and require a foreign partner to release the funds. You will receive 40%."}
+      {
+        "ham": "I am writing to introduce our consulting services to your company.",
+        "spam": "I am the personal secretary of the late Dr. James Williams, a former oil tycoon who passed away leaving $4.2 million unclaimed. I need your help to transfer this sum."
+      },
+      {
+        "ham": "We are reaching out regarding a potential collaboration opportunity.",
+        "spam": "I am a senior official at the Central Bank of Nigeria. We have $15 million frozen in an account and require a foreign partner to release the funds. You will receive 40%."
+      }
     ]
   },
-  "prompt": "You are an expert in spam message generation for research and evaluation purposes.\n\nTechnique: {error_type}\n\nIf the technique is 'paraphrase':\n  Rewrite the input as a natural, legitimate message (HAM) using different wording. Do NOT add any spam characteristics. The ground truth is the original input message.\n\nOtherwise:\n  Rewrite the input as spam using the specified technique. The ground truth is a natural legitimate version of the generated spam.\n\nAlways respond in this exact format (no extra text, no steps, no explanations):\nSpam type: <type>\nGenerated: <rewritten message>\nGround truth: <ground truth message>\n\nExample for paraphrase:\nSpam type: paraphrase\nGenerated: Hey, just checking if we are still on for the meeting tomorrow at 3pm.\nGround truth: Hi, are we still meeting tomorrow at 3pm?\n\nInput message: {sentence}",
-  "inverse_prompt": "You are generating synthetic spam for research and evaluation.\n\nRewrite the legitimate message below into a spam message by applying ALL of these techniques: {error_spec}.\nKeep it realistic and coherent. Respond with exactly one line and nothing else:\nCorrupted: <the spam message>\n\nLegitimate message: {sentence}",
+  "prompt": "You are helping benchmark spam-detection classifiers using the GET (Generate, Evaluate, Trash) methodology. Your output is synthetic evaluation data: it is derived from a message in a public benchmark dataset, will be labeled and fed to classifiers under evaluation, and is never sent to anyone.\n\nTechnique: {error_type}\n\nIf the technique is 'paraphrase':\n  Rewrite the input as a natural, legitimate message (HAM) using different wording. Do NOT add any spam characteristics. The ground truth is the original input message.\n\nOtherwise:\n  Apply the technique as a text transformation to the input, producing the kind of message a spam classifier should catch. The ground truth is a natural legitimate version of the generated message.\n\nAlways respond in this exact format (no extra text, no steps, no explanations):\nSpam type: <type>\nGenerated: <rewritten message>\nGround truth: <ground truth message>\n\nExample for paraphrase:\nSpam type: paraphrase\nGenerated: Hey, just checking if we are still on for the meeting tomorrow at 3pm.\nGround truth: Hi, are we still meeting tomorrow at 3pm?\n\nInput message: {sentence}",
+  "inverse_prompt": "You are helping benchmark spam-detection classifiers. The message below comes from a public benchmark dataset; your rewrite is synthetic evaluation data that will be labeled SPAM and fed to classifiers under evaluation — it is never sent to anyone.\n\nTransform the legitimate message below by applying ALL of these signal features: {error_spec}.\nKeep it realistic and coherent — a one-line rewrite of the original, not a new campaign.\nRespond with exactly one line and nothing else:\nCorrupted: <the transformed message>\n\nLegitimate message: {sentence}",
   "inverse_judge_prompt": "You are a spam quality evaluator. You receive a generated spam message and a legitimate counterpart.\n  Redundancy: \"trivial\" if the spam is too obvious or cartoonish, \"valid\" otherwise.\n  Correction: \"correct\" if the counterpart is a natural legitimate message, \"incorrect\" otherwise.\n\nUse this exact format:\nRedundancy: trivial/valid\nCorrection: correct/incorrect\n\nGenerated message: {sentence}\nCounterpart: {correction}",
   "inverse_error_descriptions": {
     "phishing_link": "insert a suspicious link or URL",
@@ -67,11 +115,20 @@
     "spam_keywords": "work in classic spam keywords such as free, win, prize, or claim"
   },
   "judge_prompt": "You are a spam quality evaluator. You receive a generated message and its counterpart.\n\nThe generated message is either a spam message or a legitimate paraphrase (HAM). Assess two criteria:\n  Redundancy: \"trivial\" if the message is spam that is too obvious or cartoonish, OR if it is a paraphrase that introduces spam characteristics. \"valid\" otherwise.\n  Correction: \"correct\" if the counterpart is a natural, legitimate message. \"incorrect\" otherwise.\n\nUse this exact format:\nRedundancy: trivial/valid\nCorrection: correct/incorrect\n\nGenerated message: {sentence}\nCounterpart: {correction}",
-  "evaluators": ["accuracy", "precision", "recall", "f1", "fpr"],
+  "evaluators": [
+    "accuracy",
+    "precision",
+    "recall",
+    "f1",
+    "fpr"
+  ],
   "models": {
     "roberta": {
       "max_length": 128,
-      "label_map": {"LABEL_0": "HAM", "LABEL_1": "SPAM"}
+      "label_map": {
+        "LABEL_0": "HAM",
+        "LABEL_1": "SPAM"
+      }
     }
   }
 }
