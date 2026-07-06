@@ -18,7 +18,8 @@ api_keys:
 # filled in; only the one matching `source` is read.
 dataset:
   source: local # huggingface | local
-  sample_size: 300 # size of the benchmark pool loaded from the source
+  sample_size: 150 # USABLE samples in the pool, counted after the task's row
+                   # filter (spam keeps HAM only → HAM messages, not file rows)
   huggingface:
     name: "deysi/spam-detection-dataset"
     split: "train"
@@ -36,7 +37,7 @@ generation:
   temperature: 1.0             # CoT 3-step prompt benefits from higher T
   max_tokens: 1024             # required by Anthropic; ignored by OpenAI-compatible providers
   num_runs: 3                  # repeat N times → outputs mean ± std
-  sample_size: 300             # synthetic sentences per run
+  sample_size: 150            # synthetic sentences per run
   timeout: 300                 # per-request HTTP timeout in seconds (SDK default: 600)
   max_retries: 2               # SDK retries on 5xx/429 (SDK default: 2)
   request_delay: 10            # seconds to sleep between requests to respect provider TPM limits

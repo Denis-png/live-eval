@@ -11,6 +11,19 @@ _REDUNDANCY_RE   = re.compile(r"(?im)^\s*Redundancy:\s*(trivial|valid)\b")
 _CORRECTION_RE   = re.compile(r"(?im)^\s*Correction:\s*(correct|incorrect)\b")
 _CORRUPTED_RE = re.compile(r"(?im)^\s*Corrupted:\s*(.+?)\s*$")
 
+# Consulted only when structured parsing found no answer field — so a false
+# positive merely relabels a skip, it never drops a good sample.
+_REFUSAL_RE = re.compile(
+    r"(?i)\b(?:I\s+can(?:no|')t|I\s+cannot|I(?:'m| am)\s+(?:not able|unable)|"
+    r"I\s+won'?t|I\s+will\s+not|I(?:'m| am)\s+sorry|I\s+apologi[sz]e|as an AI)\b"
+)
+
+
+def _looks_like_refusal(raw: str) -> bool:
+    """Heuristic: does this response read as a safety refusal rather than an
+    answer? Checked only after the structured fields failed to parse."""
+    return bool(_REFUSAL_RE.search(raw[:400]))
+
 
 def _parse_inverse(raw: str) -> str | None:
     """Pull the corrupted sentence out of an inverse-mode `Corrupted:` response.
@@ -113,6 +126,7 @@ class BaseGenerator(ABC):
         samples = real_samples[:sample_size]
         judge_dropped = 0
         parse_failed = 0
+        refused = 0
         judge_fn = judge_call or self.call_api
 
         total = len(samples)
@@ -130,8 +144,12 @@ class BaseGenerator(ABC):
                 gen_dt = time.monotonic() - t0
                 error_type, corrupted, gold = _parse_generation(raw)
                 if not corrupted or not gold:
-                    print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] parse failed: {raw[:60]!r}", flush=True)
-                    parse_failed += 1
+                    if _looks_like_refusal(raw):
+                        print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] model refused: {raw[:60]!r}", flush=True)
+                        refused += 1
+                    else:
+                        print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] parse failed: {raw[:60]!r}", flush=True)
+                        parse_failed += 1
                     continue
                 if corrupted.strip() == gold.strip():
                     print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] identical corrupted/gold", flush=True)
@@ -172,7 +190,8 @@ class BaseGenerator(ABC):
 
         print(
             f"Generated {len(synthetic)} synthetic samples "
-            f"(judge dropped: {judge_dropped}, parse failed: {parse_failed})."
+            f"(judge dropped: {judge_dropped}, parse failed: {parse_failed}, "
+            f"refused: {refused})."
         )
         return synthetic
 
@@ -216,6 +235,7 @@ class BaseGenerator(ABC):
         samples = real_samples[:sample_size]
         judge_dropped = 0
         parse_failed = 0
+        refused = 0
         judge_fn = judge_call or self.call_api
 
         total = len(samples)
@@ -237,6 +257,13 @@ class BaseGenerator(ABC):
             try:
                 raw = self.call_api(prompt)
                 gen_dt = time.monotonic() - t0
+                # Refusal check BEFORE _parse_inverse: its bare single-line
+                # fallback would otherwise accept a one-line refusal as the
+                # corrupted text. An explicit Corrupted: field always wins.
+                if _CORRUPTED_RE.search(raw) is None and _looks_like_refusal(raw):
+                    print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] model refused: {raw[:60]!r}", flush=True)
+                    refused += 1
+                    continue
                 corrupted = _parse_inverse(raw)
                 if not corrupted:
                     print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] parse failed: {raw[:60]!r}", flush=True)
@@ -280,7 +307,8 @@ class BaseGenerator(ABC):
         print(f"Generation phase done in {total_dt:.1f}s.")
         print(
             f"Generated {len(synthetic)} synthetic samples (inverse) "
-            f"(judge dropped: {judge_dropped}, parse failed: {parse_failed})."
+            f"(judge dropped: {judge_dropped}, parse failed: {parse_failed}, "
+            f"refused: {refused})."
         )
         return synthetic
 

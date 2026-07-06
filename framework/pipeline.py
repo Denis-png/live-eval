@@ -135,6 +135,15 @@ def load_real_data(config: dict, task: BaseTask) -> list[dict]:
             break
 
     print(f"Loaded {len(samples)} real samples.")
+    if len(samples) < sample_size:
+        # sample_size counts USABLE samples (task.parse_row filters rows, e.g.
+        # spam keeps HAM only) — the source ran out before filling the pool.
+        print(
+            f"[WARN] dataset.sample_size asks for {sample_size} usable samples "
+            f"but the source only yielded {len(samples)} — the run proceeds on "
+            f"the smaller pool.",
+            file=sys.stderr,
+        )
     return samples
 
 
@@ -337,7 +346,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call):
             f"Generation produced 0 usable samples out of {sample_size} requested "
             f"({mode} mode). Scoring an empty set would report misleading 0.0 "
             f"metrics. Check the [SKIP]/failed lines above — typical causes: bad "
-            f"API key, wrong model name, or unparseable model output."
+            f"API key, wrong model name, model refusals, or unparseable output."
         )
     return synthetic
 
