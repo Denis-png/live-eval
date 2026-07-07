@@ -72,6 +72,14 @@ class BaseTask(ABC):
         Return {} if the task does not support inverse generation."""
         return {}
 
+    def get_generation_strategy(self) -> str:
+        """How the pipeline generates synthetic data for this task:
+          "corruption"        — corrupt a source text (forward/inverse); text→text tasks.
+          "class_conditional" — sample a target class, then generate an example of it;
+                                classification tasks. Ignores generation.mode.
+        Default "corruption"."""
+        return "corruption"
+
     def profile_error_distribution(self, real_data: list[dict],
                                    count_max: int = 5, config: dict | None = None) -> dict | None:
         """Empirical inverse-mode error distribution derived from real_data (and
