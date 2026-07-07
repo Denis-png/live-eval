@@ -237,17 +237,28 @@ def aggregate(all_run_scores: list[dict]) -> dict:
     return final
 
 
+# ── Output paths ──────────────────────────────────────────────
+
+def resolve_output_paths(config: dict, task_name: str, session: str) -> dict:
+    """All artifact paths for one run session, under output.base_dir/<task>/<session>/."""
+    base = (config.get("output") or {}).get("base_dir", "framework/data/runs")
+    session_dir = os.path.join(base, task_name, session)
+    return {
+        "session_dir": session_dir,
+        "generated_dir": os.path.join(session_dir, "generated"),
+        "results": os.path.join(session_dir, "results.json"),
+        "real_sample": os.path.join(session_dir, "real_sample.json"),
+        "profile": os.path.join(session_dir, "profile.json"),
+        "plots_dir": os.path.join(session_dir, "plots"),
+    }
+
+
 # ── Synthetic data archiving ─────────────────────────────────
 
-def save_synthetic_data(synthetic: list[dict], config: dict, task_name: str,
-                        session_id: str, run_idx: int) -> str:
-    """Archive one run's synthetic data under data/generated/<task>/ instead of discarding it."""
-    base_dir = (config.get("output") or {}).get(
-        "generated_data_dir", "framework/data/generated"
-    )
-    out_dir = os.path.join(base_dir, task_name)
-    os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, f"{session_id}_run{run_idx + 1}.json")
+def save_synthetic_data(synthetic: list[dict], generated_dir: str, run_idx: int) -> str:
+    """Archive one run's synthetic data under <session>/generated/run_<N>.json."""
+    os.makedirs(generated_dir, exist_ok=True)
+    path = os.path.join(generated_dir, f"run_{run_idx + 1}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(synthetic, f, indent=2, ensure_ascii=False)
     return path
@@ -256,7 +267,7 @@ def save_synthetic_data(synthetic: list[dict], config: dict, task_name: str,
 # ── Results writing (with provenance) ────────────────────────
 
 def _build_meta(config: dict, runs_completed: int,
-                effective_samples_per_run: list[int]) -> dict:
+                effective_samples_per_run: list[int], real_baseline: bool) -> dict:
     """Provenance block written next to the scores: what produced this file.
 
     `partial` is True while runs are still outstanding — results files are
@@ -270,10 +281,10 @@ def _build_meta(config: dict, runs_completed: int,
     if ds["source"] == "local":
         dataset_meta = {"source": "local", "path": ds["path"],
                         "format": ds["format"] or None,
-                        "sample_size": ds["sample_size"]}
+                        "sample_size": config["generation"].get("sample_size")}
     else:
         dataset_meta = {"source": "huggingface", "name": ds["name"],
-                        "split": ds["split"], "sample_size": ds["sample_size"]}
+                        "split": ds["split"], "sample_size": config["generation"].get("sample_size")}
     return {
         "created": datetime.now().isoformat(timespec="seconds"),
         "task": config["task"]["name"],
@@ -284,17 +295,17 @@ def _build_meta(config: dict, runs_completed: int,
         "runs_completed": runs_completed,
         "partial": runs_completed < num_runs,
         "dataset": dataset_meta,
-        "generation_sample_size": gen.get("sample_size"),
         "effective_samples_per_run": effective_samples_per_run,
         "judge": (
             {"provider": judge.get("provider"), "model": judge.get("model")}
             if judge_active else None
         ),
+        "real_baseline": real_baseline,
+        "class_balance": gen.get("class_balance", "empirical"),
     }
 
 
-def _write_results(final: dict, config: dict, meta: dict) -> str:
-    results_path = (config.get("output") or {}).get("results_path", "results.json")
+def _write_results(final: dict, results_path: str, meta: dict) -> str:
     with open(results_path, "w", encoding="utf-8") as f:
         json.dump({"meta": meta, "results": final}, f, indent=2)
     return results_path
@@ -302,124 +313,198 @@ def _write_results(final: dict, config: dict, meta: dict) -> str:
 
 # ── Generation dispatch ───────────────────────────────────────
 
-def _run_generation(generator, task, config, real_data, error_dist, judge_call):
-    """Dispatch to forward or inverse generation based on generation.mode.
-    Both return the same {"original", "corrupted", "error_type"} contract."""
+def _run_generation(generator, task, config, real_data, error_dist, judge_call, class_prob):
+    """Dispatch on the task's generation strategy. Corruption → forward/inverse
+    (unchanged). Class-conditional → labeled SPAM/HAM records."""
     gen_cfg = config["generation"]
-    mode = gen_cfg.get("mode", "forward")
     sample_size = gen_cfg["sample_size"]
+    strategy = task.get_generation_strategy()
 
-    if mode == "inverse":
-        inverse_cfg = gen_cfg.get("inverse") or {}
-        source_field = inverse_cfg.get("source_field", "correct")
-        if real_data and not any(item.get(source_field) for item in real_data):
-            raise ValueError(
-                f"Inverse mode: source_field '{source_field}' is missing or empty on "
-                f"all {len(real_data)} real samples. Set generation.inverse.source_field "
-                f"to a field the task produces (spam: 'incorrect', gec: 'correct')."
-            )
-        synthetic = generator.generate_inverse(
-            real_samples=real_data,
-            inverse_prompt=task.get_inverse_prompt(),
-            error_descriptions=task.get_error_descriptions(),
+    if strategy == "class_conditional":
+        seed_field = gen_cfg.get("seed_field", "incorrect")
+        synthetic = generator.generate_class_conditional(
+            real_seeds=real_data,
+            seed_field=seed_field,
+            class_prob=class_prob,
             type_dist=error_dist["type_dist"],
             count_dist=error_dist["count_dist"],
+            error_descriptions=task.get_error_descriptions(),
+            inject_prompt=task.get_inverse_prompt(),
+            ham_prompt=task.get_ham_generation_prompt(),
+            positive_label="SPAM",
+            negative_label="HAM",
             sample_size=sample_size,
-            source_field=source_field,
             judge_prompt=task.get_inverse_judge_prompt() if judge_call else None,
             judge_call=judge_call,
             request_delay=gen_cfg.get("request_delay", 0.0),
         )
     else:
-        synthetic = generator.generate(
-            real_samples=real_data,
-            error_types=task.get_error_types(),
-            prompt_instruction=task.get_prompt_instruction(),
-            sample_size=sample_size,
-            judge_prompt=task.get_judge_prompt() if judge_call else None,
-            judge_call=judge_call,
-            request_delay=gen_cfg.get("request_delay", 0.0),
-        )
+        mode = gen_cfg.get("mode", "forward")
+        if mode == "inverse":
+            inverse_cfg = gen_cfg.get("inverse") or {}
+            source_field = inverse_cfg.get("source_field", "correct")
+            if real_data and not any(item.get(source_field) for item in real_data):
+                raise ValueError(
+                    f"Inverse mode: source_field '{source_field}' is missing or empty on "
+                    f"all {len(real_data)} real samples. Set generation.inverse.source_field "
+                    f"to a field the task produces (spam: 'incorrect', gec: 'correct')."
+                )
+            synthetic = generator.generate_inverse(
+                real_samples=real_data, inverse_prompt=task.get_inverse_prompt(),
+                error_descriptions=task.get_error_descriptions(),
+                type_dist=error_dist["type_dist"], count_dist=error_dist["count_dist"],
+                sample_size=sample_size, source_field=source_field,
+                judge_prompt=task.get_inverse_judge_prompt() if judge_call else None,
+                judge_call=judge_call, request_delay=gen_cfg.get("request_delay", 0.0),
+            )
+        else:
+            synthetic = generator.generate(
+                real_samples=real_data, error_types=task.get_error_types(),
+                prompt_instruction=task.get_prompt_instruction(), sample_size=sample_size,
+                judge_prompt=task.get_judge_prompt() if judge_call else None,
+                judge_call=judge_call, request_delay=gen_cfg.get("request_delay", 0.0),
+            )
 
     if not synthetic:
         raise RuntimeError(
             f"Generation produced 0 usable samples out of {sample_size} requested "
-            f"({mode} mode). Scoring an empty set would report misleading 0.0 "
-            f"metrics. Check the [SKIP]/failed lines above — typical causes: bad "
-            f"API key, wrong model name, model refusals, or unparseable output."
+            f"({strategy}). Scoring an empty set would report misleading 0.0 metrics. "
+            f"Check the [SKIP]/failed lines above — typical causes: bad API key, wrong "
+            f"model name, model refusals, or unparseable output."
         )
     return synthetic
+
+
+# ── Post-generation helpers (class balance, real baseline, nesting, profiling) ──
+
+def _resolve_class_prob(config: dict, real_reference) -> float:
+    """P(positive class) for class-conditional generation. `empirical` → the real
+    reference's positive fraction; a float → used directly."""
+    cb = (config.get("generation") or {}).get("class_balance", "empirical")
+    if isinstance(cb, (int, float)):
+        return float(cb)
+    if real_reference:
+        pos = sum(1 for r in real_reference if r.get("label") == "SPAM")
+        return pos / len(real_reference)
+    return 0.5
+
+
+def _evaluate_real_baseline(task, config, real_reference, evaluator_fns) -> dict:
+    """Evaluate task_models once on the real benchmark (deterministic → no runs)."""
+    if not real_reference:
+        print("[real baseline] skipped — task has no real reference.")
+        return {}
+    texts = [s["text"] for s in real_reference]
+    out = {}
+    for model_config in config["task_models"]:
+        model = task.get_model(model_config)
+        predictions = model.predict(texts)
+        results = [{**s, "prediction": p} for s, p in zip(real_reference, predictions)]
+        out[model_config["name"]] = {
+            name: evaluator_fns[name](results) for name in task.get_evaluators()
+        }
+    return out
+
+
+def _nest_results(generated_agg: dict, real_scores: dict) -> dict:
+    """Group each model's scores as {generated, real?}."""
+    final = {}
+    for model in set(generated_agg) | set(real_scores):
+        final[model] = {}
+        if model in generated_agg:
+            final[model]["generated"] = generated_agg[model]
+        if model in real_scores:
+            final[model]["real"] = real_scores[model]
+    return final
+
+
+def _write_profile_artifacts(task, real_reference, all_generated, paths) -> None:
+    """Persist the real sample + a {real, generated, fidelity} profile when the
+    task supports profiling. No-op for tasks that don't (e.g. GEC)."""
+    if real_reference is None:
+        return
+    with open(paths["real_sample"], "w", encoding="utf-8") as f:
+        json.dump(real_reference, f, indent=2, ensure_ascii=False)
+    real_profile = task.profile_dataset(real_reference)
+    if real_profile is None:
+        return
+    generated_profile = task.profile_dataset(all_generated)
+    fidelity = task.compare_profiles(real_profile, generated_profile)
+    with open(paths["profile"], "w", encoding="utf-8") as f:
+        json.dump({"real": real_profile, "generated": generated_profile,
+                   "fidelity": fidelity}, f, indent=2, ensure_ascii=False)
+    print(f"Fidelity profile saved to {paths['profile']}")
 
 
 # ── Main pipeline ─────────────────────────────────────────────
 
 def run_pipeline(config: dict) -> dict:
-    """
-    Run the full GET pipeline (Generate → Evaluate → Trash) N times,
-    then aggregate results as mean ± std across runs.
-    "Trash" means the synthetic data is never reused for evaluation —
-    each run is archived under data/generated/ for inspection.
-    """
+    """Run the GET pipeline N times, evaluate the generated benchmark (mean±std)
+    and — by default — the same models on the real benchmark, profile real-vs-
+    generated fidelity, and write all artifacts under one per-session directory."""
     task          = load_task(config["task"]["name"])
     real_data     = load_real_data(config, task)
     generator     = load_generator(config["generation"])
     judge_call    = _build_judge_call(config, generator)
     evaluator_fns = task.get_evaluator_fns()
 
+    strategy = task.get_generation_strategy()
     mode = config["generation"].get("mode", "forward")
     error_dist = (
         load_error_distribution(config, real_data, task)
-        if mode == "inverse" else None
+        if (strategy == "class_conditional" or mode == "inverse") else None
     )
 
-    all_run_scores = []
-    effective_samples = []
-    num_runs   = config["generation"]["num_runs"]
+    # Real reference feeds class balance, the real baseline, and profiling.
+    real_reference = task.get_real_eval_samples(config, real_data)
+    class_prob = _resolve_class_prob(config, real_reference)
+
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if config.get("output", {}).get("session_id"):
+        session_id = config["output"]["session_id"]
+    paths = resolve_output_paths(config, task.get_task_name(), session_id)
+    os.makedirs(paths["generated_dir"], exist_ok=True)
+    os.makedirs(paths["plots_dir"], exist_ok=True)
+
+    all_run_scores, effective_samples, all_generated = [], [], []
+    num_runs = config["generation"]["num_runs"]
+    real_baseline = (config.get("evaluation") or {}).get("real_baseline", True)
 
     for run_idx in range(num_runs):
-        print(f"\n{'='*50}")
-        print(f"RUN {run_idx + 1} / {num_runs}")
-        print(f"{'='*50}")
+        print(f"\n{'='*50}\nRUN {run_idx + 1} / {num_runs}\n{'='*50}")
+        synthetic = _run_generation(generator, task, config, real_data, error_dist,
+                                    judge_call, class_prob)
+        all_generated.extend(synthetic)
 
-        # ── GENERATE ──────────────────────────────────────
-        synthetic = _run_generation(
-            generator, task, config, real_data, error_dist, judge_call
-        )
-        # ── EVALUATE ──────────────────────────────────────
         eval_samples = task.get_eval_samples(synthetic)
         texts = [s["text"] for s in eval_samples]
-
         run_scores = {}
         for model_config in config["task_models"]:
-            model       = task.get_model(model_config)
+            model = task.get_model(model_config)
             predictions = model.predict(texts)
-            results = [
-                {**s, "prediction": pred}
-                for s, pred in zip(eval_samples, predictions)
-            ]
+            results = [{**s, "prediction": p} for s, p in zip(eval_samples, predictions)]
             run_scores[model_config["name"]] = {
                 name: evaluator_fns[name](results) for name in task.get_evaluators()
             }
             for name, score in run_scores[model_config["name"]].items():
                 print(f"  {model_config['name']}  {name}: {score}")
-
         all_run_scores.append(run_scores)
         effective_samples.append(len(eval_samples))
 
-        # ── TRASH (archive, never reuse) ──────────────────
-        saved_path = save_synthetic_data(
-            synthetic, config, task.get_task_name(), session_id, run_idx
-        )
+        saved_path = save_synthetic_data(synthetic, paths["generated_dir"], run_idx)
         print(f"\nSynthetic data archived to {saved_path}")
 
-        # ── AGGREGATE (incrementally: a crash in run N keeps runs 1..N-1) ──
-        final = aggregate(all_run_scores)
+        generated_agg = aggregate(all_run_scores)
+        real_scores = _evaluate_real_baseline(task, config, real_reference,
+                                              evaluator_fns) if real_baseline else {}
+        final = _nest_results(generated_agg, real_scores)
         meta = _build_meta(config, runs_completed=run_idx + 1,
-                           effective_samples_per_run=effective_samples)
-        results_path = _write_results(final, config, meta)
+                           effective_samples_per_run=effective_samples,
+                           real_baseline=bool(real_scores))
+        _write_results(final, paths["results"], meta)
         if run_idx + 1 < num_runs:
-            print(f"Partial results (run {run_idx + 1}/{num_runs}) saved to {results_path}")
+            print(f"Partial results (run {run_idx + 1}/{num_runs}) saved to {paths['results']}")
 
-    print(f"\nResults saved to {results_path}")
+    _write_profile_artifacts(task, real_reference, all_generated, paths)
+    print(f"\nResults saved to {paths['results']}")
     return final

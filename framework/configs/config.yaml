@@ -37,6 +37,8 @@ generation:
   num_runs: 3                  # repeat N times → outputs mean ± std
   sample_size: 150            # synthetic samples per run (single source of truth;
                               # dataset pool is loaded to match)
+  class_balance: empirical     # P(SPAM) for class-conditional generation: empirical | a float 0-1
+  seed_field: incorrect        # real_data field used as the seed text for class-conditional generation
   timeout: 300                 # per-request HTTP timeout in seconds (SDK default: 600)
   max_retries: 2               # SDK retries on 5xx/429 (SDK default: 2)
   request_delay: 10            # seconds to sleep between requests to respect provider TPM limits
@@ -65,6 +67,10 @@ judge:
   timeout: 300
   max_retries: 1
 
+# ── Evaluation ──────────────────────────────────────────────
+evaluation:
+  real_baseline: true # also evaluate task_models on the real benchmark (deterministic, no runs)
+
 # ── Task ────────────────────────────────────────────────────
 task:
   name: "spam" # gec | spam | hate_speech (future)
@@ -87,14 +93,16 @@ compute:
   device: cpu
 
 # ── Output ──────────────────────────────────────────────────
-# Synthetic data from each run is archived (never reused) under
-# generated_data_dir/<task>/ as <session>_run<N>.json.
-# The results file is {"meta": <provenance>, "results": <scores>} and is
-# rewritten after every run, so an interrupted session keeps completed runs
-# (meta.partial is true until the last run finishes).
+# Every run session gets its own directory under base_dir/<task>/<session>/:
+#   generated/run_<N>.json  — each run's synthetic data (never reused for eval)
+#   results.json            — {"meta": <provenance>, "results": <scores>},
+#                              rewritten after every run (meta.partial is true
+#                              until the last run finishes)
+#   real_sample.json        — the real reference sample used for baseline/profiling
+#   profile.json            — {"real", "generated", "fidelity"} dataset profile
+#   plots/                  — figures (if generated)
 output:
-  results_path: "framework/data/results/spam_forward_results.json"
-  generated_data_dir: "framework/data/generated"
+  base_dir: "framework/data/runs"
 
 # ── Multi-model comparison (read only by scripts/compare_models.py) ──
 # Runs each entry over the SAME sample; writes results/<task>_<mode>_<provider>_<model>.json.
@@ -104,4 +112,4 @@ output:
 #   - provider: openrouter
 #     model: minimax-m2.7
 #     temperature: 1.0
-# output.results_dir controls where per-model + comparison files land (default: results/).
+# output.base_dir controls where per-session artifacts land (default: framework/data/runs).

@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument("--runs",         type=int, help="Number of GET runs")
     parser.add_argument("--sample-size",  type=int, dest="sample_size", help="Synthetic samples per run")
     parser.add_argument("--mode",         choices=["forward", "inverse"], help="Generation mode")
-    parser.add_argument("--output",       help="Results JSON path (output.results_path)")
+    parser.add_argument("--output",       help="Output base directory (output.base_dir)")
     parser.add_argument("--judge", action=argparse.BooleanOptionalAction, default=None,
                         help="Enable/disable the LLM-as-judge filter (--judge / --no-judge)")
     return parser.parse_args()
@@ -53,7 +53,7 @@ def apply_overrides(config: dict, args) -> dict:
     if getattr(args, "mode", None) is not None:
         config["generation"]["mode"] = args.mode
     if getattr(args, "output", None) is not None:
-        config.setdefault("output", {})["results_path"] = args.output
+        config.setdefault("output", {})["base_dir"] = args.output
     if getattr(args, "judge", None) is not None:
         config.setdefault("judge", {})["enabled"] = args.judge
     return config

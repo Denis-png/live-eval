@@ -16,6 +16,8 @@ class FakeGenerator(BaseGenerator):
 
 
 class FakeTask:
+    # strategy hook (corruption tasks like GEC)
+    def get_generation_strategy(self): return "corruption"
     # forward-mode hooks
     def get_error_types(self):       return ["article"]
     def get_prompt_instruction(self): return "Fix: {sentence}"
@@ -36,7 +38,7 @@ class RunGenerationTests(unittest.TestCase):
             "Error type: verb_tense\nGenerated: She go there often now.\nGround truth: She goes there often now."
         ])
         config = {"generation": {"mode": "forward", "sample_size": 5}}
-        out = _run_generation(gen, FakeTask(), config, _REAL, None, judge_call=None)
+        out = _run_generation(gen, FakeTask(), config, _REAL, None, judge_call=None, class_prob=0.5)
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["corrupted"], "She go there often now.")
 
@@ -44,7 +46,7 @@ class RunGenerationTests(unittest.TestCase):
         gen = FakeGenerator(["Corrupted: He go to school daily."])
         config = {"generation": {"mode": "inverse", "sample_size": 5,
                                  "inverse": {"source_field": "correct"}}}
-        out = _run_generation(gen, FakeTask(), config, _REAL, _DIST, judge_call=None)
+        out = _run_generation(gen, FakeTask(), config, _REAL, _DIST, judge_call=None, class_prob=0.5)
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["original"], "He goes to school daily.")  # clean source
         self.assertEqual(out[0]["corrupted"], "He go to school daily.")
@@ -55,7 +57,7 @@ class RunGenerationTests(unittest.TestCase):
             "Error type: verb_tense\nGenerated: She go there often now.\nGround truth: She goes there often now."
         ])
         config = {"generation": {"sample_size": 5}}
-        out = _run_generation(gen, FakeTask(), config, _REAL, None, judge_call=None)
+        out = _run_generation(gen, FakeTask(), config, _REAL, None, judge_call=None, class_prob=0.5)
         self.assertEqual(len(out), 1)
 
     def test_raises_when_generation_yields_zero_samples(self):
@@ -65,7 +67,7 @@ class RunGenerationTests(unittest.TestCase):
         gen = FakeGenerator(["complete garbage the parser cannot use"])
         config = {"generation": {"mode": "forward", "sample_size": 5}}
         with self.assertRaises(RuntimeError) as ctx:
-            _run_generation(gen, FakeTask(), config, _REAL, None, judge_call=None)
+            _run_generation(gen, FakeTask(), config, _REAL, None, judge_call=None, class_prob=0.5)
         self.assertIn("0 usable samples", str(ctx.exception))
 
     def test_inverse_mode_honors_request_delay(self):
@@ -76,7 +78,7 @@ class RunGenerationTests(unittest.TestCase):
                                  "request_delay": 7,
                                  "inverse": {"source_field": "correct"}}}
         with mock.patch.object(base_generator.time, "sleep") as fake_sleep:
-            out = _run_generation(gen, FakeTask(), config, _REAL, _DIST, judge_call=None)
+            out = _run_generation(gen, FakeTask(), config, _REAL, _DIST, judge_call=None, class_prob=0.5)
         self.assertEqual(len(out), 1)
         fake_sleep.assert_called_once_with(7)
 
@@ -95,7 +97,7 @@ class RunGenerationTests(unittest.TestCase):
         # Only 'incorrect' key present — no 'correct' key on any sample
         data_without_correct = [{"incorrect": "x y z"}]
         with self.assertRaises(ValueError) as ctx:
-            _run_generation(gen, FakeTask(), config, data_without_correct, _DIST, judge_call=None)
+            _run_generation(gen, FakeTask(), config, data_without_correct, _DIST, judge_call=None, class_prob=0.5)
         self.assertIn("source_field", str(ctx.exception))
         self.assertIn("correct", str(ctx.exception))
 

@@ -50,8 +50,8 @@ class ApplyOverridesTests(unittest.TestCase):
         self.assertEqual(cfg["generation"]["mode"], "inverse")
 
     def test_output_override_creates_output_block(self):
-        cfg = apply_overrides(_config(), _args(output="out/r.json"))
-        self.assertEqual(cfg["output"]["results_path"], "out/r.json")
+        cfg = apply_overrides(_config(), _args(output="out/runs"))
+        self.assertEqual(cfg["output"]["base_dir"], "out/runs")
 
     def test_no_judge_disables_judge_block(self):
         cfg = _config()
