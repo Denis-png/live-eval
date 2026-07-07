@@ -81,6 +81,71 @@ class SpamTask(BaseTask):
         supported = set(self.get_error_descriptions().keys())
         return profile_spam_distribution(spam_rows, supported, count_max=count_max)
 
+    def profile_dataset(self, rows: list[dict]) -> dict:
+        """Class balance + per-signal fire rate + normalized signal / count
+        distributions over the SPAM messages, using the same detectors the
+        generator injects (so real and generated are measured identically)."""
+        from collections import Counter
+        from framework.profiling.spam_profiler import detect_signals
+
+        supported = list(self.get_error_descriptions().keys())
+        n = len(rows)
+        ham = sum(1 for r in rows if r.get("label") == "HAM")
+        spam = sum(1 for r in rows if r.get("label") == "SPAM")
+        spam_texts = [r["text"] for r in rows if r.get("label") == "SPAM" and r.get("text")]
+
+        fire = Counter()
+        per_msg = []
+        for text in spam_texts:
+            sigs = [s for s in detect_signals(text) if s in supported]
+            fire.update(sigs)
+            per_msg.append(min(len(sigs), 5))
+        m = len(spam_texts)
+        signal_rate = {s: (fire.get(s, 0) / m if m else 0.0) for s in supported}
+        total = sum(fire.values())
+        signal_type_dist = {s: (fire.get(s, 0) / total if total else 0.0) for s in supported}
+        count_counter = Counter(per_msg)
+        signal_count_dist = (
+            {k: count_counter[k] / len(per_msg) for k in sorted(count_counter)}
+            if per_msg else {}
+        )
+        return {
+            "n": n,
+            "class_balance": {
+                "HAM": ham, "SPAM": spam,
+                "spam_fraction": (spam / n if n else 0.0),
+            },
+            "signal_rate": signal_rate,
+            "signal_type_dist": signal_type_dist,
+            "signal_count_dist": signal_count_dist,
+        }
+
+    def compare_profiles(self, real: dict, generated: dict) -> dict:
+        """Real→generated deltas + Jensen-Shannon divergences. See fidelity honesty
+        note: signals are re-detected by regex, so this measures detector-visible
+        distribution match, not ground-truth semantics."""
+        from framework.profiling.fidelity import jensen_shannon_divergence
+        signals = set(real.get("signal_rate", {})) | set(generated.get("signal_rate", {}))
+        return {
+            "class_balance_delta": (
+                generated["class_balance"]["spam_fraction"]
+                - real["class_balance"]["spam_fraction"]
+            ),
+            "signal_deltas": {
+                s: generated.get("signal_rate", {}).get(s, 0.0)
+                   - real.get("signal_rate", {}).get(s, 0.0)
+                for s in signals
+            },
+            "type_dist_jsd": jensen_shannon_divergence(
+                real.get("signal_type_dist", {}), generated.get("signal_type_dist", {})
+            ),
+            "count_dist_jsd": jensen_shannon_divergence(
+                real.get("signal_count_dist", {}), generated.get("signal_count_dist", {})
+            ),
+            "note": "signals re-detected by regex on generated text; measures "
+                    "detector-visible distribution match, not semantic spamminess.",
+        }
+
     def get_evaluators(self) -> list[str]:
         return self._config["evaluators"]
 

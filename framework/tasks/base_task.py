@@ -80,6 +80,15 @@ class BaseTask(ABC):
         Default "corruption"."""
         return "corruption"
 
+    def profile_dataset(self, rows: list[dict]) -> dict | None:
+        """Profile a labeled dataset (rows with "text"+"label") for real-vs-generated
+        fidelity. Return None to opt out (default). Override in classification tasks."""
+        return None
+
+    def compare_profiles(self, real: dict, generated: dict) -> dict | None:
+        """Fidelity comparison between two profile_dataset() outputs. Default None."""
+        return None
+
     def profile_error_distribution(self, real_data: list[dict],
                                    count_max: int = 5, config: dict | None = None) -> dict | None:
         """Empirical inverse-mode error distribution derived from real_data (and
