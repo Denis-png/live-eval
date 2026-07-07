@@ -16,6 +16,10 @@ venv/
 framework/data/**
 !framework/data/**/
 !framework/data/**/.gitkeep
+# Explicit (redundant with framework/data/** above): never track dataset or
+# run-artifact json/csv under framework/data, whatever the layout.
+framework/data/**/*.json
+framework/data/**/*.csv
 
 # ── Run artifacts ───────────────────────────────────────────
 # Results files are build artifacts, rewritten on every run —
