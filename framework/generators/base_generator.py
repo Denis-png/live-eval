@@ -25,20 +25,26 @@ def _looks_like_refusal(raw: str) -> bool:
     return bool(_REFUSAL_RE.search(raw[:400]))
 
 
-def _parse_inverse(raw: str) -> str | None:
-    """Pull the corrupted sentence out of an inverse-mode `Corrupted:` response.
+def _parse_tagged(raw: str, tag: str) -> str | None:
+    """Pull the payload out of a single-field `<Tag>: <text>` response.
 
-    Falls back to accepting a bare single-line response: real models often obey
-    the prompt's "respond with exactly one line" but drop the "Corrupted:"
-    prefix. Multiline output without the field (reasoning dumps, prose) is
-    still rejected."""
-    m = _CORRUPTED_RE.search(raw)
+    Falls back to accepting a bare single-line response (models often obey
+    'respond with one line' but drop the prefix). Multiline output without the
+    field is rejected. Generalizes _parse_inverse over the field name."""
+    import re as _re
+    m = _re.search(rf"(?im)^\s*{_re.escape(tag)}:\s*(.+?)\s*$", raw or "")
     if m:
         return m.group(1).strip()
     text = (raw or "").strip()
     if text and "\n" not in text:
         return text
     return None
+
+
+def _parse_inverse(raw: str) -> str | None:
+    """Pull the corrupted sentence out of an inverse-mode `Corrupted:` response.
+    See _parse_tagged for the bare-single-line fallback behaviour."""
+    return _parse_tagged(raw, "Corrupted")
 
 
 def _sample_categories(
@@ -309,6 +315,109 @@ class BaseGenerator(ABC):
             f"Generated {len(synthetic)} synthetic samples (inverse) "
             f"(judge dropped: {judge_dropped}, parse failed: {parse_failed}, "
             f"refused: {refused})."
+        )
+        return synthetic
+
+    def generate_class_conditional(
+        self,
+        real_seeds: list[dict],
+        seed_field: str,
+        class_prob: float,
+        type_dist: dict[str, float],
+        count_dist: dict[int, float],
+        error_descriptions: dict[str, str],
+        inject_prompt: str,
+        ham_prompt: str,
+        positive_label: str,
+        negative_label: str,
+        sample_size: int,
+        judge_prompt: str | None = None,
+        judge_call: Callable[[str], str] | None = None,
+        request_delay: float = 0.0,
+        rng=None,
+    ) -> list[dict]:
+        """Symmetric class-conditional generation for classification tasks.
+
+        Per sample: draw the target class (P(positive) = class_prob). Positive →
+        inject the sampled signal mix into a seed via inject_prompt (a `Corrupted:`
+        line). Negative → paraphrase the seed via ham_prompt (a `Rewritten:` line).
+        Both classes are LLM-authored, so a classifier cannot separate them on
+        authorship artifacts. Seeds are cycled if sample_size exceeds their count.
+
+        Returns records {"text", "label", "technique", "seed"}."""
+        rng = rng or random.Random()
+        synthetic = []
+        judge_fn = judge_call or self.call_api
+        if not real_seeds:
+            return synthetic
+
+        run_start = time.monotonic()
+        print(f"Generating {sample_size} samples (class-conditional) ...", flush=True)
+        judge_dropped = parse_failed = refused = 0
+
+        for i in range(1, sample_size + 1):
+            seed = real_seeds[(i - 1) % len(real_seeds)]
+            source = seed.get(seed_field)
+            if not source:
+                print(f"[{i}/{sample_size}] [SKIP] missing seed field {seed_field!r}", flush=True)
+                parse_failed += 1
+                continue
+
+            is_positive = rng.random() < class_prob
+            if is_positive:
+                keys = _sample_categories(type_dist, count_dist, rng)
+                error_spec = "; ".join(error_descriptions.get(k, k) for k in keys)
+                prompt = inject_prompt.format(sentence=source, error_spec=error_spec)
+                tag, label, technique = "Corrupted", positive_label, ", ".join(keys)
+            else:
+                prompt = ham_prompt.format(sentence=source)
+                tag, label, technique = "Rewritten", negative_label, "paraphrase"
+
+            t0 = time.monotonic()
+            try:
+                raw = self.call_api(prompt)
+                gen_dt = time.monotonic() - t0
+                tagged = _parse_tagged(raw, tag) if f"{tag}:" in raw else None
+                if tagged is None and _looks_like_refusal(raw):
+                    print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s — [SKIP] model refused: {raw[:60]!r}", flush=True)
+                    refused += 1
+                    continue
+                text = _parse_tagged(raw, tag)
+                if not text:
+                    print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s — [SKIP] parse failed: {raw[:60]!r}", flush=True)
+                    parse_failed += 1
+                    continue
+                if text.strip() == source.strip():
+                    print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s — [SKIP] identical to seed", flush=True)
+                    continue
+                if len(text.split()) < 3:
+                    print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s — [SKIP] too short: {text!r}", flush=True)
+                    continue
+
+                judge_dt = 0.0
+                if judge_prompt:
+                    t1 = time.monotonic()
+                    judge_raw = judge_fn(judge_prompt.format(sentence=text, correction=source))
+                    judge_dt = time.monotonic() - t1
+                    if not _judgement_passes(judge_raw):
+                        print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s + judge {judge_dt:.1f}s — [JUDGE] dropped: {text[:50]}", flush=True)
+                        judge_dropped += 1
+                        continue
+
+                synthetic.append({"text": text, "label": label, "technique": technique, "seed": source})
+                suffix = f" + judge {judge_dt:.1f}s" if judge_prompt else ""
+                print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s{suffix} ✓ ({label}: {technique})", flush=True)
+                if request_delay > 0:
+                    time.sleep(request_delay)
+            except Exception as e:
+                dt = time.monotonic() - t0
+                print(f"[{i}/{sample_size}] failed after {dt:.1f}s: {e}", flush=True)
+
+        total_dt = time.monotonic() - run_start
+        print(f"Generation phase done in {total_dt:.1f}s.")
+        print(
+            f"Generated {len(synthetic)} synthetic samples (class-conditional) "
+            f"(judge dropped: {judge_dropped}, parse failed: {parse_failed}, refused: {refused})."
         )
         return synthetic
 
