@@ -89,6 +89,13 @@ class BaseTask(ABC):
         """Fidelity comparison between two profile_dataset() outputs. Default None."""
         return None
 
+    def get_real_eval_samples(self, config: dict, real_data: list[dict]) -> list[dict] | None:
+        """Eval-ready rows for the REAL benchmark, carrying the same schema the
+        evaluators expect (classification: text+label; text→text: text+corrupted+
+        original). Feeds both the real baseline and real-side profiling. Default
+        None → real baseline skipped."""
+        return None
+
     def profile_error_distribution(self, real_data: list[dict],
                                    count_max: int = 5, config: dict | None = None) -> dict | None:
         """Empirical inverse-mode error distribution derived from real_data (and

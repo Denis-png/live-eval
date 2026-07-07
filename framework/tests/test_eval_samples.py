@@ -14,23 +14,17 @@ class BaseDefaultTests(unittest.TestCase):
         self.assertNotIn("label", out[0])
 
 
-class SpamBalancedTests(unittest.TestCase):
-    def test_spam_item_adds_ham_negative(self):
-        synthetic = [{"original": "let us meet tomorrow", "corrupted": "WIN $500 now!",
-                      "error_type": "money_promise, urgency"}]
+class SpamPassThroughTests(unittest.TestCase):
+    def test_labeled_records_pass_through_unchanged(self):
+        synthetic = [
+            {"text": "WIN $500 now http://x.com", "label": "SPAM", "technique": "money_promise"},
+            {"text": "are we still meeting tomorrow", "label": "HAM", "technique": "paraphrase"},
+        ]
         out = SpamTask().get_eval_samples(synthetic)
         self.assertEqual(len(out), 2)
-        self.assertEqual(out[0]["text"], "WIN $500 now!")
+        self.assertEqual(out[0]["text"], "WIN $500 now http://x.com")
         self.assertEqual(out[0]["label"], "SPAM")
-        self.assertEqual(out[1]["text"], "let us meet tomorrow")
         self.assertEqual(out[1]["label"], "HAM")
-
-    def test_paraphrase_item_has_no_negative(self):
-        synthetic = [{"original": "are we still meeting?", "corrupted": "hey, still on for later?",
-                      "error_type": "paraphrase"}]
-        out = SpamTask().get_eval_samples(synthetic)
-        self.assertEqual(len(out), 1)
-        self.assertEqual(out[0]["label"], "HAM")
 
 
 if __name__ == "__main__":

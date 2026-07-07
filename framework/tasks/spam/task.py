@@ -44,13 +44,10 @@ class SpamTask(BaseTask):
     def get_error_descriptions(self) -> dict[str, str]:
         return self._config.get("inverse_error_descriptions", {})
 
-    def profile_error_distribution(self, real_data, count_max=5, config=None):
-        """Empirical inverse-mode distribution over spam signals. real_data is
-        HAM-only (parse_row drops SPAM), so load the SPAM subset separately via
-        the spam profiler and count which signals fire per SPAM message."""
+    def _load_reference_rows(self, config: dict | None) -> list[dict]:
+        """Load the labeled real reference ({"text","label"} rows, both classes)
+        from the configured dataset. Shared by profiling and the real baseline."""
         from framework.profiling import spam_profiler
-        from framework.profiling.spam_distribution import profile_spam_distribution
-
         from framework.data_loading import iter_local_rows, resolve_dataset_config
 
         cfg = config or {}
@@ -59,8 +56,6 @@ class SpamTask(BaseTask):
         profile_size = inv.get("profile_size", 200)
 
         if ds["source"] == "local":
-            # Profile SPAM signals from the same local file the run evaluates
-            # against (parse_row drops SPAM rows, so re-read the raw file).
             rows = []
             for raw in iter_local_rows(ds["path"], ds["format"]):
                 parsed = spam_profiler.normalize_spam_row(raw)
@@ -68,15 +63,26 @@ class SpamTask(BaseTask):
                     rows.append(parsed)
                 if len(rows) >= profile_size:
                     break
-        else:
-            hf_token = ds.get("hf_token") or (cfg.get("api_keys") or {}).get("huggingface")
-            rows = spam_profiler.load_spam_rows(
-                sample_size=profile_size,
-                streaming=ds.get("streaming", False),
-                hf_token=hf_token,
-                dataset_name=ds.get("name") or DEFAULT_SPAM_DATASET,
-                split=ds.get("split") or DEFAULT_SPAM_SPLIT,
-            )
+            return rows
+        hf_token = ds.get("hf_token") or (cfg.get("api_keys") or {}).get("huggingface")
+        return spam_profiler.load_spam_rows(
+            sample_size=profile_size,
+            streaming=ds.get("streaming", False),
+            hf_token=hf_token,
+            dataset_name=ds.get("name") or DEFAULT_SPAM_DATASET,
+            split=ds.get("split") or DEFAULT_SPAM_SPLIT,
+        )
+
+    def get_real_eval_samples(self, config: dict, real_data: list[dict]) -> list[dict]:
+        rows = self._load_reference_rows(config)
+        return [{"text": r["text"], "label": r["label"]} for r in rows if r.get("text")]
+
+    def profile_error_distribution(self, real_data, count_max=5, config=None):
+        """Empirical inverse-mode distribution over spam signals. real_data is
+        HAM-only (parse_row drops SPAM), so load the SPAM subset separately via
+        the spam profiler and count which signals fire per SPAM message."""
+        from framework.profiling.spam_distribution import profile_spam_distribution
+        rows = self._load_reference_rows(config)
         spam_rows = [r for r in rows if r["label"] == "SPAM"]
         supported = set(self.get_error_descriptions().keys())
         return profile_spam_distribution(spam_rows, supported, count_max=count_max)
@@ -184,19 +190,9 @@ class SpamTask(BaseTask):
         return "SPAM"
 
     def get_eval_samples(self, synthetic: list[dict]) -> list[dict]:
-        """Score the corrupted message, and for genuine SPAM items also score the
-        clean source as a HAM negative so precision/recall/f1/fpr stay meaningful."""
-        out = []
-        for item in synthetic:
-            label = self.get_label(item)
-            out.append({**item, "text": item["corrupted"], "label": label})
-            original = item.get("original")
-            if label == "SPAM" and original and original.strip() != item["corrupted"].strip():
-                out.append({
-                    "text": original, "label": "HAM", "error_type": "clean",
-                    "corrupted": original, "original": original,
-                })
-        return out
+        """Class-conditional records already carry text+label (both classes are
+        first-class generated samples), so no expansion is needed."""
+        return [{**item, "text": item["text"], "label": item["label"]} for item in synthetic]
 
     def parse_row(self, row: dict) -> dict | None:
         # Skip spam rows — the generator needs legitimate (HAM) messages as input.
