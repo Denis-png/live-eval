@@ -105,7 +105,9 @@ output:
   base_dir: "framework/data/runs"
 
 # ── Multi-model comparison (read only by scripts/compare_models.py) ──
-# Runs each entry over the SAME sample; writes results/<task>_<mode>_<provider>_<model>.json.
+# Runs each entry over the SAME sample; each entry gets its own session under
+# base_dir/<task>/<provider>_<model>/ (same layout as above), plus a combined
+# base_dir/<task>/comparison/comparison.json.
 # generation_models:
 #   - provider: anthropic
 #     model: claude-haiku-4-5

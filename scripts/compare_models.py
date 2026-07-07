@@ -50,7 +50,7 @@ def _slug(text: str) -> str:
 
 def _per_model_config(base: dict, entry: dict) -> dict:
     """Deep-copy base, overlay one generation_models entry, re-resolve the API key,
-    and route output to a per-model results file under output.results_dir."""
+    and route output to its own session under output.base_dir."""
     cfg = copy.deepcopy(base)
     cfg["generation"] = {**cfg["generation"], **entry}
     cfg["generation"].pop("api_key", None)  # force re-resolution for the new provider
@@ -61,24 +61,26 @@ def _per_model_config(base: dict, entry: dict) -> dict:
     provider = cfg["generation"]["provider"]
     model = cfg["generation"]["model"]
 
-    out_dir = (cfg.get("output") or {}).get("results_dir", "results")
-    os.makedirs(out_dir, exist_ok=True)
-    fname = f"{task}_{mode}_{_slug(provider)}_{_slug(model)}.json"
-    cfg.setdefault("output", {})["results_path"] = os.path.join(out_dir, fname)
+    base_dir = (cfg.get("output") or {}).get("base_dir", "framework/data/runs")
+    session = f"{_slug(provider)}_{_slug(model)}"
+    cfg.setdefault("output", {})["base_dir"] = base_dir
+    cfg["output"]["session_id"] = session
     return cfg
 
 
-def _flatten(scores: dict) -> dict:
-    """Flatten evaluator scores to {name: {mean, std}}, expanding nested metrics
-    (e.g. errant.precision) so they fit one table column each."""
+def _flatten(blocks: dict) -> dict:
+    """Flatten one model's {generated, real?} into {col: text} table cells."""
     flat = {}
-    for ev, v in scores.items():
+    for ev, v in (blocks.get("generated") or {}).items():
         if isinstance(v, dict) and "mean" in v:
-            flat[ev] = v
+            flat[f"gen.{ev}"] = f"{v['mean']:.3f}±{v['std']:.3f}"
         elif isinstance(v, dict):
             for sub, sv in v.items():
                 if isinstance(sv, dict) and "mean" in sv:
-                    flat[f"{ev}.{sub}"] = sv
+                    flat[f"gen.{ev}.{sub}"] = f"{sv['mean']:.3f}±{sv['std']:.3f}"
+    for ev, val in (blocks.get("real") or {}).items():
+        if isinstance(val, (int, float)):
+            flat[f"real.{ev}"] = f"{val:.3f}"
     return flat
 
 
@@ -90,11 +92,7 @@ def _print_table(all_results: dict) -> None:
         cols = sorted({c for f in rows.values() for c in f})
         print("gen_model".ljust(30) + "".join(c.ljust(20) for c in cols))
         for gl, f in rows.items():
-            cells = "".join(
-                (f"{f[c]['mean']:.3f}±{f[c]['std']:.3f}" if c in f else "-").ljust(20)
-                for c in cols
-            )
-            print(gl.ljust(30) + cells)
+            print(gl.ljust(30) + "".join((f.get(c, "-")).ljust(20) for c in cols))
 
 
 def run_comparison(base_config: dict) -> dict:
@@ -113,14 +111,15 @@ def run_comparison(base_config: dict) -> dict:
 
     all_results = {}
     for label, cfg in configs:
-        print(f"\n{'#'*60}\nGEN MODEL: {label}  ->  {cfg['output']['results_path']}\n{'#'*60}")
+        session = os.path.join(cfg["output"]["base_dir"], cfg["output"]["session_id"])
+        print(f"\n{'#'*60}\nGEN MODEL: {label}  ->  {session}\n{'#'*60}")
         all_results[label] = run_pipeline(cfg)
 
     task = base_config["task"]["name"]
-    mode = (base_config.get("generation") or {}).get("mode", "forward")
-    out_dir = (base_config.get("output") or {}).get("results_dir", "results")
+    base_dir = (base_config.get("output") or {}).get("base_dir", "framework/data/runs")
+    out_dir = os.path.join(base_dir, task, "comparison")
     os.makedirs(out_dir, exist_ok=True)
-    combined_path = os.path.join(out_dir, f"comparison_{task}_{mode}.json")
+    combined_path = os.path.join(out_dir, "comparison.json")
     with open(combined_path, "w", encoding="utf-8") as f:
         json.dump(all_results, f, indent=2)
     print(f"\nCombined comparison written to {combined_path}")

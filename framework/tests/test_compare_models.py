@@ -13,14 +13,14 @@ class SlugTests(unittest.TestCase):
 
 
 class PerModelConfigTests(unittest.TestCase):
-    def _base(self, results_dir):
+    def _base(self, base_dir):
         return {
             "api_keys": {"anthropic": "k1", "openrouter": "k2"},
             "dataset": {"name": "d", "split": "train", "sample_size": 5},
             "generation": {"mode": "inverse", "provider": "x", "model": "y"},
             "task": {"name": "spam"},
             "task_models": [{"name": "m", "type": "roberta"}],
-            "output": {"results_dir": results_dir},
+            "output": {"base_dir": base_dir},
         }
 
     def test_merges_entry_and_names_output(self):
@@ -29,10 +29,8 @@ class PerModelConfigTests(unittest.TestCase):
             cfg = cm._per_model_config(base, {"provider": "anthropic", "model": "claude-haiku-4-5"})
             self.assertEqual(cfg["generation"]["provider"], "anthropic")
             self.assertEqual(cfg["generation"]["api_key"], "k1")  # re-resolved
-            self.assertEqual(
-                cfg["output"]["results_path"],
-                os.path.join(d, "spam_inverse_anthropic_claude_haiku_4_5.json"),
-            )
+            self.assertEqual(cfg["output"]["base_dir"], d)
+            self.assertEqual(cfg["output"]["session_id"], "anthropic_claude_haiku_4_5")
 
 
 class ParseCompareArgsTests(unittest.TestCase):
@@ -67,17 +65,24 @@ class RunComparisonTests(unittest.TestCase):
                 "generation": {"mode": "forward", "provider": "x", "model": "y"},
                 "task": {"name": "spam"},
                 "task_models": [{"name": "m", "type": "roberta"}],
-                "output": {"results_dir": d},
+                "output": {"base_dir": d},
                 "generation_models": [
                     {"provider": "openrouter", "model": "a"},
                     {"provider": "openrouter", "model": "b"},
                 ],
             }
-            seen_paths = []
+            seen_sessions = []
 
             def fake_run(cfg):
-                seen_paths.append(cfg["output"]["results_path"])
-                return {"m": {"f1": {"mean": 0.5, "std": 0.1}}}
+                seen_sessions.append(
+                    os.path.join(cfg["output"]["base_dir"], cfg["output"]["session_id"])
+                )
+                return {
+                    "m": {
+                        "generated": {"f1": {"mean": 0.5, "std": 0.1}},
+                        "real": {"f1": 0.6},
+                    }
+                }
 
             original = cm.run_pipeline
             cm.run_pipeline = fake_run
@@ -86,10 +91,12 @@ class RunComparisonTests(unittest.TestCase):
             finally:
                 cm.run_pipeline = original
 
-            self.assertEqual(len(seen_paths), 2)
-            self.assertEqual(len(set(seen_paths)), 2)  # distinct per-model files
+            self.assertEqual(len(seen_sessions), 2)
+            self.assertEqual(len(set(seen_sessions)), 2)  # distinct per-model session dirs
             self.assertIn("openrouter/a", results)
-            self.assertTrue(os.path.exists(os.path.join(d, "comparison_spam_forward.json")))
+            self.assertTrue(
+                os.path.exists(os.path.join(d, "spam", "comparison", "comparison.json"))
+            )
 
     def test_empty_generation_models_raises(self):
         with self.assertRaises(ValueError):
