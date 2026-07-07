@@ -31,8 +31,7 @@ def _parse_tagged(raw: str, tag: str) -> str | None:
     Falls back to accepting a bare single-line response (models often obey
     'respond with one line' but drop the prefix). Multiline output without the
     field is rejected. Generalizes _parse_inverse over the field name."""
-    import re as _re
-    m = _re.search(rf"(?im)^\s*{_re.escape(tag)}:\s*(.+?)\s*$", raw or "")
+    m = re.search(rf"(?im)^\s*{re.escape(tag)}:\s*(.+?)\s*$", raw or "")
     if m:
         return m.group(1).strip()
     text = (raw or "").strip()
@@ -377,8 +376,8 @@ class BaseGenerator(ABC):
             try:
                 raw = self.call_api(prompt)
                 gen_dt = time.monotonic() - t0
-                tagged = _parse_tagged(raw, tag) if f"{tag}:" in raw else None
-                if tagged is None and _looks_like_refusal(raw):
+                tag_re = re.compile(rf"(?im)^\s*{re.escape(tag)}:\s*(.+?)\s*$")
+                if tag_re.search(raw) is None and _looks_like_refusal(raw):
                     print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s — [SKIP] model refused: {raw[:60]!r}", flush=True)
                     refused += 1
                     continue

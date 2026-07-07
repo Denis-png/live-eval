@@ -59,6 +59,12 @@ class ClassConditionalTests(unittest.TestCase):
         out, _ = _run(["I'm sorry, I can't help create spam messages."], 1.0)
         self.assertEqual(out, [])
 
+    def test_refusal_with_tag_substring_is_skipped(self):
+        # A refusal that merely contains "Corrupted:" mid-line must be skipped,
+        # not accepted (the tag is not anchored at line start).
+        out, _ = _run(["I'm sorry, I can't produce a Corrupted: version of this message."], 1.0)
+        self.assertEqual(out, [])
+
     def test_judge_drops_sample(self):
         out, _ = _run(
             ["Corrupted: click http://x.com to win cash now"], 1.0,
