@@ -71,7 +71,6 @@ def validate_config(config: dict) -> None:
 
     required = {
         "task": ["name"],
-        "dataset": ["sample_size"],
         "generation": ["provider", "model", "num_runs", "sample_size"],
     }
     problems = []
@@ -110,12 +109,6 @@ def validate_config(config: dict) -> None:
         gen, ds = config["generation"], config["dataset"]
         if gen["num_runs"] < 1:
             problems.append(f"'generation.num_runs' must be >= 1 (got {gen['num_runs']})")
-        if gen["sample_size"] > ds["sample_size"]:
-            problems.append(
-                f"'generation.sample_size' ({gen['sample_size']}) exceeds the loaded "
-                f"pool 'dataset.sample_size' ({ds['sample_size']}) — runs would "
-                f"silently use fewer samples than requested"
-            )
         mode = gen.get("mode", "forward")
         if mode not in ("forward", "inverse"):
             problems.append(f"'generation.mode' must be 'forward' or 'inverse' (got '{mode}')")

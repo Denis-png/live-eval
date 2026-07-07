@@ -155,12 +155,12 @@ class ValidateConfigTests(unittest.TestCase):
             validate_config(cfg)
         self.assertIn("num_runs", str(ctx.exception))
 
-    def test_generation_sample_size_must_not_exceed_dataset_pool(self):
+    def test_generation_sample_size_may_exceed_dataset_pool(self):
+        # dataset.sample_size no longer exists; generation.sample_size is the
+        # single source of truth and is not cross-checked against the dataset.
         cfg = _full_config()
-        cfg["generation"]["sample_size"] = 99  # dataset pool is 50
-        with self.assertRaises(ValueError) as ctx:
-            validate_config(cfg)
-        self.assertIn("sample_size", str(ctx.exception))
+        cfg["generation"]["sample_size"] = 99  # dataset pool (unused) is 50
+        validate_config(cfg)  # must NOT raise
 
     def test_unknown_mode_rejected(self):
         cfg = _full_config()

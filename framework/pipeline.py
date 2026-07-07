@@ -105,7 +105,7 @@ def load_real_data(config: dict, task: BaseTask) -> list[dict]:
     Field parsing and row filtering is delegated to task.parse_row().
     """
     ds_config = resolve_dataset_config(config["dataset"])
-    sample_size = ds_config["sample_size"]
+    sample_size = config["generation"]["sample_size"]
 
     if ds_config["source"] == "local":
         print(f"Loading local dataset: {ds_config['path']} ...")
@@ -139,7 +139,7 @@ def load_real_data(config: dict, task: BaseTask) -> list[dict]:
         # sample_size counts USABLE samples (task.parse_row filters rows, e.g.
         # spam keeps HAM only) — the source ran out before filling the pool.
         print(
-            f"[WARN] dataset.sample_size asks for {sample_size} usable samples "
+            f"[WARN] generation.sample_size asks for {sample_size} usable samples "
             f"but the source only yielded {len(samples)} — the run proceeds on "
             f"the smaller pool.",
             file=sys.stderr,
