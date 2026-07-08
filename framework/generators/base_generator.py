@@ -18,23 +18,54 @@ _REFUSAL_RE = re.compile(
     r"I\s+won'?t|I\s+will\s+not|I(?:'m| am)\s+sorry|I\s+apologi[sz]e|as an AI)\b"
 )
 
+# Reasoning models (e.g. minimax-m3) wrap chain-of-thought in <think>…</think>.
+_THINK_BLOCK_RE = re.compile(r"(?is)<think>.*?</think>")
+
+
+def _strip_reasoning(raw: str) -> str:
+    """Drop closed <think>…</think> chain-of-thought blocks. An UNCLOSED <think>
+    (the model opened a reasoning block, never closed it, and glued the answer on)
+    is left intact — the tag parser recovers the answer from it."""
+    return _THINK_BLOCK_RE.sub("", raw or "").strip()
+
+
+def _is_reasoning_dump(text: str) -> bool:
+    """True when `text` (already reasoning-stripped) still opens with an unclosed
+    <think> — i.e. the model reasoned rather than refused."""
+    return text.lstrip().lower().startswith("<think>")
+
 
 def _looks_like_refusal(raw: str) -> bool:
     """Heuristic: does this response read as a safety refusal rather than an
-    answer? Checked only after the structured fields failed to parse."""
-    return bool(_REFUSAL_RE.search(raw[:400]))
+    answer? Checked only after the structured fields failed to parse. Reasoning
+    chatter is ignored: a model that emits a <think> block engaged with the task,
+    so its incidental 'I can't…' musings are not treated as a refusal."""
+    text = _strip_reasoning(raw)
+    if _is_reasoning_dump(text):
+        return False
+    return bool(_REFUSAL_RE.search(text[:400]))
 
 
 def _parse_tagged(raw: str, tag: str) -> str | None:
     """Pull the payload out of a single-field `<Tag>: <text>` response.
 
-    Falls back to accepting a bare single-line response (models often obey
-    'respond with one line' but drop the prefix). Multiline output without the
-    field is rejected. Generalizes _parse_inverse over the field name."""
-    m = re.search(rf"(?im)^\s*{re.escape(tag)}:\s*(.+?)\s*$", raw or "")
+    Handles reasoning models (e.g. minimax-m3): closed <think>…</think> blocks are
+    stripped, and when the response is an unclosed reasoning dump — where the
+    answer is glued onto the chain-of-thought with no line break — the LAST
+    `Tag:` occurrence anywhere is taken as the answer. Otherwise the tag must
+    start a line; a bare single-line response is accepted as a last resort.
+    Multiline output with no tag is rejected."""
+    if not raw:
+        return None
+    text = _strip_reasoning(raw)
+    if _is_reasoning_dump(text):
+        # Answer is glued after the CoT, so the tag is not at line start — take
+        # the last occurrence and the rest of its line.
+        matches = list(re.finditer(rf"(?i){re.escape(tag)}:[ \t]*(.+)", text))
+        return matches[-1].group(1).strip() or None if matches else None
+    m = re.search(rf"(?im)^\s*{re.escape(tag)}:\s*(.+?)\s*$", text)
     if m:
         return m.group(1).strip()
-    text = (raw or "").strip()
     if text and "\n" not in text:
         return text
     return None
