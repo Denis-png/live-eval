@@ -4,9 +4,6 @@ import time
 from abc import ABC, abstractmethod
 from typing import Callable
 
-_ERROR_TYPE_RE   = re.compile(r"(?im)^\s*Error\s*type:\s*(.+?)\s*$")
-_GENERATED_RE    = re.compile(r"(?im)^\s*Generated:\s*(.+?)\s*$")
-_GROUND_TRUTH_RE = re.compile(r"(?im)^\s*Ground\s*truth:\s*(.+?)\s*$")
 _REDUNDANCY_RE   = re.compile(r"(?im)^\s*Redundancy:\s*(trivial|valid)\b")
 _CORRECTION_RE   = re.compile(r"(?im)^\s*Correction:\s*(correct|incorrect)\b")
 _CORRUPTED_RE = re.compile(r"(?im)^\s*Corrupted:\s*(.+?)\s*$")
@@ -46,26 +43,34 @@ def _looks_like_refusal(raw: str) -> bool:
     return bool(_REFUSAL_RE.search(text[:400]))
 
 
+def _extract_field(text: str, field_pattern: str) -> str | None:
+    """Extract the value of a `Field: value` line from reasoning-stripped `text`.
+
+    Line-anchored normally; for an unclosed reasoning dump (the answer glued onto
+    the chain-of-thought with no line break) the field is mid-line, so take the
+    LAST occurrence's rest-of-line. `field_pattern` is a regex fragment, e.g.
+    re.escape("Corrupted") or r"Ground\\s*truth"."""
+    if _is_reasoning_dump(text):
+        matches = list(re.finditer(rf"(?i){field_pattern}:[ \t]*(.+)", text))
+        return matches[-1].group(1).strip() or None if matches else None
+    m = re.search(rf"(?im)^\s*{field_pattern}:\s*(.+?)\s*$", text)
+    return m.group(1).strip() if m else None
+
+
 def _parse_tagged(raw: str, tag: str) -> str | None:
     """Pull the payload out of a single-field `<Tag>: <text>` response.
 
     Handles reasoning models (e.g. minimax-m3): closed <think>…</think> blocks are
-    stripped, and when the response is an unclosed reasoning dump — where the
-    answer is glued onto the chain-of-thought with no line break — the LAST
-    `Tag:` occurrence anywhere is taken as the answer. Otherwise the tag must
-    start a line; a bare single-line response is accepted as a last resort.
+    stripped and, for an unclosed reasoning dump, the last `Tag:` occurrence is
+    taken as the answer (see _extract_field). A bare single-line response is
+    accepted as a last resort (models often obey 'one line' but drop the prefix).
     Multiline output with no tag is rejected."""
     if not raw:
         return None
     text = _strip_reasoning(raw)
-    if _is_reasoning_dump(text):
-        # Answer is glued after the CoT, so the tag is not at line start — take
-        # the last occurrence and the rest of its line.
-        matches = list(re.finditer(rf"(?i){re.escape(tag)}:[ \t]*(.+)", text))
-        return matches[-1].group(1).strip() or None if matches else None
-    m = re.search(rf"(?im)^\s*{re.escape(tag)}:\s*(.+?)\s*$", text)
-    if m:
-        return m.group(1).strip()
+    field = _extract_field(text, re.escape(tag))
+    if field is not None:
+        return field
     if text and "\n" not in text:
         return text
     return None
@@ -105,14 +110,14 @@ def _sample_categories(
 
 
 def _parse_generation(raw: str) -> tuple[str | None, str | None, str | None]:
-    """Pull (error_type, corrupted, gold) out of the 3-step CoT response."""
-    et = _ERROR_TYPE_RE.search(raw)
-    g  = _GENERATED_RE.search(raw)
-    gt = _GROUND_TRUTH_RE.search(raw)
+    """Pull (error_type, corrupted, gold) out of the 3-step CoT response.
+    Reasoning-model safe (see _extract_field): <think> blocks are stripped and a
+    field glued onto the chain-of-thought is still recovered."""
+    text = _strip_reasoning(raw or "")
     return (
-        et.group(1).strip() if et else None,
-        g.group(1).strip()  if g  else None,
-        gt.group(1).strip() if gt else None,
+        _extract_field(text, r"Error\s*type"),
+        _extract_field(text, r"Generated"),
+        _extract_field(text, r"Ground\s*truth"),
     )
 
 

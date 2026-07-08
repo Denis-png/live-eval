@@ -7,6 +7,7 @@ from random import Random
 from framework.generators.base_generator import (
     BaseGenerator,
     _looks_like_refusal,
+    _parse_generation,
     _parse_tagged,
 )
 
@@ -69,6 +70,46 @@ class GenerateClassConditionalReasoningTests(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["label"], "SPAM")
         self.assertIn("claim your $500", out[0]["text"])
+
+
+# GEC forward path (3-field CoT response) from a reasoning model: the first field
+# is glued to the end of the reasoning, the rest are on their own lines.
+_GEC_FORWARD_RAW = (
+    "<think>\nThe user wants me to corrupt the sentence by changing the verb "
+    "tense. Let me write it out.Error type: verb tense\n"
+    "Generated: She go to school yesterday.\n"
+    "Ground truth: She went to school yesterday."
+)
+
+
+class ParseGenerationReasoningTests(unittest.TestCase):
+    def test_forward_fields_extracted_from_reasoning(self):
+        self.assertEqual(
+            _parse_generation(_GEC_FORWARD_RAW),
+            ("verb tense", "She go to school yesterday.", "She went to school yesterday."),
+        )
+
+    def test_forward_plain_still_works(self):
+        raw = "Error type: tense\nGenerated: he go home\nGround truth: he goes home"
+        self.assertEqual(_parse_generation(raw), ("tense", "he go home", "he goes home"))
+
+    def test_forward_closed_think_stripped(self):
+        raw = "<think>plan</think>\nError type: tense\nGenerated: he go home\nGround truth: he goes home"
+        self.assertEqual(_parse_generation(raw), ("tense", "he go home", "he goes home"))
+
+
+class GenerateForwardReasoningTests(unittest.TestCase):
+    def test_reasoning_forward_kept(self):
+        gen = _ReasoningGen([_GEC_FORWARD_RAW])
+        out = gen.generate(
+            real_samples=[{"incorrect": "she go to school yesterday"}],
+            error_types=["verb tense"],
+            prompt_instruction="fix {sentence} ({error_type})",
+            sample_size=1,
+        )
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["corrupted"], "She go to school yesterday.")
+        self.assertEqual(out[0]["original"], "She went to school yesterday.")
 
 
 if __name__ == "__main__":
