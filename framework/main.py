@@ -75,6 +75,7 @@ def validate_config(config: dict) -> None:
 
     required = {
         "task": ["name"],
+        "dataset": [],
         "generation": ["provider", "model", "num_runs", "sample_size"],
     }
     problems = []
@@ -110,7 +111,7 @@ def validate_config(config: dict) -> None:
             )
 
     if not problems:
-        gen, ds = config["generation"], config["dataset"]
+        gen = config["generation"]
         if gen["num_runs"] < 1:
             problems.append(f"'generation.num_runs' must be >= 1 (got {gen['num_runs']})")
         mode = gen.get("mode", "forward")
@@ -201,7 +202,11 @@ def format_results_lines(results: dict) -> list[str]:
                 lines.append(base)
             else:  # nested metric (e.g. errant.precision)
                 for sub, v in val.items():
-                    lines.append(f"  generated.{ev}.{sub}: {v['mean']} ± {v['std']}")
+                    line = f"  generated.{ev}.{sub}: {v['mean']} ± {v['std']}"
+                    real_ev = real.get(ev)
+                    if isinstance(real_ev, dict) and sub in real_ev:
+                        line += f"   | real.{ev}.{sub}: {real_ev[sub]}"
+                    lines.append(line)
         for ev, val in real.items():
             if ev not in gen:
                 lines.append(f"  real.{ev}: {val}")

@@ -218,6 +218,16 @@ class ValidateConfigTests(unittest.TestCase):
             validate_config(cfg)
         self.assertIn("source", str(ctx.exception))
 
+    def test_missing_dataset_section_reports_named_error(self):
+        cfg = {
+            "task": {"name": "spam"},
+            "generation": {"provider": "openrouter", "model": "m", "num_runs": 1, "sample_size": 5},
+            "task_models": [{"name": "x", "type": "roberta"}],
+        }
+        with self.assertRaises(ValueError) as ctx:
+            validate_config(cfg)
+        self.assertIn("dataset", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

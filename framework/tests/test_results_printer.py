@@ -23,6 +23,19 @@ class ResultsPrinterTests(unittest.TestCase):
         text = "\n".join(format_results_lines(results))
         self.assertIn("0.5", text)
 
+    def test_prints_nested_metric_real_values(self):
+        results = {
+            "g": {
+                "generated": {"errant": {"precision": {"mean": 0.7, "std": 0.05}}},
+                "real": {"errant": {"precision": 0.8}},
+            }
+        }
+        text = "\n".join(format_results_lines(results))
+        self.assertIn("generated.errant.precision", text)
+        self.assertIn("0.7", text)
+        self.assertIn("real.errant.precision", text)
+        self.assertIn("0.8", text)
+
 
 if __name__ == "__main__":
     unittest.main()
