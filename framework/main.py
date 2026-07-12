@@ -31,9 +31,11 @@ def parse_args():
     parser.add_argument("--runs",         type=int, help="Number of GET runs")
     parser.add_argument("--sample-size",  type=int, dest="sample_size", help="Synthetic samples per run")
     parser.add_argument("--mode",         choices=["forward", "inverse"], help="Generation mode")
-    parser.add_argument("--output",       help="Results JSON path (output.results_path)")
+    parser.add_argument("--output",       help="Output base directory (output.base_dir)")
     parser.add_argument("--judge", action=argparse.BooleanOptionalAction, default=None,
                         help="Enable/disable the LLM-as-judge filter (--judge / --no-judge)")
+    parser.add_argument("--real-baseline", action=argparse.BooleanOptionalAction, default=None,
+                        help="Evaluate models on the real benchmark too (--real-baseline / --no-real-baseline)")
     return parser.parse_args()
 
 
@@ -53,9 +55,11 @@ def apply_overrides(config: dict, args) -> dict:
     if getattr(args, "mode", None) is not None:
         config["generation"]["mode"] = args.mode
     if getattr(args, "output", None) is not None:
-        config.setdefault("output", {})["results_path"] = args.output
+        config.setdefault("output", {})["base_dir"] = args.output
     if getattr(args, "judge", None) is not None:
         config.setdefault("judge", {})["enabled"] = args.judge
+    if getattr(args, "real_baseline", None) is not None:
+        config.setdefault("evaluation", {})["real_baseline"] = args.real_baseline
     return config
 
 
@@ -71,7 +75,7 @@ def validate_config(config: dict) -> None:
 
     required = {
         "task": ["name"],
-        "dataset": ["sample_size"],
+        "dataset": [],
         "generation": ["provider", "model", "num_runs", "sample_size"],
     }
     problems = []
@@ -107,15 +111,9 @@ def validate_config(config: dict) -> None:
             )
 
     if not problems:
-        gen, ds = config["generation"], config["dataset"]
+        gen = config["generation"]
         if gen["num_runs"] < 1:
             problems.append(f"'generation.num_runs' must be >= 1 (got {gen['num_runs']})")
-        if gen["sample_size"] > ds["sample_size"]:
-            problems.append(
-                f"'generation.sample_size' ({gen['sample_size']}) exceeds the loaded "
-                f"pool 'dataset.sample_size' ({ds['sample_size']}) — runs would "
-                f"silently use fewer samples than requested"
-            )
         mode = gen.get("mode", "forward")
         if mode not in ("forward", "inverse"):
             problems.append(f"'generation.mode' must be 'forward' or 'inverse' (got '{mode}')")
@@ -189,6 +187,32 @@ def _resolve_api_keys(config: dict, strict: bool = False) -> dict:
     return config
 
 
+def format_results_lines(results: dict) -> list[str]:
+    """Render the nested {model: {generated, real?}} results as printable lines."""
+    lines = []
+    for model, blocks in results.items():
+        lines.append(f"\n{model}:")
+        gen = blocks.get("generated", {})
+        real = blocks.get("real", {})
+        for ev, val in gen.items():
+            if isinstance(val, dict) and "mean" in val:
+                base = f"  generated.{ev}: {val['mean']} ± {val['std']}"
+                if ev in real:
+                    base += f"   | real.{ev}: {real[ev]}"
+                lines.append(base)
+            else:  # nested metric (e.g. errant.precision)
+                for sub, v in val.items():
+                    line = f"  generated.{ev}.{sub}: {v['mean']} ± {v['std']}"
+                    real_ev = real.get(ev)
+                    if isinstance(real_ev, dict) and sub in real_ev:
+                        line += f"   | real.{ev}.{sub}: {real_ev[sub]}"
+                    lines.append(line)
+        for ev, val in real.items():
+            if ev not in gen:
+                lines.append(f"  real.{ev}: {val}")
+    return lines
+
+
 def main():
     args = parse_args()
     _load_dotenv()
@@ -223,16 +247,10 @@ def main():
         sys.exit(f"\n[ERROR] {e}")
 
     print("\n" + "=" * 55)
-    print("FINAL RESULTS (mean ± std across runs)")
+    print("FINAL RESULTS (generated mean ± std across runs | real baseline)")
     print("=" * 55)
-    for model, scores in results.items():
-        print(f"\n{model}:")
-        for evaluator, values in scores.items():
-            if isinstance(values, dict) and "mean" in values:
-                print(f"  {evaluator}: {values['mean']} ± {values['std']}")
-            else:
-                for sub, v in values.items():
-                    print(f"  {evaluator}.{sub}: {v['mean']} ± {v['std']}")
+    for line in format_results_lines(results):
+        print(line)
 
 
 if __name__ == "__main__":

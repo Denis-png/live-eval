@@ -50,8 +50,8 @@ class ApplyOverridesTests(unittest.TestCase):
         self.assertEqual(cfg["generation"]["mode"], "inverse")
 
     def test_output_override_creates_output_block(self):
-        cfg = apply_overrides(_config(), _args(output="out/r.json"))
-        self.assertEqual(cfg["output"]["results_path"], "out/r.json")
+        cfg = apply_overrides(_config(), _args(output="out/runs"))
+        self.assertEqual(cfg["output"]["base_dir"], "out/runs")
 
     def test_no_judge_disables_judge_block(self):
         cfg = _config()
@@ -155,12 +155,12 @@ class ValidateConfigTests(unittest.TestCase):
             validate_config(cfg)
         self.assertIn("num_runs", str(ctx.exception))
 
-    def test_generation_sample_size_must_not_exceed_dataset_pool(self):
+    def test_generation_sample_size_may_exceed_dataset_pool(self):
+        # dataset.sample_size no longer exists; generation.sample_size is the
+        # single source of truth and is not cross-checked against the dataset.
         cfg = _full_config()
-        cfg["generation"]["sample_size"] = 99  # dataset pool is 50
-        with self.assertRaises(ValueError) as ctx:
-            validate_config(cfg)
-        self.assertIn("sample_size", str(ctx.exception))
+        cfg["generation"]["sample_size"] = 99  # dataset pool (unused) is 50
+        validate_config(cfg)  # must NOT raise
 
     def test_unknown_mode_rejected(self):
         cfg = _full_config()
@@ -217,6 +217,16 @@ class ValidateConfigTests(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             validate_config(cfg)
         self.assertIn("source", str(ctx.exception))
+
+    def test_missing_dataset_section_reports_named_error(self):
+        cfg = {
+            "task": {"name": "spam"},
+            "generation": {"provider": "openrouter", "model": "m", "num_runs": 1, "sample_size": 5},
+            "task_models": [{"name": "x", "type": "roberta"}],
+        }
+        with self.assertRaises(ValueError) as ctx:
+            validate_config(cfg)
+        self.assertIn("dataset", str(ctx.exception))
 
 
 if __name__ == "__main__":

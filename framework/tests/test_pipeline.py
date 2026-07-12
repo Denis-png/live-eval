@@ -28,8 +28,8 @@ class LoadRealDataLocalTests(unittest.TestCase):
             path = os.path.join(d, "spam.csv")
             with open(path, "w", encoding="utf-8") as f:
                 f.write("label,text\nham,one\nSPAM,ignore me\nham,two\nham,three\n")
-            config = {"dataset": {"source": "local", "sample_size": 2,
-                                  "local": {"path": path}}}
+            config = {"dataset": {"source": "local", "local": {"path": path}},
+                      "generation": {"sample_size": 2}}
             samples = load_real_data(config, _SpamLikeTask())
         # SPAM row filtered by parse_row; first-N sampling stops at 2.
         self.assertEqual(samples, [{"incorrect": "one"}, {"incorrect": "two"}])
@@ -40,8 +40,9 @@ class LoadRealDataLocalTests(unittest.TestCase):
             with open(path, "w", encoding="utf-8") as f:
                 f.write("S He go home .\n"
                         "A 1 2|||R:VERB:SVA|||goes|||REQUIRED|||-NONE-|||0\n")
-            config = {"dataset": {"source": "local", "sample_size": 5,
-                                  "local": {"path": path, "format": "m2"}}}
+            config = {"dataset": {"source": "local",
+                                  "local": {"path": path, "format": "m2"}},
+                      "generation": {"sample_size": 5}}
             samples = load_real_data(config, _GecLikeTask())
         self.assertEqual(samples, [{"incorrect": "He go home .",
                                     "correct": "He goes home ."}])
@@ -56,8 +57,8 @@ class LoadRealDataLocalTests(unittest.TestCase):
             path = os.path.join(d, "spam.csv")
             with open(path, "w", encoding="utf-8") as f:
                 f.write("label,text\nham,one\nham,two\n")
-            config = {"dataset": {"source": "local", "sample_size": 5,
-                                  "local": {"path": path}}}
+            config = {"dataset": {"source": "local", "local": {"path": path}},
+                      "generation": {"sample_size": 5}}
             stderr = io.StringIO()
             with contextlib.redirect_stderr(stderr):
                 samples = load_real_data(config, _SpamLikeTask())
@@ -66,8 +67,8 @@ class LoadRealDataLocalTests(unittest.TestCase):
         self.assertIn("5", stderr.getvalue())
 
     def test_local_missing_file_raises_with_path(self):
-        config = {"dataset": {"source": "local", "sample_size": 5,
-                              "local": {"path": "no/such.csv"}}}
+        config = {"dataset": {"source": "local", "local": {"path": "no/such.csv"}},
+                  "generation": {"sample_size": 5}}
         with self.assertRaises(ValueError) as ctx:
             load_real_data(config, _SpamLikeTask())
         self.assertIn("no/such.csv", str(ctx.exception))

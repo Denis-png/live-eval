@@ -89,6 +89,15 @@ class GECTask(BaseTask):
             return None
         return {"incorrect": incorrect, "correct": correct}
 
+    def get_real_eval_samples(self, config, real_data):
+        """Real GEC benchmark: score models on the real incorrect inputs against
+        the real correct references."""
+        return [
+            {"text": it["incorrect"], "corrupted": it["incorrect"], "original": it["correct"]}
+            for it in real_data
+            if it.get("incorrect") and it.get("correct")
+        ]
+
     def profile_error_distribution(self, real_data, count_max=5, config: dict | None = None, annotator=None):
         """Empirical inverse-mode distribution: ERRANT-annotate real
         incorrect->correct pairs, keeping only this task's supported edit types."""

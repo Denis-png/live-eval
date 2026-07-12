@@ -72,6 +72,30 @@ class BaseTask(ABC):
         Return {} if the task does not support inverse generation."""
         return {}
 
+    def get_generation_strategy(self) -> str:
+        """How the pipeline generates synthetic data for this task:
+          "corruption"        — corrupt a source text (forward/inverse); text→text tasks.
+          "class_conditional" — sample a target class, then generate an example of it;
+                                classification tasks. Ignores generation.mode.
+        Default "corruption"."""
+        return "corruption"
+
+    def profile_dataset(self, rows: list[dict]) -> dict | None:
+        """Profile a labeled dataset (rows with "text"+"label") for real-vs-generated
+        fidelity. Return None to opt out (default). Override in classification tasks."""
+        return None
+
+    def compare_profiles(self, real: dict, generated: dict) -> dict | None:
+        """Fidelity comparison between two profile_dataset() outputs. Default None."""
+        return None
+
+    def get_real_eval_samples(self, config: dict, real_data: list[dict]) -> list[dict] | None:
+        """Eval-ready rows for the REAL benchmark, carrying the same schema the
+        evaluators expect (classification: text+label; text→text: text+corrupted+
+        original). Feeds both the real baseline and real-side profiling. Default
+        None → real baseline skipped."""
+        return None
+
     def profile_error_distribution(self, real_data: list[dict],
                                    count_max: int = 5, config: dict | None = None) -> dict | None:
         """Empirical inverse-mode error distribution derived from real_data (and
