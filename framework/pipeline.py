@@ -406,8 +406,13 @@ def _evaluate_real_baseline(task, config, real_reference, evaluator_fns) -> dict
     return out
 
 
-def _nest_results(generated_agg: dict, real_scores: dict) -> dict:
-    """Group each model's scores as {generated, real?}."""
+def _nest_results(generated_agg: dict, real_scores: dict,
+                  all_run_scores: list[dict] | None = None) -> dict:
+    """Group each model's scores as {generated, real?, runs?}.
+
+    `runs` lists the model's score dict for each completed run. It is additive —
+    the printer and compare_models read only generated/real — and it is what the
+    run-variance figure plots."""
     final = {}
     for model in set(generated_agg) | set(real_scores):
         final[model] = {}
@@ -415,6 +420,9 @@ def _nest_results(generated_agg: dict, real_scores: dict) -> dict:
             final[model]["generated"] = generated_agg[model]
         if model in real_scores:
             final[model]["real"] = real_scores[model]
+        runs = [run[model] for run in (all_run_scores or []) if model in run]
+        if runs:
+            final[model]["runs"] = runs
     return final
 
 
@@ -434,6 +442,18 @@ def _write_profile_artifacts(task, real_reference, all_generated, paths) -> None
         json.dump({"real": real_profile, "generated": generated_profile,
                    "fidelity": fidelity}, f, indent=2, ensure_ascii=False)
     print(f"Fidelity profile saved to {paths['profile']}")
+
+
+def _render_plots(config: dict, paths: dict) -> None:
+    """Render the session's figures. Runs AFTER results/profile are on disk and is
+    fail-soft: plotting must never cost a run that already succeeded."""
+    if not (config.get("output") or {}).get("plots", True):
+        return
+    try:
+        from framework.plotting.session import render_session
+        render_session(paths["session_dir"])
+    except Exception as e:
+        print(f"[WARN] plotting failed (results are unaffected): {e}", file=sys.stderr)
 
 
 # ── Main pipeline ─────────────────────────────────────────────
@@ -497,7 +517,7 @@ def run_pipeline(config: dict) -> dict:
         generated_agg = aggregate(all_run_scores)
         real_scores = _evaluate_real_baseline(task, config, real_reference,
                                               evaluator_fns) if real_baseline else {}
-        final = _nest_results(generated_agg, real_scores)
+        final = _nest_results(generated_agg, real_scores, all_run_scores)
         meta = _build_meta(config, runs_completed=run_idx + 1,
                            effective_samples_per_run=effective_samples,
                            real_baseline=bool(real_scores))
@@ -506,5 +526,6 @@ def run_pipeline(config: dict) -> dict:
             print(f"Partial results (run {run_idx + 1}/{num_runs}) saved to {paths['results']}")
 
     _write_profile_artifacts(task, real_reference, all_generated, paths)
+    _render_plots(config, paths)
     print(f"\nResults saved to {paths['results']}")
     return final

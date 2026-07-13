@@ -103,6 +103,7 @@ compute:
 #   plots/                  — figures (if generated)
 output:
   base_dir: "framework/data/runs"
+  plots: true # render figures into <session>/plots/ at the end of a run (--no-plots to skip)
 
 # ── Multi-model comparison (read only by scripts/compare_models.py) ──
 # Runs each entry over the SAME sample; each entry gets its own session under

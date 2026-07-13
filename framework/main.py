@@ -36,6 +36,8 @@ def parse_args():
                         help="Enable/disable the LLM-as-judge filter (--judge / --no-judge)")
     parser.add_argument("--real-baseline", action=argparse.BooleanOptionalAction, default=None,
                         help="Evaluate models on the real benchmark too (--real-baseline / --no-real-baseline)")
+    parser.add_argument("--plots", action=argparse.BooleanOptionalAction, default=None,
+                        help="Render figures into the session's plots/ dir (--plots / --no-plots)")
     return parser.parse_args()
 
 
@@ -60,6 +62,8 @@ def apply_overrides(config: dict, args) -> dict:
         config.setdefault("judge", {})["enabled"] = args.judge
     if getattr(args, "real_baseline", None) is not None:
         config.setdefault("evaluation", {})["real_baseline"] = args.real_baseline
+    if getattr(args, "plots", None) is not None:
+        config.setdefault("output", {})["plots"] = args.plots
     return config
 
 
