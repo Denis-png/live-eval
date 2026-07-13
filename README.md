@@ -46,6 +46,9 @@ so it can be inspected later.
             errant_distribution.py  - ERRANT-based GEC error distribution
             spam_distribution.py  - spam-signal-based spam error distribution
             fidelity.py           - Jensen-Shannon divergence for distribution fidelity
+        plotting/            - figures from a run session (matplotlib, headless)
+            plots.py         - pure figure builders (dict -> Figure)
+            session.py       - load a session, render + save PNGs (fail-soft)
         models/gec/              - GEC models under evaluation
             seq2seq.py (t5/gec_v1/coedit), claude.py
         models/spam/             - Spam models under evaluation
@@ -180,6 +183,28 @@ JSD reflects detector-visible distribution match, not ground-truth semantics.
 
 ---
 
+## Plots
+
+Every run renders figures into its session's `plots/` dir (`output.plots: true`;
+`--no-plots` to skip). Plotting is fail-soft — a missing matplotlib or a broken
+figure warns and is skipped, never costing a run whose results are already written.
+
+- `generated_vs_real_<model>.png` — per evaluator, generated (mean ± std) beside the
+  real-benchmark baseline. The headline "is the synthetic benchmark a good proxy?" chart.
+- `run_variance_<model>.png` — each run's score per evaluator, showing run-to-run
+  instability (needs the `runs` block, added to `results.json` by this feature).
+- `fidelity.png` — real vs generated spam-signal rates and class balance, titled with
+  the Jensen-Shannon divergences. Classification tasks only.
+
+Render any past session standalone:
+
+    python -m framework.plotting framework/data/runs/spam/<session>/ [--out DIR]
+
+Metrics on different scales (e.g. GEC's `n_edits` count vs 0–1 scores) are split into
+separate panels — never a dual axis.
+
+---
+
 ## Comparing Generation Models (same benchmark sample)
 
 Use the multi-model driver to run several generation models over the identical
@@ -226,7 +251,7 @@ Each run session gets its own directory under `output.base_dir/<task>/<session>/
         run_1.json …   - each run's synthetic data (never reused for eval)
     real_sample.json   - the real reference sample (classification tasks)
     profile.json       - {real, generated, fidelity} (classification tasks)
-    plots/             - reserved for figures
+    plots/             - generated_vs_real_<model>.png, run_variance_<model>.png, fidelity.png (classification tasks)
 
 `results.json` has two top-level keys:
 
