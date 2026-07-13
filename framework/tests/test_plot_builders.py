@@ -1,0 +1,76 @@
+import unittest
+
+from framework.plotting.plots import (
+    _split_by_scale,
+    plot_fidelity,
+    plot_generated_vs_real,
+    plot_run_variance,
+)
+
+_GENERATED = {"f1": {"mean": 0.82, "std": 0.03}, "recall": {"mean": 0.74, "std": 0.05}}
+_REAL = {"f1": 0.90, "recall": 0.88}
+_RUNS = [{"f1": 0.80, "recall": 0.70}, {"f1": 0.85, "recall": 0.78}]
+_PROFILE = {
+    "real": {
+        "class_balance": {"spam_fraction": 0.5},
+        "signal_rate": {"phishing_link": 0.4, "urgency": 0.6},
+    },
+    "generated": {
+        "class_balance": {"spam_fraction": 0.45},
+        "signal_rate": {"phishing_link": 0.5, "urgency": 0.3},
+    },
+    "fidelity": {"type_dist_jsd": 0.12, "count_dist_jsd": 0.08},
+}
+
+
+class SplitByScaleTests(unittest.TestCase):
+    def test_all_unit_metrics_one_group(self):
+        self.assertEqual(_split_by_scale({"f1": 0.8, "recall": 0.6}), [["f1", "recall"]])
+
+    def test_out_of_unit_metric_gets_its_own_group(self):
+        # n_edits (a count) must never share a y-axis with 0-1 scores.
+        groups = _split_by_scale({"f1": 0.8, "n_edits": 3.4})
+        self.assertEqual(groups, [["f1"], ["n_edits"]])
+
+
+class GeneratedVsRealTests(unittest.TestCase):
+    def test_draws_both_series_with_legend(self):
+        fig = plot_generated_vs_real("m", _GENERATED, _REAL)
+        ax = fig.axes[0]
+        # 2 series x 2 metrics = 4 bars
+        self.assertEqual(len(ax.containers[0]), 2)
+        labels = [t.get_text() for t in ax.get_legend().get_texts()]
+        self.assertEqual(len(labels), 2)
+        self.assertTrue(any("generated" in l for l in labels))
+        self.assertTrue(any("real" in l for l in labels))
+
+    def test_without_real_still_renders_generated_only(self):
+        fig = plot_generated_vs_real("m", _GENERATED, None)
+        self.assertGreaterEqual(len(fig.axes), 1)
+
+    def test_out_of_unit_metric_makes_a_second_subplot(self):
+        gen = {"gleu": {"mean": 0.5, "std": 0.0}, "n_edits": {"mean": 3.2, "std": 0.4}}
+        fig = plot_generated_vs_real("m", gen, None)
+        self.assertEqual(len(fig.axes), 2)  # small multiples, never a dual axis
+
+
+class RunVarianceTests(unittest.TestCase):
+    def test_plots_one_point_per_run_per_metric(self):
+        fig = plot_run_variance("m", _RUNS)
+        ax = fig.axes[0]
+        self.assertGreaterEqual(len(ax.collections), 1)  # scatter of run scores
+
+    def test_empty_runs_still_returns_figure(self):
+        fig = plot_run_variance("m", [])
+        self.assertGreaterEqual(len(fig.axes), 1)
+
+
+class FidelityTests(unittest.TestCase):
+    def test_two_panels_and_jsd_in_title(self):
+        fig = plot_fidelity(_PROFILE)
+        self.assertEqual(len(fig.axes), 2)  # signal rates + class balance
+        self.assertIn("JSD", fig._suptitle.get_text())
+
+
+if __name__ == "__main__":
+    unittest.main()
