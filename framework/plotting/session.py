@@ -36,8 +36,8 @@ def load_session(session_dir: str) -> tuple[dict, dict | None]:
     try:
         with open(results_path, encoding="utf-8") as f:
             results = json.load(f)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Could not parse '{results_path}': {e}") from e
+    except (json.JSONDecodeError, OSError) as e:
+        raise ValueError(f"Could not read '{results_path}': {e}") from e
 
     profile = None
     profile_path = os.path.join(session_dir, "profile.json")
@@ -45,8 +45,8 @@ def load_session(session_dir: str) -> tuple[dict, dict | None]:
         try:
             with open(profile_path, encoding="utf-8") as f:
                 profile = json.load(f)
-        except json.JSONDecodeError:
-            print(f"[WARN] ignoring unparseable {profile_path}", file=sys.stderr)
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"[WARN] ignoring unreadable {profile_path}: {e}", file=sys.stderr)
     return results, profile
 
 
@@ -72,11 +72,25 @@ def render_session(session_dir: str, out_dir: str | None = None) -> list[str]:
     import matplotlib.pyplot as plt
 
     out_dir = out_dir or os.path.join(session_dir, "plots")
-    os.makedirs(out_dir, exist_ok=True)
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except OSError as e:
+        print(f"[WARN] could not create output dir '{out_dir}': {e}", file=sys.stderr)
+        return []
     meta = results.get("meta") or {}
     written: list[str] = []
 
-    for model, blocks in (results.get("results") or {}).items():
+    model_results = results.get("results") or {}
+    if not isinstance(model_results, dict):
+        print(f"[WARN] 'results' is not a dict (got {type(model_results).__name__}) "
+              "— skipping per-model figures", file=sys.stderr)
+        model_results = {}
+
+    for model, blocks in model_results.items():
+        if not isinstance(blocks, dict):
+            print(f"[WARN] results for model '{model}' are not a dict "
+                  f"(got {type(blocks).__name__}) — skipping", file=sys.stderr)
+            continue
         slug = _slug(model)
         jobs = [(
             f"generated_vs_real_{slug}.png",

@@ -47,6 +47,23 @@ class LoadSessionTests(unittest.TestCase):
                 S.load_session(d)
             self.assertIn(d, str(ctx.exception))
 
+    @unittest.skipIf(os.geteuid() == 0, "root ignores file permission bits")
+    def test_unreadable_results_raises_value_error_not_os_error(self):
+        # A results.json that exists (passes the isfile check) but cannot be
+        # opened — e.g. permission bits — must surface as ValueError, not the
+        # raw OSError/PermissionError that open()/json.load() would raise.
+        with tempfile.TemporaryDirectory() as d:
+            results_path = os.path.join(d, "results.json")
+            with open(results_path, "w") as f:
+                f.write("{}")
+            os.chmod(results_path, 0o000)
+            try:
+                with self.assertRaises(ValueError) as ctx:
+                    S.load_session(d)
+                self.assertIn(results_path, str(ctx.exception))
+            finally:
+                os.chmod(results_path, 0o644)
+
 
 class RenderSessionTests(unittest.TestCase):
     def test_renders_all_three_figures(self):
@@ -81,6 +98,25 @@ class RenderSessionTests(unittest.TestCase):
             _make_session(d)
             with patch.object(S, "_import_plots", side_effect=ImportError("no matplotlib")):
                 self.assertEqual(S.render_session(d), [])  # warns, does not raise
+
+    def test_malformed_model_shape_is_fail_soft(self):
+        # results["<model>"] is a string, not a dict-of-metrics: must warn and
+        # skip that model's figures rather than raising AttributeError.
+        with tempfile.TemporaryDirectory() as d:
+            malformed = {"meta": {}, "results": {"m": "not-a-dict"}}
+            with open(os.path.join(d, "results.json"), "w") as f:
+                json.dump(malformed, f)
+            written = S.render_session(d)  # must not raise
+            self.assertEqual(written, [])
+
+    def test_out_dir_exists_as_file_is_fail_soft(self):
+        with tempfile.TemporaryDirectory() as d:
+            _make_session(d)
+            out_dir = os.path.join(d, "out_as_file")
+            with open(out_dir, "w") as f:
+                f.write("not a directory")
+            written = S.render_session(d, out_dir=out_dir)  # must not raise
+            self.assertEqual(written, [])
 
     def test_one_broken_figure_does_not_stop_the_others(self):
         with tempfile.TemporaryDirectory() as d:
