@@ -96,3 +96,24 @@ class FidelityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HiddenMetricTests(unittest.TestCase):
+    """fpr carries no signal in the figures (it reads 0.00/0.00 on a good model).
+    It stays in results.json — this only hides it from the charts."""
+
+    def _xtick_labels(self, fig):
+        return [t.get_text() for ax in fig.axes for t in ax.get_xticklabels()]
+
+    def test_fpr_hidden_from_generated_vs_real(self):
+        gen = {"f1": {"mean": 0.82, "std": 0.03}, "fpr": {"mean": 0.0, "std": 0.0}}
+        real = {"f1": 0.90, "fpr": 0.0}
+        labels = self._xtick_labels(plot_generated_vs_real("m", gen, real))
+        self.assertNotIn("fpr", labels)
+        self.assertIn("f1", labels)
+
+    def test_fpr_hidden_from_run_variance(self):
+        runs = [{"f1": 0.80, "fpr": 0.0}, {"f1": 0.85, "fpr": 0.0}]
+        labels = self._xtick_labels(plot_run_variance("m", runs))
+        self.assertNotIn("fpr", labels)
+        self.assertIn("f1", labels)

@@ -203,6 +203,10 @@ Render any past session standalone:
 Metrics on different scales (e.g. GEC's `n_edits` count vs 0–1 scores) are split into
 separate panels — never a dual axis.
 
+`fpr` is omitted from the figures (it reads a flat 0.00 against a 0.00 baseline, so it is
+dead space in the chart). It is still computed and written to `results.json` — this only
+hides it from the plots. See `HIDDEN_METRICS` in `framework/plotting/plots.py`.
+
 ---
 
 ## Comparing Generation Models (same benchmark sample)

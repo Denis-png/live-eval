@@ -49,6 +49,19 @@ def flatten_mean_std(block: dict) -> dict[str, tuple[float, float]]:
     return out
 
 
+# Evaluators that carry no signal in the figures — fpr reads a flat 0.00 against a
+# 0.00 baseline on any decent classifier, so it is dead space in the chart. They are
+# still computed and written to results.json; this only hides them from the plots.
+# Lives here (not in config) because the standalone CLI renders from the session
+# artifacts alone and must produce the same figures the pipeline did.
+HIDDEN_METRICS = frozenset({"fpr"})
+
+
+def _visible(names) -> list[str]:
+    """Metric names to draw, dropping the ones with no signal (see HIDDEN_METRICS)."""
+    return [n for n in names if n not in HIDDEN_METRICS]
+
+
 def _split_by_scale(values: dict[str, float]) -> list[list[str]]:
     """Group metric names so that each group shares one y-scale.
 
@@ -75,7 +88,7 @@ def plot_generated_vs_real(model: str, generated: dict, real: dict | None,
     gen = flatten_mean_std(generated)
     real_flat = flatten_point(real or {})
     peak = {n: max(gen.get(n, (0.0, 0.0))[0], real_flat.get(n, 0.0))
-            for n in set(gen) | set(real_flat)}
+            for n in _visible(set(gen) | set(real_flat))}
     groups = _split_by_scale(peak) or [[]]
 
     fig, axes = plt.subplots(
@@ -130,7 +143,7 @@ def plot_run_variance(model: str, runs: list[dict], generated: dict | None = Non
     Shows run-to-run instability — the core GET signal. Deliberately unlabelled:
     a number on every dot would be chaos; the y-axis carries the values."""
     per_run = [flatten_point(r) for r in (runs or [])]
-    names = sorted({n for r in per_run for n in r})
+    names = sorted(_visible({n for r in per_run for n in r}))
     peak = {n: max([r[n] for r in per_run if n in r] or [0.0]) for n in names}
     groups = _split_by_scale(peak) or [[]]
 
