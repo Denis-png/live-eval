@@ -94,12 +94,19 @@ def plot_generated_vs_real(model: str, generated: dict, real: dict | None,
         # call: ax.bar(..., yerr=...) would register its internal errorbar
         # container in ax.containers *before* the BarContainer itself, which
         # shifts containers[0] away from the "generated" bars callers expect.
-        bars = ax.bar(gen_x, gen_vals, width,
-                      label="generated (mean ± std)", color=SERIES_GENERATED)
-        ax.errorbar(gen_x, gen_vals, yerr=[gen.get(n, (0.0, 0.0))[1] for n in names],
+        gen_stds = [gen.get(n, (0.0, 0.0))[1] for n in names]
+        ax.bar(gen_x, gen_vals, width,
+              label="generated (mean ± std)", color=SERIES_GENERATED)
+        ax.errorbar(gen_x, gen_vals, yerr=gen_stds,
                     fmt="none", capsize=3, ecolor=INK_MUTED, elinewidth=1.2,
                     label="_nolegend_")
-        ax.bar_label(bars, fmt="%.2f", padding=2, color=INK_MUTED, fontsize=8)
+        # Anchor each value label above the error-bar whisker (val + std), not just
+        # the bar top — bar_label's point-based padding sits inside the whisker
+        # whenever std is non-trivial, drawing the cap straight through the digits.
+        for xi, val, std in zip(gen_x, gen_vals, gen_stds):
+            ax.annotate(f"{val:.2f}", xy=(xi, val + std), xytext=(0, 3),
+                        textcoords="offset points", ha="center", va="bottom",
+                        color=INK_MUTED, fontsize=8)
         if real_flat:
             rbars = ax.bar([i + width / 2 + 0.01 for i in x],
                            [real_flat.get(n, 0.0) for n in names], width,
