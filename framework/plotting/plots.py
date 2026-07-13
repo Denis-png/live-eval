@@ -10,7 +10,6 @@ matplotlib.use("Agg")  # headless: no display/GUI backend on the server
 import matplotlib.pyplot as plt  # noqa: E402  (must follow matplotlib.use)
 
 from framework.plotting.style import (  # noqa: E402
-    GRID,
     INK,
     INK_MUTED,
     SERIES_GENERATED,
@@ -81,6 +80,7 @@ def plot_generated_vs_real(model: str, generated: dict, real: dict | None,
 
     fig, axes = plt.subplots(
         1, len(groups), figsize=(max(6.0, 1.6 * len(peak) + 2), 4.4), squeeze=False,
+        gridspec_kw={"width_ratios": [max(len(g), 1) for g in groups]},
     )
     fig.patch.set_facecolor(SURFACE)
     width = 0.38  # leaves a visible surface gap between the paired bars
@@ -136,6 +136,7 @@ def plot_run_variance(model: str, runs: list[dict], generated: dict | None = Non
 
     fig, axes = plt.subplots(
         1, len(groups), figsize=(max(6.0, 1.5 * len(names) + 2), 4.4), squeeze=False,
+        gridspec_kw={"width_ratios": [max(len(g), 1) for g in groups]},
     )
     fig.patch.set_facecolor(SURFACE)
 

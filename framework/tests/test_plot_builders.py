@@ -1,11 +1,14 @@
 import unittest
 
+from matplotlib.colors import to_hex
+
 from framework.plotting.plots import (
     _split_by_scale,
     plot_fidelity,
     plot_generated_vs_real,
     plot_run_variance,
 )
+from framework.plotting.style import SERIES_GENERATED, SERIES_REAL
 
 _GENERATED = {"f1": {"mean": 0.82, "std": 0.03}, "recall": {"mean": 0.74, "std": 0.05}}
 _REAL = {"f1": 0.90, "recall": 0.88}
@@ -53,6 +56,14 @@ class GeneratedVsRealTests(unittest.TestCase):
         fig = plot_generated_vs_real("m", gen, None)
         self.assertEqual(len(fig.axes), 2)  # small multiples, never a dual axis
 
+    def test_colour_follows_the_entity(self):
+        fig = plot_generated_vs_real("m", _GENERATED, _REAL)
+        ax = fig.axes[0]
+        # containers[0] = generated bars, containers[1] = the errorbar overlay
+        # (no patches of its own), containers[2] = the real bars.
+        self.assertEqual(to_hex(ax.containers[0].patches[0].get_facecolor()), SERIES_GENERATED)
+        self.assertEqual(to_hex(ax.containers[2].patches[0].get_facecolor()), SERIES_REAL)
+
 
 class RunVarianceTests(unittest.TestCase):
     def test_plots_one_point_per_run_per_metric(self):
@@ -69,6 +80,17 @@ class FidelityTests(unittest.TestCase):
     def test_two_panels_and_jsd_in_title(self):
         fig = plot_fidelity(_PROFILE)
         self.assertEqual(len(fig.axes), 2)  # signal rates + class balance
+
+    def test_colour_follows_the_entity(self):
+        fig = plot_fidelity(_PROFILE)
+        ax_sig, ax_bal = fig.axes
+        # signal-rate panel: real bars drawn first, generated second.
+        self.assertEqual(to_hex(ax_sig.containers[0].patches[0].get_facecolor()), SERIES_REAL)
+        self.assertEqual(to_hex(ax_sig.containers[1].patches[0].get_facecolor()), SERIES_GENERATED)
+        # class-balance panel: one container, bars in [real, generated] order.
+        bal_patches = ax_bal.containers[0].patches
+        self.assertEqual(to_hex(bal_patches[0].get_facecolor()), SERIES_REAL)
+        self.assertEqual(to_hex(bal_patches[1].get_facecolor()), SERIES_GENERATED)
         self.assertIn("JSD", fig._suptitle.get_text())
 
 

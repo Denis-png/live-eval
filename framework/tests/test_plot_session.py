@@ -64,6 +64,16 @@ class LoadSessionTests(unittest.TestCase):
             finally:
                 os.chmod(results_path, 0o644)
 
+    def test_wrong_top_level_json_type_raises_value_error(self):
+        # results.json parses fine but is a JSON array, not an object — results.get("meta")
+        # would raise AttributeError further down. Must be caught here as ValueError.
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "results.json"), "w") as f:
+                json.dump([], f)
+            with self.assertRaises(ValueError) as ctx:
+                S.load_session(d)
+            self.assertNotIsInstance(ctx.exception, AttributeError)
+
 
 class RenderSessionTests(unittest.TestCase):
     def test_renders_all_three_figures(self):

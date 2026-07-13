@@ -39,6 +39,9 @@ def load_session(session_dir: str) -> tuple[dict, dict | None]:
     except (json.JSONDecodeError, OSError) as e:
         raise ValueError(f"Could not read '{results_path}': {e}") from e
 
+    if not isinstance(results, dict):
+        raise ValueError(f"'{results_path}' must contain a JSON object, got {type(results).__name__}.")
+
     profile = None
     profile_path = os.path.join(session_dir, "profile.json")
     if os.path.isfile(profile_path):

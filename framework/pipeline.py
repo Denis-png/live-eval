@@ -451,7 +451,7 @@ def _render_plots(config: dict, paths: dict) -> None:
         return
     try:
         from framework.plotting.session import render_session
-        render_session(paths["session_dir"])
+        render_session(paths["session_dir"], paths["plots_dir"])
     except Exception as e:
         print(f"[WARN] plotting failed (results are unaffected): {e}", file=sys.stderr)
 
