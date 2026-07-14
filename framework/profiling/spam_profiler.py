@@ -29,6 +29,31 @@ _SPAM_KEYWORDS = {
     "cash", "money", "reward", "bonus", "deal", "discount",
 }
 
+# Category key -> rate name used by analyze_spam_signals (kept for output stability).
+_SIGNAL_TO_RATE = {
+    "phishing_link": "url_rate",
+    "money_promise": "currency_rate",
+    "excessive_caps": "caps_rate",
+    "urgency": "exclaim_rate",
+    "spam_keywords": "keyword_rate",
+}
+
+
+def detect_signals(text: str) -> set[str]:
+    """Return the set of inverse-mode spam-signal category keys present in `text`."""
+    signals: set[str] = set()
+    if _URL_RE.search(text):
+        signals.add("phishing_link")
+    if _CURRENCY_RE.search(text):
+        signals.add("money_promise")
+    if _CAPS_RE.search(text):
+        signals.add("excessive_caps")
+    if _EXCLAIM_RE.search(text):
+        signals.add("urgency")
+    if any(kw in text.lower().split() for kw in _SPAM_KEYWORDS):
+        signals.add("spam_keywords")
+    return signals
+
 
 def normalize_spam_label(label: Any) -> str:
     """Normalize raw dataset labels into HAM/SPAM."""
@@ -105,23 +130,14 @@ def analyze_spam_signals(rows: list[dict[str, str]]) -> dict[str, dict[str, floa
         total = len(texts)
         if total == 0:
             continue
-
-        def rate(pattern: re.Pattern) -> float:
-            return round(sum(1 for t in texts if pattern.search(t)) / total, 4)
-
-        keyword_hits = sum(
-            1 for t in texts
-            if any(kw in t.lower().split() for kw in _SPAM_KEYWORDS)
-        )
-
+        counts = {category: 0 for category in _SIGNAL_TO_RATE}
+        for text in texts:
+            for category in detect_signals(text):
+                counts[category] += 1
         signals[label] = {
-            "url_rate":      rate(_URL_RE),
-            "currency_rate": rate(_CURRENCY_RE),
-            "caps_rate":     rate(_CAPS_RE),
-            "exclaim_rate":  rate(_EXCLAIM_RE),
-            "keyword_rate":  round(keyword_hits / total, 4),
+            _SIGNAL_TO_RATE[category]: round(hits / total, 4)
+            for category, hits in counts.items()
         }
-
     return signals
 
 

@@ -177,6 +177,36 @@
   },
   "prompt": "You are an expert linguist specializing in grammatical error generation. For the input sentence below:\n\n  Step 1: Identify the grammatical error type (e.g. subject-verb agreement, article, preposition, verb tense, spelling).\n  Step 2: Write a new, original sentence a B1-level foreign learner would produce on a different topic, exhibiting the same error type plus typical L1-transfer errors. The generated sentence MUST contain a grammatical error — do NOT produce a correct sentence.\n  Step 3: Write the fully corrected version of the sentence from Step 2 (fix all grammatical errors so it reads as natural, fluent English).\n\nUse this exact format:\nError type: <type>\nGenerated: <new sentence with error>\nGround truth: <corrected version of Generated>\n\nDo NOT correct or rewrite the input sentence.\n\nInput sentence: {sentence}",
   "judge_prompt": "You are a GEC (grammatical error correction) quality evaluator. You receive an erroneous sentence and its proposed correction.\n\nAssess two criteria:\n  Redundancy: \"trivial\" if the error is too obvious or uninteresting for GEC evaluation (e.g. a single missing full-stop, one clearly wrong article in isolation, a trivial misspelling of one very common word with no other errors). \"valid\" otherwise.\n  Correction: \"correct\" if the proposed correction is grammatically correct and natural English with no remaining errors. \"incorrect\" otherwise.\n\nUse this exact format:\nRedundancy: trivial/valid\nCorrection: correct/incorrect\n\nErroneous sentence: {sentence}\nProposed correction: {correction}",
+  "inverse_prompt": "You are an expert in generating realistic language-learner errors. You are given a fully correct English sentence. Rewrite it so that it contains ONLY the specific error(s) requested below, keeping the same meaning and topic. Do NOT introduce any other errors, and do NOT fix anything else. The rewritten sentence MUST be grammatically incorrect.\n\nUse this exact format:\nCorrupted: <the sentence rewritten with the requested error(s)>\n\nRequested error(s): {error_spec}\nCorrect sentence: {sentence}",
+  "inverse_judge_prompt": "You are a GEC (grammatical error correction) data-quality evaluator. You receive a sentence that was deliberately corrupted from a known-correct sentence, together with that correct sentence.\n\nAssess two criteria:\n  Redundancy: \"trivial\" if the corrupted sentence is actually still grammatically correct, or differs from the correct sentence only cosmetically (no real grammatical error). \"valid\" if it contains a genuine, natural-looking grammatical error a learner might make.\n  Correction: \"correct\" if the provided correct sentence is indeed fluent, natural English. \"incorrect\" otherwise.\n\nUse this exact format:\nRedundancy: trivial/valid\nCorrection: correct/incorrect\n\nCorrupted sentence: {sentence}\nCorrect sentence: {correction}",
+  "errant_operations": {
+    "M": "omit a required",
+    "U": "add an unnecessary",
+    "R": "use a wrong"
+  },
+  "errant_categories": {
+    "DET": "article/determiner",
+    "PREP": "preposition",
+    "VERB:TENSE": "verb tense",
+    "VERB:FORM": "verb form",
+    "VERB:SVA": "subject-verb agreement",
+    "NOUN:NUM": "noun number",
+    "PRON": "pronoun",
+    "SPELL": "spelling",
+    "WO": "word order",
+    "PUNCT": "punctuation",
+    "ADJ": "adjective form",
+    "MORPH": "word form",
+    "ORTH": "capitalization or spacing"
+  },
+  "errant_supported_types": [
+    "M:DET", "U:DET", "R:DET",
+    "M:PREP", "U:PREP", "R:PREP",
+    "R:VERB:TENSE", "R:VERB:FORM", "R:VERB:SVA",
+    "R:NOUN:NUM", "R:PRON", "R:SPELL", "R:WO",
+    "M:PUNCT", "U:PUNCT", "R:PUNCT",
+    "R:ADJ", "R:MORPH", "R:ORTH"
+  ],
   "evaluators": ["gleu", "errant", "errant_dist", "cola", "correction_extent", "n_edits"],
   "models": {
     "t5": {

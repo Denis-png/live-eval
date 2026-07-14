@@ -14,25 +14,44 @@ api_keys:
   huggingface: "${HF_TOKEN}"
 
 # ── Dataset ─────────────────────────────────────────────────
+# Switch between sources by flipping `source` — both blocks can stay
+# filled in; only the one matching `source` is read.
 dataset:
-  source: local
-  local_path: "framework/data/spam/sms_spam_sample_300.csv"
-  format: csv
-  sample_size: 300 # loads all rows; parse_row filters to ~150 HAM
+  source: local # huggingface | local
+  huggingface:
+    name: "deysi/spam-detection-dataset"
+    split: "train"
+    streaming: false # set true for large datasets
+  local:
+    path: "framework/data/spam/sms_spam_sample_300.csv"
+    format: csv # m2 | csv | tsv (optional — inferred from the extension)
 
 # ── Generation (LLM that creates synthetic corrupted sentences) ──
 generation:
+  mode: "forward"                  # forward | inverse  (forward = existing behaviour)
   provider: "openrouter"
   model: "deepseek/deepseek-v4-flash"
-  temperature: 1.0 # CoT 3-step prompt benefits from higher T (Denis: 1.0)
-  max_tokens: 1024 # required by Anthropic; ignored by OpenAI-compatible providers
-  num_runs: 3
-  sample_size: 300 # all HAM rows from the benchmark sample
-  timeout: 300 # per-request HTTP timeout in seconds (SDK default: 600)
-  max_retries: 1 # SDK retries on 5xx/429 (SDK default: 2)
-  request_delay: 2 # deepseek-v4-flash is fast; reduce delay
+  temperature: 1.0             # CoT 3-step prompt benefits from higher T
+  max_tokens: 1024             # required by Anthropic; ignored by OpenAI-compatible providers
+  num_runs: 1
+  sample_size: 150            # synthetic samples per run
+  class_balance: empirical     # P(SPAM) for class-conditional generation: empirical | a float 0-1
+  seed_field: incorrect        # real_data field used as the seed text for class-conditional generation
+  timeout: 300                 # per-request HTTP timeout in seconds (SDK default: 600)
+  max_retries: 2               # SDK retries on 5xx/429 (SDK default: 2)
+  request_delay: 2             # deepseek-v4-flash is fast
   # api_key is auto-resolved from api_keys[provider]; uncomment to override:
   # api_key: "..."
+  # ── Inverse mode (only read when mode == inverse) ──
+  # Corrupt a known-clean sentence according to an error distribution.
+  inverse:
+    source_field: "incorrect"        # dataset field holding the clean source text
+                                   #   gec: "correct" | spam: "incorrect" (the HAM message)
+    profile_size: 200              # raw rows scanned to profile the empirical error
+                                   #   distribution (spam: SPAM signal rates)
+    placeholder_distribution:      # fallback when no empirical profile is available
+      count_mean: 1.5
+      count_max: 5
 
 # ── Judge (optional LLM-as-judge that filters bad generations) ──
 # If omitted or enabled=false → judging is skipped.
@@ -46,6 +65,10 @@ judge:
   timeout: 300
   max_retries: 1
 
+# ── Evaluation ──────────────────────────────────────────────
+evaluation:
+  real_baseline: true # also evaluate task_models on the real benchmark (deterministic, no runs)
+
 # ── Task ────────────────────────────────────────────────────
 task:
   name: "spam" # gec | spam | hate_speech (future)
@@ -58,7 +81,8 @@ task_models:
     type: "roberta"
 
 # ── Compute ─────────────────────────────────────────────────
-# Device for HuggingFace models (CoLA scorer, T5/CoEdit evaluators).
+# Device for HuggingFace/torch models (CoLA scorer + the seq2seq GEC
+# models under evaluation: t5, gec_v1, coedit).
 # auto = use GPU only if available AND its compute capability is supported
 #        by the installed PyTorch build (otherwise CPU).
 # cpu  = force CPU.
@@ -67,8 +91,25 @@ compute:
   device: cpu
 
 # ── Output ──────────────────────────────────────────────────
-# Synthetic data from each run is archived (never reused) under
-# generated_data_dir/<task>/ as <session>_run<N>.json.
+# Every run session gets its own directory under base_dir/<task>/<session>/:
+#   generated/run_<N>.json  — each run's synthetic data (never reused for eval)
+#   results.json            — {"meta": <provenance>, "results": <scores>},
+#                              rewritten after every run (meta.partial is true
+#                              until the last run finishes)
+#   real_sample.json        — the real reference sample used for baseline/profiling
+#   profile.json            — {"real", "generated", "fidelity"} dataset profile
+#   plots/                  — figures (if generated)
 output:
-  results_path: "results.json"
-  generated_data_dir: "framework/data/generated"
+  base_dir: "framework/data/runs"
+
+# ── Multi-model comparison (read only by scripts/compare_models.py) ──
+# Runs each entry over the SAME sample; each entry gets its own session under
+# base_dir/<task>/<provider>_<model>/ (same layout as above), plus a combined
+# base_dir/<task>/comparison/comparison.json.
+# generation_models:
+#   - provider: anthropic
+#     model: claude-haiku-4-5
+#   - provider: openrouter
+#     model: minimax-m2.7
+#     temperature: 1.0
+# output.base_dir controls where per-session artifacts land (default: framework/data/runs).

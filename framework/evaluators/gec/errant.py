@@ -1,4 +1,4 @@
-from ._errant_shared import annotator
+from ._errant_shared import annotate_results
 
 
 def compute_errant(results: list[dict]) -> dict:
@@ -19,16 +19,9 @@ def compute_errant(results: list[dict]) -> dict:
     """
     tp = fp = fn = 0
 
-    for item in results:
-        orig = annotator.parse(item["corrupted"])
-        ref  = annotator.parse(item["original"])
-        pred = annotator.parse(item["prediction"])
-
-        ref_edits  = annotator.annotate(orig, ref)
-        pred_edits = annotator.annotate(orig, pred)
-
-        ref_set  = {(e.o_start, e.o_end, e.type) for e in ref_edits}
-        pred_set = {(e.o_start, e.o_end, e.type) for e in pred_edits}
+    for ann in annotate_results(results):
+        ref_set  = {(e.o_start, e.o_end, e.type) for e in ann["ref_edits"]}
+        pred_set = {(e.o_start, e.o_end, e.type) for e in ann["pred_edits"]}
 
         tp += len(pred_set & ref_set)
         fp += len(pred_set - ref_set)

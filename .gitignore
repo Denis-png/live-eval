@@ -16,6 +16,16 @@ venv/
 framework/data/**
 !framework/data/**/
 !framework/data/**/.gitkeep
+# Explicit (redundant with framework/data/** above): never track dataset or
+# run-artifact json/csv under framework/data, whatever the layout.
+framework/data/**/*.json
+framework/data/**/*.csv
+
+# ── Run artifacts ───────────────────────────────────────────
+# Results files are build artifacts, rewritten on every run —
+# committing them keeps the working tree permanently dirty.
+results.json
+results/
 
 # ── Secrets ─────────────────────────────────────────────────
 # Keep example.env as the template; real keys go in .env (never committed).
@@ -29,3 +39,7 @@ framework/data/**
 .idea/
 .vscode/
 .DS_Store
+
+# ── Documentation & other noise ─────────────────────────────
+docs
+.superpowers
