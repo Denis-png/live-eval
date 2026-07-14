@@ -21,6 +21,7 @@ class OpenAIGenerator(BaseGenerator):
     def __init__(self, config: dict):
         self.model       = config["model"]
         self.temperature = config["temperature"]
+        self.max_tokens  = config.get("max_tokens")
         self.client = OpenAI(
             api_key=config["api_key"],
             base_url=_BASE_URLS.get(config["provider"]),  # None → default OpenAI endpoint
@@ -29,9 +30,13 @@ class OpenAIGenerator(BaseGenerator):
         )
 
     def call_api(self, prompt: str) -> str:
+        kwargs = {}
+        if self.max_tokens is not None:
+            kwargs["max_tokens"] = self.max_tokens
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
             temperature=self.temperature,
+            **kwargs,
         )
         return response.choices[0].message.content
