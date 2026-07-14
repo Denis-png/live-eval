@@ -96,10 +96,25 @@ def load_real_data(config: dict, task: BaseTask) -> list[dict]:
     sample_size = ds_config["sample_size"]
 
     if ds_config.get("source", "huggingface") == "local":
-        raise NotImplementedError(
-            "Local dataset loading is not yet implemented. "
-            "Contribute it in pipeline.load_real_data()."
-        )
+        import csv as _csv
+        local_path = ds_config.get("local_path")
+        if not local_path:
+            raise ValueError("dataset.local_path is required when source: local")
+        fmt = ds_config.get("format", "csv")
+        if fmt not in ("csv", "tsv"):
+            raise NotImplementedError(f"Local format '{fmt}' is not yet supported.")
+        delimiter = "\t" if fmt == "tsv" else ","
+        print(f"Loading local dataset: {local_path} ...")
+        samples = []
+        with open(local_path, encoding="utf-8", newline="") as _f:
+            for row in _csv.DictReader(_f, delimiter=delimiter):
+                parsed = task.parse_row(row)
+                if parsed is not None:
+                    samples.append(parsed)
+                if len(samples) >= sample_size:
+                    break
+        print(f"Loaded {len(samples)} real samples.")
+        return samples
 
     print(f"Loading dataset: {ds_config['name']} ...")
     hf_token = (
