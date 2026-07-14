@@ -128,6 +128,27 @@ def validate_config(config: dict) -> None:
         )
 
 
+def generation_models_notice(config: dict) -> str | None:
+    """`framework.main` runs exactly ONE generation model. `generation_models` is read
+    only by scripts/compare_models.py — so a config carrying that list would otherwise
+    be silently ignored here, and the run would look like the comparison when it wasn't.
+    Return the warning to print, or None when there is nothing to warn about."""
+    entries = config.get("generation_models") or []
+    if not entries:
+        return None
+    gen = config.get("generation") or {}
+    listed = ", ".join(
+        f"{e.get('provider')}/{e.get('model')}" for e in entries if isinstance(e, dict)
+    )
+    return (
+        f"[NOTE] This config lists {len(entries)} generation_models ({listed}), but "
+        f"framework.main IGNORES that list and runs a SINGLE generation model: "
+        f"{gen.get('provider')}/{gen.get('model')}.\n"
+        f"       To evaluate all {len(entries)} over the same benchmark sample, run:\n"
+        f"           python -m scripts.compare_models --config <your-config.yaml>"
+    )
+
+
 def _load_dotenv() -> None:
     """Load .env into os.environ. Warns loudly if python-dotenv is missing —
     silent failures here cause confusing 'empty api_key' errors downstream."""
@@ -235,6 +256,10 @@ def main():
     # Propagate compute.device into the env for lazy-loaded evaluator/model code.
     device_pref = (config.get("compute") or {}).get("device", "auto")
     os.environ["FRAMEWORK_DEVICE"] = str(device_pref)
+
+    notice = generation_models_notice(config)
+    if notice:
+        print(notice, file=sys.stderr)
 
     print(f"Task     : {config['task']['name']}")
     print(f"Mode     : {config['generation'].get('mode', 'forward')}")
