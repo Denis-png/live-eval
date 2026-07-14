@@ -185,27 +185,59 @@ JSD reflects detector-visible distribution match, not ground-truth semantics.
 
 ## Plots
 
-Every run renders figures into its session's `plots/` dir (`output.plots: true`;
-`--no-plots` to skip). Plotting is fail-soft — a missing matplotlib or a broken
-figure warns and is skipped, never costing a run whose results are already written.
+Figures are rendered with matplotlib (installed by `framework/requirements.txt`, run
+headless — no display needed).
 
-- `generated_vs_real_<model>.png` — per evaluator, generated (mean ± std) beside the
-  real-benchmark baseline. The headline "is the synthetic benchmark a good proxy?" chart.
-- `run_variance_<model>.png` — each run's score per evaluator, showing run-to-run
-  instability (needs the `runs` block, added to `results.json` by this feature).
-- `fidelity.png` — real vs generated spam-signal rates and class balance, titled with
-  the Jensen-Shannon divergences. Classification tasks only.
+### During a run (default)
 
-Render any past session standalone:
+Plots are on by default: every run writes its figures into that run's own
+`<session>/plots/` directory.
 
-    python -m framework.plotting framework/data/runs/spam/<session>/ [--out DIR]
+    python -m framework.main                 # renders plots at the end of the run
+    python -m framework.main --no-plots      # skip them
 
-Metrics on different scales (e.g. GEC's `n_edits` count vs 0–1 scores) are split into
-separate panels — never a dual axis.
+Or set it in `config.yaml`:
 
-`fpr` is omitted from the figures (it reads a flat 0.00 against a 0.00 baseline, so it is
-dead space in the chart). It is still computed and written to `results.json` — this only
-hides it from the plots. See `HIDDEN_METRICS` in `framework/plotting/plots.py`.
+    output:
+      plots: true    # false to disable
+
+Plotting runs **after** `results.json` is already on disk and is **fail-soft**: if
+matplotlib is missing or a figure fails to build, it warns and skips — it can never
+cost you a run that already succeeded.
+
+### Standalone (any past session)
+
+Point the module at a session directory to (re)render it — no API calls, no re-run:
+
+    python -m framework.plotting framework/data/runs/spam/20260708_172422/
+
+    # write the PNGs somewhere else instead of <session>/plots/
+    python -m framework.plotting framework/data/runs/gec/<session>/ --out /tmp/figs
+
+It reads only that session's `results.json` (+ `profile.json` if present), so it
+reproduces exactly the figures the run itself would have made. A bad path fails loudly
+with a clear message.
+
+### What you get
+
+| File | Reads | Shows |
+|------|-------|-------|
+| `generated_vs_real_<model>.png` | `results.json` | Per evaluator: generated (mean ± std) beside the **real-benchmark baseline**. The headline chart — *is the synthetic benchmark a good proxy for real data?* |
+| `run_variance_<model>.png` | `results.json` → `runs` | Each individual run's score per evaluator — run-to-run instability, the core GET signal. |
+| `fidelity.png` | `profile.json` | Real vs generated spam-signal rates + class balance, titled with the Jensen-Shannon divergences. Classification tasks only. |
+
+Figures whose data is absent are skipped, not errored: a GEC session has no
+`profile.json`, so it simply gets no fidelity chart; sessions produced before per-run
+scores were persisted get no variance chart.
+
+### Reading them
+
+- **Blue is always generated, orange is always real** — in every figure.
+- Metrics on different scales (e.g. GEC's unbounded `n_edits` count vs 0–1 scores) are
+  drawn in **separate panels**, never on a second y-axis.
+- `fpr` is omitted from the figures (it reads a flat 0.00 against a 0.00 baseline — dead
+  space). It is still computed and written to `results.json`; this only hides it from the
+  charts. See `HIDDEN_METRICS` in `framework/plotting/plots.py`.
 
 ---
 
@@ -217,6 +249,13 @@ sample in one command:
     cd live-eval
     # add a `generation_models:` list to your config (see config.yaml comments)
     python -m scripts.compare_models --config framework/configs/config.yaml
+
+> **`generation_models` is read ONLY by `scripts.compare_models`.**
+> `python -m framework.main` always runs the **single** model in `generation.provider` /
+> `generation.model` and ignores the list — so adding `generation_models` and then
+> running `framework.main` does *not* compare anything. `framework.main` now prints a
+> `[NOTE]` at startup when it sees the list, naming the entries it is ignoring and the
+> one model it is actually about to run.
 
 Each model gets its own session under `output.base_dir/<task>/<provider>_<model>/`
 (the same per-session layout as a normal run), plus a combined
