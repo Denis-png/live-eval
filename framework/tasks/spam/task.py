@@ -7,7 +7,7 @@ from framework.profiling.spam_profiler import (
     DEFAULT_SPAM_SPLIT,
 )
 
-_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "configs", "tasks", "spam.json")
+_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "configs", "spam", "spam.json")
 
 
 def _load_config() -> dict:
@@ -177,10 +177,15 @@ class SpamTask(BaseTask):
         if model_type == "roberta":
             from framework.models.spam.roberta import RobertaSpamModel
             return RobertaSpamModel(merged)
+        elif model_type in ("bert_tiny", "bert"):
+            # Both are AutoModelForSequenceClassification fine-tunes; only the
+            # label_map / max_length from spam.json["models"] differ per type.
+            from framework.models.spam.bert_tiny import BertTinySpamModel
+            return BertTinySpamModel(merged)
         else:
             raise ValueError(
                 f"Unsupported spam model type: '{model_type}'. "
-                f"Add it to configs/tasks/spam.json and tasks/spam/task.py."
+                f"Add it to configs/spam/spam.json and tasks/spam/task.py."
             )
         
     def get_label(self, result: dict) -> str:
