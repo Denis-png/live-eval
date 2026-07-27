@@ -15,7 +15,6 @@ except ModuleNotFoundError as exc:
         "(the parent of framework/):\n    python -m framework.main [flags]"
     )
 
-DEFAULT_CONFIG = "framework/configs/config.yaml"
 _ENV_VAR_RE = re.compile(r"\$\{([A-Z0-9_]+)\}")
 
 
@@ -24,7 +23,8 @@ def parse_args():
         description="GET Framework — Generate, Evaluate, Trash",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--config",       default=DEFAULT_CONFIG, help="Path to config YAML")
+    parser.add_argument("--config", required=True,
+                        help="Path to config YAML (e.g. framework/configs/gec/config.yaml)")
     parser.add_argument("--task",         help="Task name (e.g. gec)")
     parser.add_argument("--provider",     help="Generator provider (groq|openai|anthropic|...)")
     parser.add_argument("--model",        help="Generator model name")
@@ -36,6 +36,8 @@ def parse_args():
                         help="Enable/disable the LLM-as-judge filter (--judge / --no-judge)")
     parser.add_argument("--real-baseline", action=argparse.BooleanOptionalAction, default=None,
                         help="Evaluate models on the real benchmark too (--real-baseline / --no-real-baseline)")
+    parser.add_argument("--plots", action=argparse.BooleanOptionalAction, default=None,
+                        help="Render figures into the session's plots/ dir (--plots / --no-plots)")
     return parser.parse_args()
 
 
@@ -60,6 +62,8 @@ def apply_overrides(config: dict, args) -> dict:
         config.setdefault("judge", {})["enabled"] = args.judge
     if getattr(args, "real_baseline", None) is not None:
         config.setdefault("evaluation", {})["real_baseline"] = args.real_baseline
+    if getattr(args, "plots", None) is not None:
+        config.setdefault("output", {})["plots"] = args.plots
     return config
 
 
@@ -122,6 +126,27 @@ def validate_config(config: dict) -> None:
         raise ValueError(
             "Invalid config:\n  - " + "\n  - ".join(problems)
         )
+
+
+def generation_models_notice(config: dict) -> str | None:
+    """`framework.main` runs exactly ONE generation model. `generation_models` is read
+    only by scripts/compare_models.py — so a config carrying that list would otherwise
+    be silently ignored here, and the run would look like the comparison when it wasn't.
+    Return the warning to print, or None when there is nothing to warn about."""
+    entries = config.get("generation_models") or []
+    if not entries:
+        return None
+    gen = config.get("generation") or {}
+    listed = ", ".join(
+        f"{e.get('provider')}/{e.get('model')}" for e in entries if isinstance(e, dict)
+    )
+    return (
+        f"[NOTE] This config lists {len(entries)} generation_models ({listed}), but "
+        f"framework.main IGNORES that list and runs a SINGLE generation model: "
+        f"{gen.get('provider')}/{gen.get('model')}.\n"
+        f"       To evaluate all {len(entries)} over the same benchmark sample, run:\n"
+        f"           python -m scripts.compare_models --config <your-config.yaml>"
+    )
 
 
 def _load_dotenv() -> None:
@@ -232,8 +257,12 @@ def main():
     device_pref = (config.get("compute") or {}).get("device", "auto")
     os.environ["FRAMEWORK_DEVICE"] = str(device_pref)
 
+    notice = generation_models_notice(config)
+    if notice:
+        print(notice, file=sys.stderr)
+
     print(f"Task     : {config['task']['name']}")
-    print(f"Mode     : {config['generation'].get('mode', 'forward')}")
+    print(f"Mode     : {config['generation'].get('mode', 'n/a (class-conditional generation)')}")
     print(f"Provider : {config['generation']['provider']}")
     print(f"Model    : {config['generation']['model']}")
     print(f"Runs     : {config['generation']['num_runs']}")

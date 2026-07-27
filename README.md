@@ -46,6 +46,9 @@ so it can be inspected later.
             errant_distribution.py  - ERRANT-based GEC error distribution
             spam_distribution.py  - spam-signal-based spam error distribution
             fidelity.py           - Jensen-Shannon divergence for distribution fidelity
+        plotting/            - figures from a run session (matplotlib, headless)
+            plots.py         - pure figure builders (dict -> Figure)
+            session.py       - load a session, render + save PNGs (fail-soft)
         models/gec/              - GEC models under evaluation
             seq2seq.py (t5/gec_v1/coedit), claude.py
         models/spam/             - Spam models under evaluation
@@ -71,7 +74,9 @@ so it can be inspected later.
    providers you actually use (the generator's provider, plus Anthropic if
    you evaluate Claude as a task model).
 
-3. Edit `framework/configs/config.yaml`:
+3. Edit `framework/configs/<task>/config.yaml` (e.g. `framework/configs/gec/config.yaml`
+   or `framework/configs/spam/config.yaml` — each task's config carries only the
+   fields that task reads; there is no shared root config):
    - `dataset`         — `source` (huggingface | local). Per-source settings live in
                          nested blocks that can both stay filled in — switching source
                          is a one-field change:
@@ -110,12 +115,13 @@ so it can be inspected later.
 Run as a module from the `live-eval/` directory (the parent of `framework/`):
 
     cd live-eval
-    python -m framework.main
+    python -m framework.main --config framework/configs/gec/config.yaml
 
-CLI flags override values in `config.yaml`:
+`--config` is required — there is no default, since each task has its own
+config file. CLI flags override values in the YAML:
 
     python -m framework.main \
-        --task gec \
+        --config framework/configs/gec/config.yaml \
         --mode inverse \
         --provider anthropic \
         --model claude-haiku-4-5 \
@@ -125,9 +131,9 @@ CLI flags override values in `config.yaml`:
         --no-judge \
         --no-real-baseline
 
-Use `--config <path>` to point at a different YAML. `--judge/--no-judge`
-toggles the LLM-as-judge filter; `--real-baseline/--no-real-baseline` toggles
-the real-benchmark baseline; `--output` sets `output.base_dir`.
+`--judge/--no-judge` toggles the LLM-as-judge filter;
+`--real-baseline/--no-real-baseline` toggles the real-benchmark baseline;
+`--output` sets `output.base_dir`.
 
 > Note: `python framework/main.py` will NOT work — `framework` must be
 > importable as a package, so use `python -m framework.main`.
@@ -180,14 +186,79 @@ JSD reflects detector-visible distribution match, not ground-truth semantics.
 
 ---
 
+## Plots
+
+Figures are rendered with matplotlib (installed by `framework/requirements.txt`, run
+headless — no display needed).
+
+### During a run (default)
+
+Plots are on by default: every run writes its figures into that run's own
+`<session>/plots/` directory.
+
+    python -m framework.main                 # renders plots at the end of the run
+    python -m framework.main --no-plots      # skip them
+
+Or set it in `config.yaml`:
+
+    output:
+      plots: true    # false to disable
+
+Plotting runs **after** `results.json` is already on disk and is **fail-soft**: if
+matplotlib is missing or a figure fails to build, it warns and skips — it can never
+cost you a run that already succeeded.
+
+### Standalone (any past session)
+
+Point the module at a session directory to (re)render it — no API calls, no re-run:
+
+    python -m framework.plotting framework/data/runs/spam/20260708_172422/
+
+    # write the PNGs somewhere else instead of <session>/plots/
+    python -m framework.plotting framework/data/runs/gec/<session>/ --out /tmp/figs
+
+It reads only that session's `results.json` (+ `profile.json` if present), so it
+reproduces exactly the figures the run itself would have made. A bad path fails loudly
+with a clear message.
+
+### What you get
+
+| File | Reads | Shows |
+|------|-------|-------|
+| `generated_vs_real_<model>.png` | `results.json` | Per evaluator: generated (mean ± std) beside the **real-benchmark baseline**. The headline chart — *is the synthetic benchmark a good proxy for real data?* |
+| `run_variance_<model>.png` | `results.json` → `runs` | Each individual run's score per evaluator — run-to-run instability, the core GET signal. |
+| `fidelity.png` | `profile.json` | Real vs generated spam-signal rates + class balance, titled with the Jensen-Shannon divergences. Classification tasks only. |
+
+Figures whose data is absent are skipped, not errored: a GEC session has no
+`profile.json`, so it simply gets no fidelity chart; sessions produced before per-run
+scores were persisted get no variance chart.
+
+### Reading them
+
+- **Blue is always generated, orange is always real** — in every figure.
+- Metrics on different scales (e.g. GEC's unbounded `n_edits` count vs 0–1 scores) are
+  drawn in **separate panels**, never on a second y-axis.
+- `fpr` is omitted from the figures (it reads a flat 0.00 against a 0.00 baseline — dead
+  space). It is still computed and written to `results.json`; this only hides it from the
+  charts. See `HIDDEN_METRICS` in `framework/plotting/plots.py`.
+
+---
+
 ## Comparing Generation Models (same benchmark sample)
 
 Use the multi-model driver to run several generation models over the identical
 sample in one command:
 
     cd live-eval
-    # add a `generation_models:` list to your config (see config.yaml comments)
-    python -m scripts.compare_models --config framework/configs/config.yaml
+    # generation_models: lives in each task's compare.yaml (see its comments)
+    python -m scripts.compare_models --config framework/configs/gec/compare.yaml
+
+> **`generation_models` is read ONLY by `scripts.compare_models`.**
+> `python -m framework.main` always runs the **single** model in `generation.provider` /
+> `generation.model` and ignores the list — so adding `generation_models` and then
+> running `framework.main` does *not* compare anything. `framework.main` now prints a
+> `[NOTE]` at startup when it sees the list, naming the entries it is ignoring and the
+> one model it is actually about to run.
 
 Each model gets its own session under `output.base_dir/<task>/<provider>_<model>/`
 (the same per-session layout as a normal run), plus a combined
@@ -208,12 +279,14 @@ the first model runs.
 1. Create `framework/tasks/<task>/task.py` subclassing `BaseTask` and
    implement `get_error_types`, `get_prompt_instruction`, `get_evaluators`,
    `get_evaluator_fns`, `get_model` (and optionally `get_judge_prompt`).
-2. Create `framework/configs/tasks/<task>.json` with error types, prompts,
+2. Create `framework/configs/<task>/<task>.json` with error types, prompts,
    evaluators list, and per-model inference params.
 3. Register the task in `framework/pipeline.py::load_task()`.
 4. Add model classes under `framework/models/<task>/` and evaluator
    functions under `framework/evaluators/<task>/`.
-5. Set `task.name: <task>` in `configs/config.yaml`.
+5. Create `framework/configs/<task>/config.yaml` with `task.name: <task>` and
+   only the fields that task's generation strategy actually reads (see
+   `spam/config.yaml`'s comment on why it omits `generation.mode`).
 
 ---
 
@@ -226,7 +299,7 @@ Each run session gets its own directory under `output.base_dir/<task>/<session>/
         run_1.json …   - each run's synthetic data (never reused for eval)
     real_sample.json   - the real reference sample (classification tasks)
     profile.json       - {real, generated, fidelity} (classification tasks)
-    plots/             - reserved for figures
+    plots/             - generated_vs_real_<model>.png, run_variance_<model>.png, fidelity.png (classification tasks)
 
 `results.json` has two top-level keys:
 

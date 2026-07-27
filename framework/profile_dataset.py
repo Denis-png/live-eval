@@ -15,7 +15,6 @@ from typing import Any
 from framework.profiling.dataset_profiler import save_profile_json
 from framework.profiling.gec_profiler import profile_gec_rows
 
-DEFAULT_CONFIG = "framework/configs/config.yaml"
 DEFAULT_GEC_OUTPUT = "framework/data/profiles/gec_profile.json"
 DEFAULT_SPAM_OUTPUT = "framework/data/profiles/spam_profile.json"
 DEFAULT_GEC_DATASET = "agentlans/grammar-correction"
@@ -30,7 +29,8 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--task", choices=("gec", "spam"), default="gec", help="Task to profile")
-    parser.add_argument("--config", default=DEFAULT_CONFIG, help="Path to config YAML")
+    parser.add_argument("--config", required=True,
+                        help="Path to config YAML (e.g. framework/configs/gec/config.yaml)")
     parser.add_argument("--output", help="Path to output JSON profile")
     return parser.parse_args()
 

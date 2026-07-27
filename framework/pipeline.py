@@ -79,7 +79,7 @@ def load_task(task_name: str) -> BaseTask:
         return SpamTask()
     raise ValueError(
         f"Unknown task: '{task_name}'. "
-        f"Register it in pipeline.load_task() and add configs/tasks/{task_name}.json."
+        f"Register it in pipeline.load_task() and add configs/{task_name}/{task_name}.json."
     )
 
 
@@ -266,18 +266,26 @@ def save_synthetic_data(synthetic: list[dict], generated_dir: str, run_idx: int)
 
 # ── Results writing (with provenance) ────────────────────────
 
-def _build_meta(config: dict, runs_completed: int,
+def _build_meta(config: dict, task, runs_completed: int,
                 effective_samples_per_run: list[int], real_baseline: bool) -> dict:
     """Provenance block written next to the scores: what produced this file.
 
     `partial` is True while runs are still outstanding — results files are
     (re)written after every run so an interrupted session keeps the runs it
-    already paid for."""
+    already paid for.
+
+    `mode` only means something for the `corruption` strategy (GEC); a
+    class_conditional task (spam) always generates the same way regardless
+    of any `generation.mode` a config happens to carry, so `mode` is written
+    as None there rather than echoing a config value that isn't actually
+    read — see `_run_generation`'s dispatch, which checks `strategy` first."""
     gen = config["generation"]
     ds = resolve_dataset_config(config.get("dataset") or {})
     judge = config.get("judge") or {}
     judge_active = bool(judge) and judge.get("enabled", True) is not False
     num_runs = gen["num_runs"]
+    strategy = task.get_generation_strategy()
+    mode = gen.get("mode", "forward") if strategy != "class_conditional" else None
     if ds["source"] == "local":
         dataset_meta = {"source": "local", "path": ds["path"],
                         "format": ds["format"] or None,
@@ -288,7 +296,8 @@ def _build_meta(config: dict, runs_completed: int,
     return {
         "created": datetime.now().isoformat(timespec="seconds"),
         "task": config["task"]["name"],
-        "mode": gen.get("mode", "forward"),
+        "strategy": strategy,
+        "mode": mode,
         "provider": gen["provider"],
         "model": gen["model"],
         "num_runs": num_runs,
@@ -303,6 +312,21 @@ def _build_meta(config: dict, runs_completed: int,
         "real_baseline": real_baseline,
         "class_balance": gen.get("class_balance", "empirical"),
     }
+
+
+def class_conditional_mode_notice(config: dict, task, strategy: str) -> str | None:
+    """`generation.mode` only affects the `corruption` strategy — a
+    class_conditional task (spam) always generates the same way regardless of
+    it (see `_run_generation`'s dispatch). Return a warning when a config for
+    such a task still explicitly sets `mode`, or None when there's nothing to
+    warn about."""
+    if strategy != "class_conditional" or "mode" not in config["generation"]:
+        return None
+    return (
+        f"[NOTE] task '{task.get_task_name()}' uses class_conditional generation — "
+        f"generation.mode ('{config['generation']['mode']}') has no effect and is "
+        f"ignored. Remove it from the config."
+    )
 
 
 def _write_results(final: dict, results_path: str, meta: dict) -> str:
@@ -406,8 +430,13 @@ def _evaluate_real_baseline(task, config, real_reference, evaluator_fns) -> dict
     return out
 
 
-def _nest_results(generated_agg: dict, real_scores: dict) -> dict:
-    """Group each model's scores as {generated, real?}."""
+def _nest_results(generated_agg: dict, real_scores: dict,
+                  all_run_scores: list[dict] | None = None) -> dict:
+    """Group each model's scores as {generated, real?, runs?}.
+
+    `runs` lists the model's score dict for each completed run. It is additive —
+    the printer and compare_models read only generated/real — and it is what the
+    run-variance figure plots."""
     final = {}
     for model in set(generated_agg) | set(real_scores):
         final[model] = {}
@@ -415,12 +444,15 @@ def _nest_results(generated_agg: dict, real_scores: dict) -> dict:
             final[model]["generated"] = generated_agg[model]
         if model in real_scores:
             final[model]["real"] = real_scores[model]
+        runs = [run[model] for run in (all_run_scores or []) if model in run]
+        if runs:
+            final[model]["runs"] = runs
     return final
 
 
 def _write_profile_artifacts(task, real_reference, all_generated, paths) -> None:
     """Persist the real sample + a {real, generated, fidelity} profile when the
-    task supports profiling. No-op for tasks that don't (e.g. GEC)."""
+    task supports profiling. No-op for tasks whose profile_dataset returns None."""
     if real_reference is None:
         return
     with open(paths["real_sample"], "w", encoding="utf-8") as f:
@@ -434,6 +466,18 @@ def _write_profile_artifacts(task, real_reference, all_generated, paths) -> None
         json.dump({"real": real_profile, "generated": generated_profile,
                    "fidelity": fidelity}, f, indent=2, ensure_ascii=False)
     print(f"Fidelity profile saved to {paths['profile']}")
+
+
+def _render_plots(config: dict, paths: dict) -> None:
+    """Render the session's figures. Runs AFTER results/profile are on disk and is
+    fail-soft: plotting must never cost a run that already succeeded."""
+    if not (config.get("output") or {}).get("plots", True):
+        return
+    try:
+        from framework.plotting.session import render_session
+        render_session(paths["session_dir"], paths["plots_dir"])
+    except Exception as e:
+        print(f"[WARN] plotting failed (results are unaffected): {e}", file=sys.stderr)
 
 
 # ── Main pipeline ─────────────────────────────────────────────
@@ -450,6 +494,9 @@ def run_pipeline(config: dict) -> dict:
 
     strategy = task.get_generation_strategy()
     mode = config["generation"].get("mode", "forward")
+    notice = class_conditional_mode_notice(config, task, strategy)
+    if notice:
+        print(notice, file=sys.stderr)
     error_dist = (
         load_error_distribution(config, real_data, task)
         if (strategy == "class_conditional" or mode == "inverse") else None
@@ -497,8 +544,8 @@ def run_pipeline(config: dict) -> dict:
         generated_agg = aggregate(all_run_scores)
         real_scores = _evaluate_real_baseline(task, config, real_reference,
                                               evaluator_fns) if real_baseline else {}
-        final = _nest_results(generated_agg, real_scores)
-        meta = _build_meta(config, runs_completed=run_idx + 1,
+        final = _nest_results(generated_agg, real_scores, all_run_scores)
+        meta = _build_meta(config, task, runs_completed=run_idx + 1,
                            effective_samples_per_run=effective_samples,
                            real_baseline=bool(real_scores))
         _write_results(final, paths["results"], meta)
@@ -506,5 +553,6 @@ def run_pipeline(config: dict) -> dict:
             print(f"Partial results (run {run_idx + 1}/{num_runs}) saved to {paths['results']}")
 
     _write_profile_artifacts(task, real_reference, all_generated, paths)
+    _render_plots(config, paths)
     print(f"\nResults saved to {paths['results']}")
     return final
