@@ -9,7 +9,7 @@ class Seq2SeqModel(BaseModel):
     """Prefix-prompted encoder-decoder GEC corrector.
 
     Backs the `t5`, `gec_v1`, and `coedit` model types — they differ only in
-    their prompt prefix and weights, both supplied from configs/tasks/gec.json.
+    their prompt prefix and weights, both supplied from configs/gec/gec.json.
     Runs on the device resolved from compute.device (FRAMEWORK_DEVICE).
     """
 

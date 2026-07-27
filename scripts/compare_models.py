@@ -34,8 +34,9 @@ def parse_compare_args(argv=None):
                     "Per-model provider/model come from the config's generation_models list.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--config",      default="framework/configs/config.yaml",
-                        help="Path to config YAML (must contain generation_models)")
+    parser.add_argument("--config",      required=True,
+                        help="Path to config YAML (must contain generation_models, "
+                             "e.g. framework/configs/gec/compare.yaml)")
     parser.add_argument("--task",        help="Task name (e.g. gec)")
     parser.add_argument("--runs",        type=int, help="Number of GET runs per model")
     parser.add_argument("--sample-size", type=int, dest="sample_size",
@@ -56,8 +57,6 @@ def _per_model_config(base: dict, entry: dict) -> dict:
     cfg["generation"].pop("api_key", None)  # force re-resolution for the new provider
     _resolve_api_keys(cfg, strict=True)
 
-    task = cfg["task"]["name"]
-    mode = cfg["generation"].get("mode", "forward")
     provider = cfg["generation"]["provider"]
     model = cfg["generation"]["model"]
 

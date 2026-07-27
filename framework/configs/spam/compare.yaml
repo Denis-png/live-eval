@@ -1,0 +1,85 @@
+# Spam multi-model comparison — fills the model-impact grid for spam.
+# Spam always generates class-conditionally (no forward/inverse mode — see
+# generation/config.yaml's comment); this config exists purely to run more
+# generation models over the same sample, not to vary mode.
+# Run with:  .venv/bin/python -m scripts.compare_models --config framework/configs/spam/compare.yaml
+api_keys:
+  groq: "${GROQ_API_KEY}"
+  openai: "${OPENAI_API_KEY}"
+  openrouter: "${OPENROUTER_API_KEY}"
+  mistral: "${MISTRAL_API_KEY}"
+  minimax: "${MINIMAX_API_KEY}"
+  anthropic: "${ANTHROPIC_API_KEY}"
+  google: "${GOOGLE_API_KEY}"
+  huggingface: "${HF_TOKEN}"
+
+dataset:
+  source: local
+  local:
+    path: "framework/data/spam/sms_spam_ham_300.csv"
+    format: csv
+
+generation:
+  provider: "openrouter"           # superseded per generation_models entry
+  model: "minimax-m3"
+  temperature: 1.0
+  max_tokens: 1024
+  num_runs: 3
+  sample_size: 150
+  class_balance: empirical
+  seed_field: incorrect
+  timeout: 300
+  max_retries: 2
+  request_delay: 10
+  inverse:
+    profile_size: 200
+    placeholder_distribution:
+      count_mean: 1.5
+      count_max: 5
+
+judge:
+  enabled: false
+  provider: "openrouter"
+  model: "minimax-m3"
+  temperature: 0
+  max_tokens: 1024
+  timeout: 300
+  max_retries: 1
+
+evaluation:
+  real_baseline: true
+
+task:
+  name: "spam"
+
+task_models:
+  - name: "mshenoda/roberta-spam"
+    type: "roberta"
+  - name: "mariagrandury/roberta-base-finetuned-sms-spam-detection"
+    type: "roberta"
+  - name: "mrm8488/bert-tiny-finetuned-sms-spam-detection"
+    type: "bert_tiny"
+  - name: "wesleyacheng/sms-spam-classification-with-bert"
+    type: "bert"
+
+compute:
+  device: cpu
+
+output:
+  base_dir: "framework/data/runs"
+  plots: true
+
+# Free-tier model last: a hard failure there must not block the paid entries.
+generation_models:
+  - provider: openrouter
+    model: z-ai/glm-5.2
+    temperature: 1.0
+  - provider: openrouter
+    model: xiaomi/mimo-v2.5
+    temperature: 1.0
+  - provider: openrouter
+    model: deepseek/deepseek-v4-flash
+    temperature: 1.0
+  - provider: openrouter
+    model: tencent/hy3:free
+    temperature: 1.0

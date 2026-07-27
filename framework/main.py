@@ -15,7 +15,6 @@ except ModuleNotFoundError as exc:
         "(the parent of framework/):\n    python -m framework.main [flags]"
     )
 
-DEFAULT_CONFIG = "framework/configs/config.yaml"
 _ENV_VAR_RE = re.compile(r"\$\{([A-Z0-9_]+)\}")
 
 
@@ -24,7 +23,8 @@ def parse_args():
         description="GET Framework — Generate, Evaluate, Trash",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--config",       default=DEFAULT_CONFIG, help="Path to config YAML")
+    parser.add_argument("--config", required=True,
+                        help="Path to config YAML (e.g. framework/configs/gec/config.yaml)")
     parser.add_argument("--task",         help="Task name (e.g. gec)")
     parser.add_argument("--provider",     help="Generator provider (groq|openai|anthropic|...)")
     parser.add_argument("--model",        help="Generator model name")
@@ -262,7 +262,7 @@ def main():
         print(notice, file=sys.stderr)
 
     print(f"Task     : {config['task']['name']}")
-    print(f"Mode     : {config['generation'].get('mode', 'forward')}")
+    print(f"Mode     : {config['generation'].get('mode', 'n/a (class-conditional generation)')}")
     print(f"Provider : {config['generation']['provider']}")
     print(f"Model    : {config['generation']['model']}")
     print(f"Runs     : {config['generation']['num_runs']}")

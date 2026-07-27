@@ -74,7 +74,9 @@ so it can be inspected later.
    providers you actually use (the generator's provider, plus Anthropic if
    you evaluate Claude as a task model).
 
-3. Edit `framework/configs/config.yaml`:
+3. Edit `framework/configs/<task>/config.yaml` (e.g. `framework/configs/gec/config.yaml`
+   or `framework/configs/spam/config.yaml` — each task's config carries only the
+   fields that task reads; there is no shared root config):
    - `dataset`         — `source` (huggingface | local). Per-source settings live in
                          nested blocks that can both stay filled in — switching source
                          is a one-field change:
@@ -113,12 +115,13 @@ so it can be inspected later.
 Run as a module from the `live-eval/` directory (the parent of `framework/`):
 
     cd live-eval
-    python -m framework.main
+    python -m framework.main --config framework/configs/gec/config.yaml
 
-CLI flags override values in `config.yaml`:
+`--config` is required — there is no default, since each task has its own
+config file. CLI flags override values in the YAML:
 
     python -m framework.main \
-        --task gec \
+        --config framework/configs/gec/config.yaml \
         --mode inverse \
         --provider anthropic \
         --model claude-haiku-4-5 \
@@ -128,9 +131,9 @@ CLI flags override values in `config.yaml`:
         --no-judge \
         --no-real-baseline
 
-Use `--config <path>` to point at a different YAML. `--judge/--no-judge`
-toggles the LLM-as-judge filter; `--real-baseline/--no-real-baseline` toggles
-the real-benchmark baseline; `--output` sets `output.base_dir`.
+`--judge/--no-judge` toggles the LLM-as-judge filter;
+`--real-baseline/--no-real-baseline` toggles the real-benchmark baseline;
+`--output` sets `output.base_dir`.
 
 > Note: `python framework/main.py` will NOT work — `framework` must be
 > importable as a package, so use `python -m framework.main`.
@@ -247,8 +250,8 @@ Use the multi-model driver to run several generation models over the identical
 sample in one command:
 
     cd live-eval
-    # add a `generation_models:` list to your config (see config.yaml comments)
-    python -m scripts.compare_models --config framework/configs/config.yaml
+    # generation_models: lives in each task's compare.yaml (see its comments)
+    python -m scripts.compare_models --config framework/configs/gec/compare.yaml
 
 > **`generation_models` is read ONLY by `scripts.compare_models`.**
 > `python -m framework.main` always runs the **single** model in `generation.provider` /
@@ -276,12 +279,14 @@ the first model runs.
 1. Create `framework/tasks/<task>/task.py` subclassing `BaseTask` and
    implement `get_error_types`, `get_prompt_instruction`, `get_evaluators`,
    `get_evaluator_fns`, `get_model` (and optionally `get_judge_prompt`).
-2. Create `framework/configs/tasks/<task>.json` with error types, prompts,
+2. Create `framework/configs/<task>/<task>.json` with error types, prompts,
    evaluators list, and per-model inference params.
 3. Register the task in `framework/pipeline.py::load_task()`.
 4. Add model classes under `framework/models/<task>/` and evaluator
    functions under `framework/evaluators/<task>/`.
-5. Set `task.name: <task>` in `configs/config.yaml`.
+5. Create `framework/configs/<task>/config.yaml` with `task.name: <task>` and
+   only the fields that task's generation strategy actually reads (see
+   `spam/config.yaml`'s comment on why it omits `generation.mode`).
 
 ---
 
