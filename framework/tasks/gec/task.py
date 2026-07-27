@@ -2,7 +2,7 @@ import json
 import os
 from ..base_task import BaseTask
 
-_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "configs", "tasks", "gec.json")
+_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "configs", "gec", "gec.json")
 
 
 def _load_config() -> dict:
@@ -78,7 +78,7 @@ class GECTask(BaseTask):
         else:
             raise ValueError(
                 f"Unsupported GEC model type: '{model_type}'. "
-                f"Add it to configs/tasks/gec.json and tasks/gec/task.py."
+                f"Add it to configs/gec/gec.json and tasks/gec/task.py."
             )
 
     def parse_row(self, row: dict) -> dict | None:
@@ -106,6 +106,45 @@ class GECTask(BaseTask):
         return profile_error_distribution(
             real_data, supported, count_max=count_max, annotator=annotator
         )
+
+    def profile_dataset(self, rows: list[dict], annotator=None) -> dict:
+        """Edit-type distribution over (corrupted -> original) pairs, re-annotated
+        with ERRANT so real and generated are measured identically (a generated
+        row's own error_type claim is never trusted)."""
+        from framework.profiling.gec_profiler import profile_gec_edit_types
+        return profile_gec_edit_types(
+            rows,
+            supported_types=set(self.get_error_descriptions().keys()),
+            annotator=annotator,
+        )
+
+    def compare_profiles(self, real: dict, generated: dict) -> dict:
+        """Real->generated deltas + Jensen-Shannon divergences, mirroring the
+        spam fidelity block."""
+        from framework.profiling.fidelity import jensen_shannon_divergence
+        types = set(real.get("error_type_dist", {})) | set(generated.get("error_type_dist", {}))
+        return {
+            "edits_per_pair_delta": (
+                generated.get("edits_per_pair_mean", 0.0) - real.get("edits_per_pair_mean", 0.0)
+            ),
+            "type_deltas": {
+                t: generated.get("error_type_dist", {}).get(t, 0.0)
+                   - real.get("error_type_dist", {}).get(t, 0.0)
+                for t in sorted(types)
+            },
+            "type_dist_jsd": jensen_shannon_divergence(
+                real.get("error_type_dist", {}), generated.get("error_type_dist", {})
+            ),
+            "count_dist_jsd": jensen_shannon_divergence(
+                real.get("error_count_dist", {}), generated.get("error_count_dist", {})
+            ),
+            "supported_fraction_delta": (
+                generated.get("supported_fraction", 0.0) - real.get("supported_fraction", 0.0)
+            ),
+            "note": "edit types re-annotated with ERRANT on both real and generated "
+                    "pairs; measures ERRANT-visible distribution match, not the "
+                    "generator's intended error semantics.",
+        }
 
     def get_task_name(self) -> str:
         return "gec"

@@ -149,3 +149,63 @@ def profile_gec_rows(
             limit=example_limit,
         ),
     }
+
+
+def profile_gec_edit_types(
+    rows: list[dict[str, Any]],
+    *,
+    supported_types=(),
+    annotator=None,
+    count_max: int = 5,
+) -> dict[str, Any]:
+    """Edit-type profile of (corrupted -> original) pairs via ERRANT re-annotation.
+
+    Accepts both real-reference rows ({"corrupted", "original", "text"}) and
+    generated rows ({"original", "corrupted", "error_type"}); a generated row's
+    own error_type claim is deliberately ignored so real and generated are
+    measured with the same instrument. supported_types is the inverse-mode
+    vocabulary; supported_fraction reports how much of the observed edit mass
+    that vocabulary can express.
+    """
+    from collections import Counter
+
+    if annotator is None:
+        from framework.evaluators.gec._errant_shared import get_annotator
+        annotator = get_annotator()
+
+    supported = set(supported_types)
+    type_counter: Counter = Counter()
+    per_pair: list[int] = []
+    for row in rows:
+        incorrect = row.get("corrupted") or row.get("incorrect")
+        correct = row.get("original") or row.get("correct")
+        if not incorrect or not correct:
+            continue
+        try:
+            edits = annotator.annotate(annotator.parse(incorrect), annotator.parse(correct))
+        except Exception:
+            continue
+        types = [e.type for e in edits if e.type and e.type != "noop"]
+        type_counter.update(types)
+        per_pair.append(min(len(types), count_max))
+
+    n_annotated = len(per_pair)
+    total_edits = sum(type_counter.values())
+    count_counter = Counter(per_pair)
+    return {
+        "n": len(rows),
+        "n_annotated": n_annotated,
+        "edits_per_pair_mean": (
+            round(sum(per_pair) / n_annotated, 4) if n_annotated else 0.0
+        ),
+        "error_type_dist": {
+            t: type_counter[t] / total_edits for t in sorted(type_counter)
+        } if total_edits else {},
+        "error_count_dist": {
+            n: count_counter[n] / n_annotated for n in sorted(count_counter)
+        } if n_annotated else {},
+        "supported_fraction": (
+            sum(c for t, c in type_counter.items() if t in supported) / total_edits
+            if total_edits else 0.0
+        ),
+    }
