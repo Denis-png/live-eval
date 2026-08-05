@@ -32,7 +32,7 @@ def _load_nlp():
 
 def _token_depth(token) -> int:
     depth = 0
-    while token.head is not token:
+    while token.head != token:
         token = token.head
         depth += 1
     return depth

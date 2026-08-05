@@ -28,6 +28,32 @@ class FakeNLP:
         return iter(self._docs)
 
 
+class SpacyLikeToken:
+    """Token that mimics real spaCy: returns fresh object on each .head access."""
+    def __init__(self, i, pos, dep, head_i, doc=None):
+        self.i = i
+        self.pos_ = pos
+        self.dep_ = dep
+        self.head_i = head_i
+        self.doc = doc
+
+    @property
+    def head(self):
+        if self.doc is None:
+            # Self-rooting fallback
+            return SpacyLikeToken(self.i, self.pos_, self.dep_, self.i, None)
+        return self.doc[self.head_i]
+
+    def __eq__(self, other):
+        if not isinstance(other, SpacyLikeToken):
+            return False
+        return self.i == other.i and self.head_i == other.head_i
+
+    def __getitem__(self, idx):
+        # Allow doc[idx] access; return self if idx matches, else placeholder
+        return self if idx == self.i else SpacyLikeToken(idx, "NOUN", "dep", idx, None)
+
+
 def _simple_doc():
     root = FakeToken("VERB", "ROOT")            # depth 0, clause
     noun = FakeToken("NOUN", "nsubj", head=root)  # depth 1
@@ -61,6 +87,37 @@ class SyntaxProfileTests(unittest.TestCase):
             "framework.profiling.syntax_stats._load_nlp", return_value=None
         ):
             self.assertIsNone(syntax_profile(["hello"]))
+
+    def test_token_depth_with_fresh_head_objects(self):
+        """Regression: _token_depth must use equality (!=) not identity (is not).
+
+        Real spaCy returns a fresh Token object on each .head access.
+        Old code with 'is not' would loop forever; new code with '!=' works.
+        """
+        # Create a simple doc: root (i=0, head_i=0) and child (i=1, head_i=0)
+        root = SpacyLikeToken(0, "VERB", "ROOT", 0)
+        child = SpacyLikeToken(1, "NOUN", "nsubj", 0)
+
+        # Create a minimal doc that supports indexing
+        class SimpleDoc:
+            def __init__(self, tokens):
+                self._tokens = tokens
+                for t in tokens:
+                    t.doc = self
+                self.sents = [object()]
+
+            def __iter__(self):
+                return iter(self._tokens)
+
+            def __getitem__(self, idx):
+                return self._tokens[idx]
+
+        doc = SimpleDoc([root, child])
+        profile = syntax_profile(["verb noun"], nlp=FakeNLP([doc]))
+
+        # Verify it completes and produces correct depth
+        self.assertIsNotNone(profile)
+        self.assertEqual(profile["parse_depth"]["max"], 1)
 
 
 if __name__ == "__main__":
