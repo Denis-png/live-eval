@@ -5,6 +5,7 @@ from framework.profiling.text_stats import (
     WORD_BINS,
     bin_label,
     length_distribution,
+    style_profile,
 )
 
 
@@ -48,6 +49,26 @@ class LengthDistributionTests(unittest.TestCase):
     def test_char_bins_exist(self):
         dist = length_distribution([30], CHAR_BINS)
         self.assertAlmostEqual(dist["bins"]["26-50"], 1.0)
+
+
+class StyleProfileTests(unittest.TestCase):
+    def test_rates_on_crafted_texts(self):
+        texts = ["Are you FREE now?", "i'm at home", "call her 2day plz!"]
+        style = style_profile(texts)
+        self.assertAlmostEqual(style["question_rate"], 1 / 3, places=3)
+        self.assertAlmostEqual(style["exclaim_rate"], 1 / 3, places=3)
+        self.assertAlmostEqual(style["first_person_rate"], 1 / 3, places=3)   # i'm
+        self.assertAlmostEqual(style["second_person_rate"], 1 / 3, places=3)  # you
+        self.assertAlmostEqual(style["contraction_rate"], 1 / 3, places=3)    # i'm
+        self.assertAlmostEqual(style["digit_rate"], 1 / 3, places=3)          # 2day
+        self.assertAlmostEqual(style["uppercase_word_rate"], 1 / 3, places=3) # FREE
+        self.assertAlmostEqual(style["texting_slang_rate"], 1 / 3, places=3)  # 2day, plz
+        self.assertGreater(style["punctuation_density"], 0.0)
+
+    def test_empty_input_all_zero(self):
+        style = style_profile([])
+        for value in style.values():
+            self.assertEqual(value, 0.0)
 
 
 if __name__ == "__main__":
