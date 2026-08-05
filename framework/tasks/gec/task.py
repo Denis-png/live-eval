@@ -110,13 +110,31 @@ class GECTask(BaseTask):
     def profile_dataset(self, rows: list[dict], annotator=None) -> dict:
         """Edit-type distribution over (corrupted -> original) pairs, re-annotated
         with ERRANT so real and generated are measured identically (a generated
-        row's own error_type claim is never trusted)."""
+        row's own error_type claim is never trusted). Plus cheap content
+        characteristics (word-count histogram, style rates) over the corrupted
+        side — no LLM in this per-run path."""
+        from framework.profiling.dataset_profiler import tokenize
         from framework.profiling.gec_profiler import profile_gec_edit_types
-        return profile_gec_edit_types(
+        from framework.profiling.text_stats import (
+            WORD_BINS,
+            length_distribution,
+            style_profile,
+        )
+
+        profile = profile_gec_edit_types(
             rows,
             supported_types=set(self.get_error_descriptions().keys()),
             annotator=annotator,
         )
+        texts = [
+            text for row in rows
+            if (text := (row.get("corrupted") or row.get("incorrect")))
+        ]
+        profile["word_count_hist"] = length_distribution(
+            [len(tokenize(t)) for t in texts], WORD_BINS
+        )["bins"]
+        profile["style"] = style_profile(texts)
+        return profile
 
     def compare_profiles(self, real: dict, generated: dict) -> dict:
         """Real->generated deltas + Jensen-Shannon divergences, mirroring the
@@ -141,6 +159,17 @@ class GECTask(BaseTask):
             "supported_fraction_delta": (
                 generated.get("supported_fraction", 0.0) - real.get("supported_fraction", 0.0)
             ),
+            "length_jsd": jensen_shannon_divergence(
+                real.get("word_count_hist", {}), generated.get("word_count_hist", {})
+            ),
+            "style_deltas": {
+                key: round(
+                    generated.get("style", {}).get(key, 0.0)
+                    - real.get("style", {}).get(key, 0.0), 4)
+                for key in sorted(
+                    set(real.get("style", {})) | set(generated.get("style", {}))
+                )
+            },
             "note": "edit types re-annotated with ERRANT on both real and generated "
                     "pairs; measures ERRANT-visible distribution match, not the "
                     "generator's intended error semantics.",

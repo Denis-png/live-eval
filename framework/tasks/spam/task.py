@@ -93,6 +93,12 @@ class SpamTask(BaseTask):
         generator injects (so real and generated are measured identically)."""
         from collections import Counter
         from framework.profiling.spam_profiler import detect_signals
+        from framework.profiling.dataset_profiler import tokenize
+        from framework.profiling.text_stats import (
+            WORD_BINS,
+            length_distribution,
+            style_profile,
+        )
 
         supported = list(self.get_error_descriptions().keys())
         n = len(rows)
@@ -115,6 +121,21 @@ class SpamTask(BaseTask):
             {k: count_counter[k] / len(per_msg) for k in sorted(count_counter)}
             if per_msg else {}
         )
+
+        texts_by_label = {
+            "HAM": [r["text"] for r in rows if r.get("label") == "HAM" and r.get("text")],
+            "SPAM": spam_texts,
+        }
+        word_count_hist_per_label = {
+            label: length_distribution(
+                [len(tokenize(t)) for t in texts], WORD_BINS
+            )["bins"]
+            for label, texts in texts_by_label.items()
+        }
+        style_per_label = {
+            label: style_profile(texts) for label, texts in texts_by_label.items()
+        }
+
         return {
             "n": n,
             "class_balance": {
@@ -124,6 +145,8 @@ class SpamTask(BaseTask):
             "signal_rate": signal_rate,
             "signal_type_dist": signal_type_dist,
             "signal_count_dist": signal_count_dist,
+            "word_count_hist_per_label": word_count_hist_per_label,
+            "style_per_label": style_per_label,
         }
 
     def compare_profiles(self, real: dict, generated: dict) -> dict:
@@ -148,6 +171,25 @@ class SpamTask(BaseTask):
             "count_dist_jsd": jensen_shannon_divergence(
                 real.get("signal_count_dist", {}), generated.get("signal_count_dist", {})
             ),
+            "length_jsd_per_label": {
+                label: jensen_shannon_divergence(
+                    real.get("word_count_hist_per_label", {}).get(label, {}),
+                    generated.get("word_count_hist_per_label", {}).get(label, {}),
+                )
+                for label in ("HAM", "SPAM")
+            },
+            "style_deltas_per_label": {
+                label: {
+                    key: round(
+                        generated.get("style_per_label", {}).get(label, {}).get(key, 0.0)
+                        - real.get("style_per_label", {}).get(label, {}).get(key, 0.0), 4)
+                    for key in sorted(
+                        set(real.get("style_per_label", {}).get(label, {}))
+                        | set(generated.get("style_per_label", {}).get(label, {}))
+                    )
+                }
+                for label in ("HAM", "SPAM")
+            },
             "note": "signals re-detected by regex on generated text; measures "
                     "detector-visible distribution match, not semantic spamminess.",
         }

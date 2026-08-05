@@ -82,5 +82,35 @@ class GecProfileDatasetTests(unittest.TestCase):
         self.assertEqual(fid["edits_per_pair_delta"], 0.0)
 
 
+class GecFidelityCharacteristicsTests(unittest.TestCase):
+    def setUp(self):
+        self.task = GecTask()
+        self.ann = FakeAnnotator({"a bad": ["R:SPELL"]})
+
+    def test_profile_dataset_adds_length_hist_and_style(self):
+        rows = [{"corrupted": "a bad", "original": "a good"}]
+        profile = self.task.profile_dataset(rows, annotator=self.ann)
+        self.assertAlmostEqual(sum(profile["word_count_hist"].values()), 1.0, places=3)
+        self.assertAlmostEqual(profile["word_count_hist"]["1-5"], 1.0)
+        self.assertIn("question_rate", profile["style"])
+        self.assertIn("error_type_dist", profile)  # v1 key intact
+
+    def test_compare_profiles_identical_zero_length_jsd(self):
+        rows = [{"corrupted": "a bad", "original": "a good"}]
+        profile = self.task.profile_dataset(rows, annotator=self.ann)
+        fidelity = self.task.compare_profiles(profile, profile)
+        self.assertAlmostEqual(fidelity["length_jsd"], 0.0, places=6)
+        for delta in fidelity["style_deltas"].values():
+            self.assertAlmostEqual(delta, 0.0, places=6)
+        self.assertIn("type_dist_jsd", fidelity)  # v1 key intact
+
+    def test_compare_profiles_disjoint_length_bins(self):
+        short = {"word_count_hist": {"1-5": 1.0}, "style": {"question_rate": 0.0}}
+        long = {"word_count_hist": {"51+": 1.0}, "style": {"question_rate": 1.0}}
+        fidelity = self.task.compare_profiles(short, long)
+        self.assertAlmostEqual(fidelity["length_jsd"], 1.0, places=6)
+        self.assertAlmostEqual(fidelity["style_deltas"]["question_rate"], 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

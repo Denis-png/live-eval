@@ -46,6 +46,9 @@ so it can be inspected later.
             errant_distribution.py  - ERRANT-based GEC error distribution
             spam_distribution.py  - spam-signal-based spam error distribution
             fidelity.py           - Jensen-Shannon divergence for distribution fidelity
+            text_stats.py         - samplable length/style/vocabulary characteristics
+            topics.py             - opt-in LLM topic profiling (profile_dataset --topics)
+            syntax_stats.py       - spaCy-based GEC syntactic complexity
         plotting/            - figures from a run session (matplotlib, headless)
             plots.py         - pure figure builders (dict -> Figure)
             session.py       - load a session, render + save PNGs (fail-soft)

@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", required=True,
                         help="Path to config YAML (e.g. framework/configs/gec/config.yaml)")
     parser.add_argument("--output", help="Path to output JSON profile")
+    parser.add_argument(
+        "--topics", action="store_true",
+        help="Also run LLM topic profiling (uses the 'profiling' config block, "
+             "falling back to 'generation')",
+    )
+    parser.add_argument(
+        "--topic-sample-size", type=int, default=200,
+        help="Texts sampled per topic pass (per label for spam)",
+    )
     return parser.parse_args()
 
 
@@ -54,7 +64,45 @@ def _expand_env_vars(value: Any) -> Any:
     return value
 
 
-def _profile_gec(config: dict[str, Any], output: str) -> str:
+def _build_topic_call(config: dict):
+    """Build call_api for --topics from the 'profiling' config block.
+
+    Mirrors pipeline._build_judge_call's fallback: profiling block missing
+    provider/model -> warn and use the 'generation' block; neither usable ->
+    SystemExit. The api_key resolves from api_keys[provider] unless the block
+    carries an explicit one (standalone CLI never goes through
+    main._resolve_api_keys)."""
+    import framework.pipeline as pipeline
+
+    profiling_cfg = config.get("profiling") or {}
+    if profiling_cfg.get("provider") and profiling_cfg.get("model"):
+        cfg = dict(profiling_cfg)
+    else:
+        generation_cfg = config.get("generation") or {}
+        if not (generation_cfg.get("provider") and generation_cfg.get("model")):
+            raise SystemExit(
+                "--topics requires a 'profiling' (or fallback 'generation') "
+                "config block with provider and model set."
+            )
+        print(
+            "[WARN] profiling block missing provider/model — falling back to "
+            "the generation LLM.",
+            file=sys.stderr,
+        )
+        cfg = dict(generation_cfg)
+
+    if not cfg.get("api_key"):
+        cfg["api_key"] = (config.get("api_keys") or {}).get(cfg["provider"], "")
+    if not cfg["api_key"]:
+        raise SystemExit(
+            f"No API key for topic profiling provider '{cfg['provider']}'. "
+            f"Set {cfg['provider'].upper()}_API_KEY in .env or api_keys.{cfg['provider']}."
+        )
+    print(f"Topics   : {cfg['provider']} / {cfg['model']}")
+    return pipeline.load_generator(cfg).call_api
+
+
+def _profile_gec(config: dict[str, Any], output: str, topic_call=None, topic_sample_size: int = 200) -> str:
     """Profile normalized GEC rows using the existing dataset loader."""
     from framework.pipeline import load_real_data, load_task
 
@@ -74,6 +122,23 @@ def _profile_gec(config: dict[str, Any], output: str) -> str:
     task = load_task("gec")
     rows = load_real_data(config, task)
     profile = profile_gec_rows(rows)
+
+    from framework.profiling.syntax_stats import syntax_profile
+
+    correct_texts = [
+        row["correct"] for row in rows if isinstance(row.get("correct"), str)
+    ]
+    syntax = syntax_profile(correct_texts)
+    if syntax is not None:
+        profile["syntax"] = syntax
+
+    if topic_call is not None:
+        from framework.profiling.topics import profile_topics
+
+        profile["topics"] = profile_topics(
+            correct_texts, topic_call, sample_size=topic_sample_size
+        )
+
     output_path = save_profile_json(profile, output)
 
     print("\nGEC dataset profile summary")
@@ -83,10 +148,17 @@ def _profile_gec(config: dict[str, Any], output: str) -> str:
     print(f"Avg correct word count   : {profile['correct_word_count']['mean']}")
     print(f"Avg similarity           : {profile['similarity']['stats']['mean']}")
     print(f"Output                   : {output_path}")
+    if "topics" in profile:
+        top = sorted(
+            profile["topics"]["topics"].items(),
+            key=lambda item: -item[1]["fraction"],
+        )[:3]
+        print("Top topics               : "
+              + ", ".join(f"{name} ({block['fraction']:.0%})" for name, block in top))
     return output_path
 
 
-def _profile_spam(config: dict[str, Any], output: str) -> str:
+def _profile_spam(config: dict[str, Any], output: str, topic_call=None, topic_sample_size: int = 200) -> str:
     """Profile the raw spam dataset without using SpamTask.parse_row()."""
     from framework.profiling.spam_profiler import (
         DEFAULT_SPAM_DATASET,
@@ -111,6 +183,8 @@ def _profile_spam(config: dict[str, Any], output: str) -> str:
         split=split or DEFAULT_SPAM_SPLIT,
         streaming=streaming,
         hf_token=hf_token,
+        topic_call_api=topic_call,
+        topic_sample_size=topic_sample_size,
     )
     output_path = save_profile_json(profile, output)
     labels = profile["label_distribution"]
@@ -127,6 +201,10 @@ def _profile_spam(config: dict[str, Any], output: str) -> str:
         print(f"  {label}:")
         for signal, rate in stats.items():
             print(f"    {signal:<16}: {rate:.2%}")
+    for label, block in (profile.get("topics_per_label") or {}).items():
+        top = sorted(block["topics"].items(), key=lambda item: -item[1]["fraction"])[:3]
+        print(f"  {label} topics: "
+              + ", ".join(f"{name} ({b['fraction']:.0%})" for name, b in top))
     print(f"\nOutput     : {output_path}")
     return output_path
 
@@ -135,11 +213,14 @@ def main() -> None:
     """Load the selected benchmark dataset, profile it, and save JSON output."""
     args = parse_args()
     config = load_config(args.config)
+    topic_call = _build_topic_call(config) if args.topics else None
 
     if args.task == "spam":
-        _profile_spam(config, args.output or DEFAULT_SPAM_OUTPUT)
+        _profile_spam(config, args.output or DEFAULT_SPAM_OUTPUT,
+                      topic_call, args.topic_sample_size)
     else:
-        _profile_gec(config, args.output or DEFAULT_GEC_OUTPUT)
+        _profile_gec(config, args.output or DEFAULT_GEC_OUTPUT,
+                     topic_call, args.topic_sample_size)
 
 
 if __name__ == "__main__":

@@ -147,8 +147,22 @@ def profile_spam_dataset(
     streaming: bool = False,
     sample_size: int | None = None,
     hf_token: str | None = None,
+    topic_call_api=None,
+    topic_sample_size: int = 200,
 ) -> dict[str, Any]:
-    """Load the raw spam dataset and return classification profile stats."""
+    """Load the raw spam dataset and return classification profile stats.
+
+    topic_call_api: optional call_api(prompt) -> str; when given, an LLM
+    topic profile is computed per label (see profiling.topics)."""
+    from framework.profiling.dataset_profiler import tokenize
+    from framework.profiling.text_stats import (
+        CHAR_BINS,
+        WORD_BINS,
+        length_distribution,
+        style_profile,
+        vocab_profile,
+    )
+
     rows = load_spam_rows(
         dataset_name=dataset_name,
         split=split,
@@ -158,4 +172,33 @@ def profile_spam_dataset(
     )
     profile = profile_classification_rows(rows, text_field="text", label_field="label")
     profile["spam_signals"] = analyze_spam_signals(rows)
+
+    grouped: dict[str, list[str]] = defaultdict(list)
+    for row in rows:
+        grouped[row["label"]].append(row["text"])
+
+    profile["length_distributions_per_label"] = {
+        label: {
+            "words": length_distribution([len(tokenize(t)) for t in texts], WORD_BINS),
+            "chars": length_distribution([len(t) for t in texts], CHAR_BINS),
+        }
+        for label, texts in sorted(grouped.items())
+    }
+    profile["style_per_label"] = {
+        label: style_profile(texts) for label, texts in sorted(grouped.items())
+    }
+    profile["vocabulary_per_label"] = {
+        label: vocab_profile(texts) for label, texts in sorted(grouped.items())
+    }
+    profile["profile_version"] = 2
+
+    if topic_call_api is not None:
+        from framework.profiling.topics import profile_topics
+
+        profile["topics_per_label"] = {
+            label: profile_topics(
+                texts, topic_call_api, sample_size=topic_sample_size
+            )
+            for label, texts in sorted(grouped.items())
+        }
     return profile
