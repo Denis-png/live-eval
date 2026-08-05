@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import re
 import string
+from collections import Counter
 from statistics import mean, quantiles
 
-from framework.profiling.dataset_profiler import tokenize
+from framework.profiling.dataset_profiler import DEFAULT_STOPWORDS, tokenize
 
 WORD_BINS: tuple[tuple[int, int | None], ...] = (
     (1, 5), (6, 10), (11, 15), (16, 20), (21, 30), (31, 50), (51, None),
@@ -115,4 +116,48 @@ def style_profile(texts: list[str]) -> dict:
         "uppercase_word_rate": rate(lambda t: bool(_ALLCAPS_RE.search(t))),
         "texting_slang_rate": token_rate(TEXTING_SLANG),
         "punctuation_density": round(mean(densities), 4) if densities else 0.0,
+    }
+
+
+def vocab_profile(
+    texts: list[str],
+    stopwords: set[str] | None = None,
+    top_n: int = 15,
+) -> dict:
+    """Vocabulary-richness stats. N-grams keep stopwords (word order matters
+    more than content words there) and never cross text boundaries."""
+    if stopwords is None:
+        stopwords = DEFAULT_STOPWORDS
+    token_lists = [tokenize(t) for t in texts]
+    all_tokens = [token for tokens in token_lists for token in tokens]
+    total = len(all_tokens)
+    type_counts = Counter(all_tokens)
+    n_types = len(type_counts)
+
+    bigrams: Counter[str] = Counter()
+    trigrams: Counter[str] = Counter()
+    for tokens in token_lists:
+        bigrams.update(" ".join(tokens[i:i + 2]) for i in range(len(tokens) - 1))
+        trigrams.update(" ".join(tokens[i:i + 3]) for i in range(len(tokens) - 2))
+
+    return {
+        "total_tokens": total,
+        "type_token_ratio": round(n_types / total, 4) if total else 0.0,
+        "hapax_fraction": (
+            round(sum(1 for c in type_counts.values() if c == 1) / n_types, 4)
+            if n_types else 0.0
+        ),
+        "stopword_fraction": (
+            round(sum(c for w, c in type_counts.items() if w in stopwords) / total, 4)
+            if total else 0.0
+        ),
+        "avg_word_length": (
+            round(mean(len(t) for t in all_tokens), 4) if total else 0.0
+        ),
+        "top_bigrams": [
+            {"ngram": g, "count": c} for g, c in bigrams.most_common(top_n)
+        ],
+        "top_trigrams": [
+            {"ngram": g, "count": c} for g, c in trigrams.most_common(top_n)
+        ],
     }

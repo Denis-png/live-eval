@@ -6,6 +6,7 @@ from framework.profiling.text_stats import (
     bin_label,
     length_distribution,
     style_profile,
+    vocab_profile,
 )
 
 
@@ -69,6 +70,29 @@ class StyleProfileTests(unittest.TestCase):
         style = style_profile([])
         for value in style.values():
             self.assertEqual(value, 0.0)
+
+
+class VocabProfileTests(unittest.TestCase):
+    def test_vocab_stats_on_crafted_texts(self):
+        texts = ["the cat sat", "the cat ran"]
+        vocab = vocab_profile(texts)
+        self.assertEqual(vocab["total_tokens"], 6)
+        self.assertAlmostEqual(vocab["type_token_ratio"], 4 / 6, places=3)
+        self.assertAlmostEqual(vocab["hapax_fraction"], 2 / 4, places=3)  # sat, ran
+        self.assertAlmostEqual(vocab["stopword_fraction"], 2 / 6, places=3)  # the x2
+        self.assertAlmostEqual(vocab["avg_word_length"], 3.0, places=3)
+        self.assertEqual(vocab["top_bigrams"][0], {"ngram": "the cat", "count": 2})
+
+    def test_ngrams_do_not_cross_text_boundaries(self):
+        vocab = vocab_profile(["a b", "c d"])
+        bigrams = {item["ngram"] for item in vocab["top_bigrams"]}
+        self.assertNotIn("b c", bigrams)
+
+    def test_empty_input(self):
+        vocab = vocab_profile([])
+        self.assertEqual(vocab["total_tokens"], 0)
+        self.assertEqual(vocab["type_token_ratio"], 0.0)
+        self.assertEqual(vocab["top_bigrams"], [])
 
 
 if __name__ == "__main__":
