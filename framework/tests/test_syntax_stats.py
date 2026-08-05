@@ -28,9 +28,9 @@ class FakeNLP:
         return iter(self._docs)
 
 
-class SpacyLikeToken:
-    """Token that mimics real spaCy: returns fresh object on each .head access."""
-    def __init__(self, i, pos, dep, head_i, doc=None):
+class FreshToken:
+    """Token that mimics real spaCy: .head returns fresh objects on every access."""
+    def __init__(self, i, pos, dep, head_i, doc):
         self.i = i
         self.pos_ = pos
         self.dep_ = dep
@@ -39,19 +39,31 @@ class SpacyLikeToken:
 
     @property
     def head(self):
-        if self.doc is None:
-            # Self-rooting fallback
-            return SpacyLikeToken(self.i, self.pos_, self.dep_, self.i, None)
+        # Returns a fresh object every time (never cached)
         return self.doc[self.head_i]
 
     def __eq__(self, other):
-        if not isinstance(other, SpacyLikeToken):
+        if not isinstance(other, FreshToken):
             return False
-        return self.i == other.i and self.head_i == other.head_i
+        # Compare by doc identity and index (not object identity)
+        return self.doc is other.doc and self.i == other.i
+
+
+class FreshDoc:
+    """Doc whose __getitem__ builds fresh token instances on every call."""
+    def __init__(self, specs):
+        """specs: list of (pos, dep, head_i) tuples defining token properties."""
+        self.specs = specs
+        self.sents = [object()]
+
+    def __iter__(self):
+        return (FreshToken(i, pos, dep, head_i, self)
+                for i, (pos, dep, head_i) in enumerate(self.specs))
 
     def __getitem__(self, idx):
-        # Allow doc[idx] access; return self if idx matches, else placeholder
-        return self if idx == self.i else SpacyLikeToken(idx, "NOUN", "dep", idx, None)
+        # Always construct a fresh token instance
+        pos, dep, head_i = self.specs[idx]
+        return FreshToken(idx, pos, dep, head_i, self)
 
 
 def _simple_doc():
@@ -91,31 +103,29 @@ class SyntaxProfileTests(unittest.TestCase):
     def test_token_depth_with_fresh_head_objects(self):
         """Regression: _token_depth must use equality (!=) not identity (is not).
 
-        Real spaCy returns a fresh Token object on each .head access.
-        Old code with 'is not' would loop forever; new code with '!=' works.
+        Real spaCy returns a fresh Token object on each .head access (never
+        identity-equal). Old code with 'is not' would loop forever; new code
+        with '!=' correctly uses __eq__ to detect the root.
         """
-        # Create a simple doc: root (i=0, head_i=0) and child (i=1, head_i=0)
-        root = SpacyLikeToken(0, "VERB", "ROOT", 0)
-        child = SpacyLikeToken(1, "NOUN", "nsubj", 0)
+        # Create doc: root at i=0 (head_i=0), child at i=1 (head_i=0)
+        doc = FreshDoc([
+            ("VERB", "ROOT", 0),   # i=0: root token pointing to itself
+            ("NOUN", "nsubj", 0),  # i=1: child token pointing to root
+        ])
 
-        # Create a minimal doc that supports indexing
-        class SimpleDoc:
-            def __init__(self, tokens):
-                self._tokens = tokens
-                for t in tokens:
-                    t.doc = self
-                self.sents = [object()]
+        # Sanity check: verify FreshToken mimics spaCy's fresh-object semantics
+        token0 = doc[0]
+        token0_head1 = token0.head
+        token0_head2 = token0.head
+        self.assertIsNot(token0_head1, token0_head2,
+                         "Multiple .head accesses must return distinct objects")
+        self.assertEqual(token0_head1, token0_head2,
+                         "But they must compare equal via __eq__")
 
-            def __iter__(self):
-                return iter(self._tokens)
-
-            def __getitem__(self, idx):
-                return self._tokens[idx]
-
-        doc = SimpleDoc([root, child])
+        # Now test that syntax_profile completes without hanging
         profile = syntax_profile(["verb noun"], nlp=FakeNLP([doc]))
 
-        # Verify it completes and produces correct depth
+        # Verify correctness
         self.assertIsNotNone(profile)
         self.assertEqual(profile["parse_depth"]["max"], 1)
 
