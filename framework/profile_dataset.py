@@ -74,6 +74,16 @@ def _profile_gec(config: dict[str, Any], output: str) -> str:
     task = load_task("gec")
     rows = load_real_data(config, task)
     profile = profile_gec_rows(rows)
+
+    from framework.profiling.syntax_stats import syntax_profile
+
+    correct_texts = [
+        row["correct"] for row in rows if isinstance(row.get("correct"), str)
+    ]
+    syntax = syntax_profile(correct_texts)
+    if syntax is not None:
+        profile["syntax"] = syntax
+
     output_path = save_profile_json(profile, output)
 
     print("\nGEC dataset profile summary")

@@ -16,6 +16,13 @@ from framework.profiling.dataset_profiler import (
     tokenize,
     top_frequent_words,
 )
+from framework.profiling.text_stats import (
+    CHAR_BINS,
+    WORD_BINS,
+    length_distribution,
+    style_profile,
+    vocab_profile,
+)
 
 
 def sequence_similarity(source: str, reference: str) -> float:
@@ -148,6 +155,25 @@ def profile_gec_rows(
             rows_with_similarity,
             limit=example_limit,
         ),
+        "length_distributions": {
+            "incorrect": {
+                "words": length_distribution(incorrect_word_counts, WORD_BINS),
+                "chars": length_distribution(incorrect_lengths, CHAR_BINS),
+            },
+            "correct": {
+                "words": length_distribution(correct_word_counts, WORD_BINS),
+                "chars": length_distribution(correct_lengths, CHAR_BINS),
+            },
+        },
+        "style": {
+            "incorrect": style_profile(incorrect_texts),
+            "correct": style_profile(correct_texts),
+        },
+        "vocabulary": {
+            "incorrect": vocab_profile(incorrect_texts),
+            "correct": vocab_profile(correct_texts),
+        },
+        "profile_version": 2,
     }
 
 
