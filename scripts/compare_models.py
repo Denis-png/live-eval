@@ -84,14 +84,18 @@ def _flatten(blocks: dict) -> dict:
 
 
 def _print_table(all_results: dict) -> None:
-    task_models = sorted({tm for r in all_results.values() for tm in r})
+    ok = {gl: r for gl, r in all_results.items() if "error" not in r}
+    failed = {gl: r["error"] for gl, r in all_results.items() if "error" in r}
+    task_models = sorted({tm for r in ok.values() for tm in r})
     for tm in task_models:
         print(f"\n=== task model: {tm} ===")
-        rows = {gl: _flatten(r[tm]) for gl, r in all_results.items() if tm in r}
+        rows = {gl: _flatten(r[tm]) for gl, r in ok.items() if tm in r}
         cols = sorted({c for f in rows.values() for c in f})
         print("gen_model".ljust(30) + "".join(c.ljust(20) for c in cols))
         for gl, f in rows.items():
             print(gl.ljust(30) + "".join((f.get(c, "-")).ljust(20) for c in cols))
+    for gl, err in failed.items():
+        print(f"\n[FAILED] {gl}: {err}")
 
 
 def run_comparison(base_config: dict) -> dict:
@@ -112,7 +116,13 @@ def run_comparison(base_config: dict) -> dict:
     for label, cfg in configs:
         session = os.path.join(cfg["output"]["base_dir"], cfg["output"]["session_id"])
         print(f"\n{'#'*60}\nGEN MODEL: {label}  ->  {session}\n{'#'*60}")
-        all_results[label] = run_pipeline(cfg)
+        try:
+            all_results[label] = run_pipeline(cfg)
+        except (RuntimeError, ValueError) as e:
+            # One failing model must not destroy the rest of an expensive
+            # multi-model comparison; record it and keep going.
+            print(f"[ERROR] {label}: {e}", file=sys.stderr)
+            all_results[label] = {"error": str(e)}
 
     task = base_config["task"]["name"]
     base_dir = (base_config.get("output") or {}).get("base_dir", "framework/data/runs")
@@ -124,6 +134,9 @@ def run_comparison(base_config: dict) -> dict:
     print(f"\nCombined comparison written to {combined_path}")
 
     _print_table(all_results)
+    if all("error" in r for r in all_results.values()):
+        sys.exit("[ERROR] every generation model failed — see errors above "
+                 "and comparison.json.")
     return all_results
 
 
@@ -150,7 +163,10 @@ def main():
     device_pref = (config.get("compute") or {}).get("device", "auto")
     os.environ["FRAMEWORK_DEVICE"] = str(device_pref)
 
-    run_comparison(config)
+    try:
+        run_comparison(config)
+    except (RuntimeError, ValueError) as e:
+        sys.exit(f"[ERROR] {e}")
 
 
 if __name__ == "__main__":
