@@ -22,8 +22,8 @@ class RealEvalSamplesTests(unittest.TestCase):
             {"text": "lunch tomorrow", "label": "HAM"},
         ]
         try:
-            config = {"dataset": {"huggingface": {"name": "d", "split": "train"}},
-                      "generation": {"inverse": {"profile_size": 10}}}
+            config = {"dataset": {"huggingface": {"name": "d", "split": "train"},
+                                   "reference_size": 10}}
             out = SpamTask().get_real_eval_samples(config, [])
         finally:
             sp.load_spam_rows = original

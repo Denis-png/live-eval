@@ -41,14 +41,14 @@ class SpamProfileTests(unittest.TestCase):
         sp.load_spam_rows = fake_load
         try:
             config = {
-                "dataset": {"name": "deysi/spam-detection-dataset", "split": "train"},
-                "generation": {"inverse": {"profile_size": 42}},
+                "dataset": {"name": "deysi/spam-detection-dataset", "split": "train",
+                            "reference_size": 42},
             }
             dist = task.profile_error_distribution([], count_max=5, config=config)
         finally:
             sp.load_spam_rows = original
 
-        self.assertEqual(captured["sample_size"], 42)          # profile_size forwarded
+        self.assertEqual(captured["sample_size"], 42)          # reference_size forwarded
         self.assertEqual(set(dist["type_dist"].keys()), _CATS)  # HAM rows excluded, vocab full
         self.assertAlmostEqual(sum(dist["type_dist"].values()), 1.0)
 

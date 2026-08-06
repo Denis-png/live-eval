@@ -46,14 +46,15 @@ class SpamTask(BaseTask):
 
     def _load_reference_rows(self, config: dict | None) -> list[dict]:
         """Load the labeled real reference ({"text","label"} rows, both classes)
-        from the configured dataset. Shared by profiling and the real baseline."""
+        from the configured dataset, defaulting to the whole split. Shared by
+        profiling and the real baseline."""
         from framework.profiling import spam_profiler
         from framework.data_loading import iter_local_rows, resolve_dataset_config
 
         cfg = config or {}
         ds = resolve_dataset_config(cfg.get("dataset") or {})
-        inv = ((cfg.get("generation") or {}).get("inverse") or {})
-        profile_size = inv.get("profile_size", 200)
+        # None -> no cap: the labeled reference defaults to the whole split.
+        reference_size = ds.get("reference_size")
 
         if ds["source"] == "local":
             rows = []
@@ -61,12 +62,12 @@ class SpamTask(BaseTask):
                 parsed = spam_profiler.normalize_spam_row(raw)
                 if parsed is not None:
                     rows.append(parsed)
-                if len(rows) >= profile_size:
+                if reference_size is not None and len(rows) >= reference_size:
                     break
             return rows
         hf_token = ds.get("hf_token") or (cfg.get("api_keys") or {}).get("huggingface")
         return spam_profiler.load_spam_rows(
-            sample_size=profile_size,
+            sample_size=reference_size,
             streaming=ds.get("streaming", False),
             hf_token=hf_token,
             dataset_name=ds.get("name") or DEFAULT_SPAM_DATASET,

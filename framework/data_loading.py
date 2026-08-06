@@ -35,6 +35,7 @@ def resolve_dataset_config(ds_config: dict) -> dict:
     return {
         "source": ds.get("source", "huggingface"),
         "sample_size": ds.get("sample_size"),
+        "reference_size": ds.get("reference_size"),
         "name": hf.get("name", ds.get("name")),
         "split": hf.get("split", ds.get("split")),
         "streaming": hf.get("streaming", ds.get("streaming", False)),
