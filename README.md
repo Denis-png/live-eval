@@ -97,8 +97,7 @@ so it can be inspected later.
                          samples generated per run; the real pool is loaded to match).
                          `mode` (forward | inverse) applies to **corruption** tasks
                          (GEC); spam is **class-conditional** and ignores it. Spam
-                         also reads `class_balance` (`empirical` | float = P(SPAM))
-                         and `seed_field` (the real-data field seeded from).
+                         also reads `class_balance` (`empirical` | float = P(SPAM)).
    - `evaluation.real_baseline` — also score the task models on the real benchmark
                          (default `true`; see "Real baseline & fidelity").
    - `task.name`       — `gec` or `spam`
@@ -155,9 +154,9 @@ pipeline dispatches on it. `generation.mode` only applies to the corruption stra
 - **`corruption`** (GEC) — corrupt a source text. `generation.mode` selects:
   - **`forward`** — the generator rewrites each source sentence into a corrupted
     variant, choosing an error type itself.
-  - **`inverse`** — the generator corrupts a known-clean source
-    (`inverse.source_field`) according to an **empirical error distribution**
-    (ERRANT-profiled) so the injected error mix matches the benchmark.
+  - **`inverse`** — the generator corrupts the known-clean `correct` field according
+    to an **empirical error distribution** (ERRANT-profiled) so the injected error
+    mix matches the benchmark.
 
 - **`class_conditional`** (Spam) — spam detection is classification (text → label), so
   generation is inherently **label → text**: sample a target class from the balance

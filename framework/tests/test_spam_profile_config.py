@@ -12,9 +12,9 @@ class SpamProfileDatasetConfigTests(unittest.TestCase):
             "dataset": {
                 "source": "huggingface",
                 "sample_size": 50,
+                "reference_size": 7,
                 "huggingface": {"name": "nested/ds", "split": "validation"},
             },
-            "generation": {"inverse": {"profile_size": 7}},
         }
         with mock.patch(
             "framework.profiling.spam_profiler.load_spam_rows", return_value=[]
@@ -45,8 +45,8 @@ class SpamProfileDatasetConfigTests(unittest.TestCase):
                         "spam,URGENT! claim your £500 reward\n")
             config = {
                 "dataset": {"source": "local", "sample_size": 50,
+                            "reference_size": 10,
                             "local": {"path": path, "format": "csv"}},
-                "generation": {"inverse": {"profile_size": 10}},
             }
             with mock.patch(
                 "framework.profiling.spam_profiler.load_spam_rows"
@@ -60,6 +60,24 @@ class SpamProfileDatasetConfigTests(unittest.TestCase):
             spam_rows = profile.call_args.args[0]
             self.assertEqual(len(spam_rows), 2)  # the two SPAM rows from the file
             self.assertTrue(all(r["label"] == "SPAM" for r in spam_rows))
+
+    def test_reference_size_absent_means_uncapped(self):
+        """No dataset.reference_size -> the whole split is loaded (sample_size=None)."""
+        config = {
+            "dataset": {
+                "source": "huggingface",
+                "huggingface": {"name": "nested/ds", "split": "train"},
+            },
+        }
+        with mock.patch(
+            "framework.profiling.spam_profiler.load_spam_rows", return_value=[]
+        ) as load_rows:
+            with mock.patch(
+                "framework.profiling.spam_distribution.profile_spam_distribution",
+                return_value={},
+            ):
+                SpamTask().profile_error_distribution([], config=config)
+        self.assertIsNone(load_rows.call_args.kwargs["sample_size"])
 
 
 if __name__ == "__main__":

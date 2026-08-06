@@ -27,15 +27,9 @@ generation:
   num_runs: 3
   sample_size: 150
   class_balance: empirical
-  seed_field: incorrect
   timeout: 300
   max_retries: 2
   request_delay: 10
-  inverse:
-    profile_size: 200
-    placeholder_distribution:
-      count_mean: 1.5
-      count_max: 5
 
 judge:
   enabled: false

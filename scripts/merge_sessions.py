@@ -43,7 +43,7 @@ def merge_sessions(session_dirs, out_dir, config, *, plots=False):
                     for d in session_dirs if os.path.exists(os.path.join(d, "real_sample.json"))]
     if real_samples and any(rs != real_samples[0] for rs in real_samples[1:]):
         print(f"[WARN] source sessions have differing real_sample.json — using "
-              f"{session_dirs[0]}'s (same dataset/profile_size should make these "
+              f"{session_dirs[0]}'s (same dataset/reference sample should make these "
               f"identical; a mismatch means they weren't really replicate runs).",
               file=sys.stderr)
 

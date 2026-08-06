@@ -68,7 +68,7 @@ class BaseTask(ABC):
     def get_error_descriptions(self) -> dict[str, str]:
         """Map of corruption category key -> short human phrase, used to render
         {error_spec} for the inverse prompt. The keys also define the category
-        vocabulary the (placeholder) error distribution samples over.
+        vocabulary the empirical error distribution samples over.
         Return {} if the task does not support inverse generation."""
         return {}
 
@@ -100,8 +100,9 @@ class BaseTask(ABC):
                                    count_max: int = 5, config: dict | None = None) -> dict | None:
         """Empirical inverse-mode error distribution derived from real_data (and
         optionally the run `config`, e.g. to load an auxiliary subset), keyed on
-        get_error_descriptions() vocabulary. Return None to fall back to the
-        placeholder distribution (default: no empirical profiler)."""
+        get_error_descriptions() vocabulary. Return None when real_data is
+        insufficient; the pipeline fails fast on None (default: no empirical
+        profiler)."""
         return None
 
     @abstractmethod
