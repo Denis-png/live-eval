@@ -44,8 +44,7 @@ class RunGenerationTests(unittest.TestCase):
 
     def test_inverse_mode_uses_generate_inverse(self):
         gen = FakeGenerator(["Corrupted: He go to school daily."])
-        config = {"generation": {"mode": "inverse", "sample_size": 5,
-                                 "inverse": {"source_field": "correct"}}}
+        config = {"generation": {"mode": "inverse", "sample_size": 5}}
         out = _run_generation(gen, FakeTask(), config, _REAL, _DIST, judge_call=None, class_prob=0.5)
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["original"], "He goes to school daily.")  # clean source
@@ -75,30 +74,27 @@ class RunGenerationTests(unittest.TestCase):
         applied only to forward mode before."""
         gen = FakeGenerator(["Corrupted: He go to school daily."])
         config = {"generation": {"mode": "inverse", "sample_size": 5,
-                                 "request_delay": 7,
-                                 "inverse": {"source_field": "correct"}}}
+                                 "request_delay": 7}}
         with mock.patch.object(base_generator.time, "sleep") as fake_sleep:
             out = _run_generation(gen, FakeTask(), config, _REAL, _DIST, judge_call=None, class_prob=0.5)
         self.assertEqual(len(out), 1)
         fake_sleep.assert_called_once_with(7)
 
     def test_inverse_raises_when_source_field_missing_from_all_samples(self):
-        """_run_generation must raise ValueError if the configured source_field is
+        """_run_generation must raise ValueError if the hardcoded 'correct' field is
         absent from every real sample — prevents silent zero-output runs (e.g.
-        mode=inverse, task=spam, but source_field left at the 'correct' default)."""
+        mode=inverse, task=spam, whose parse_row() never populates 'correct')."""
         gen = FakeGenerator([])  # generate_inverse should never be reached
         config = {
             "generation": {
                 "mode": "inverse",
                 "sample_size": 5,
-                "inverse": {"source_field": "correct"},
             }
         }
         # Only 'incorrect' key present — no 'correct' key on any sample
         data_without_correct = [{"incorrect": "x y z"}]
         with self.assertRaises(ValueError) as ctx:
             _run_generation(gen, FakeTask(), config, data_without_correct, _DIST, judge_call=None, class_prob=0.5)
-        self.assertIn("source_field", str(ctx.exception))
         self.assertIn("correct", str(ctx.exception))
 
 

@@ -317,7 +317,8 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
     strategy = task.get_generation_strategy()
 
     if strategy == "class_conditional":
-        seed_field = gen_cfg.get("seed_field", "incorrect")
+        # Post-parse_row contract: the seed text always lives in "incorrect".
+        seed_field = "incorrect"
         synthetic = generator.generate_class_conditional(
             real_seeds=real_data,
             seed_field=seed_field,
@@ -337,13 +338,14 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
     else:
         mode = gen_cfg.get("mode", "forward")
         if mode == "inverse":
-            inverse_cfg = gen_cfg.get("inverse") or {}
-            source_field = inverse_cfg.get("source_field", "correct")
+            # Post-parse_row contract: every corruption task normalizes rows to
+            # {"incorrect", "correct"}; inverse mode corrupts the clean side.
+            source_field = "correct"
             if real_data and not any(item.get(source_field) for item in real_data):
                 raise ValueError(
-                    f"Inverse mode: source_field '{source_field}' is missing or empty on "
-                    f"all {len(real_data)} real samples. Set generation.inverse.source_field "
-                    f"to a field the task produces (spam: 'incorrect', gec: 'correct')."
+                    f"Inverse mode corrupts the clean '{source_field}' field, but it "
+                    f"is missing or empty on all {len(real_data)} real samples — "
+                    "check the dataset and task.parse_row()."
                 )
             synthetic = generator.generate_inverse(
                 real_samples=real_data, inverse_prompt=task.get_inverse_prompt(),

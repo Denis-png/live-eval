@@ -38,10 +38,10 @@ class PipelineClassConditionalTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             config = {
                 "task": {"name": "spam"},
-                "dataset": {"source": "huggingface", "huggingface": {"name": "x", "split": "train"}},
+                "dataset": {"source": "huggingface", "huggingface": {"name": "x", "split": "train"},
+                            "reference_size": 10},
                 "generation": {"provider": "openrouter", "model": "m", "num_runs": 2,
-                               "sample_size": 4, "class_balance": 0.5, "seed_field": "incorrect",
-                               "inverse": {"profile_size": 10}},
+                               "sample_size": 4, "class_balance": 0.5},
                 "evaluation": {"real_baseline": True},
                 "task_models": [{"name": "fake", "type": "roberta"}],
                 "output": {"base_dir": os.path.join(d, "runs")},

@@ -22,7 +22,7 @@ dataset:
 
 # ── Generation (LLM that creates synthetic corrupted sentences) ──
 generation:
-  mode: "inverse"                  # forward | inverse  (forward = existing behaviour)
+  mode: "inverse"                  # forward | inverse — the full switch; modes need no extra config
   provider: "openrouter"           # groq | openai | openrouter | mistral | minimax | anthropic | google
   model: "minimax-m3"
   temperature: 1.0             # CoT 3-step prompt benefits from higher T
@@ -30,21 +30,11 @@ generation:
   num_runs: 3                  # repeat N times → outputs mean ± std
   sample_size: 150            # synthetic samples per run (single source of truth;
                               # dataset pool is loaded to match)
-  seed_field: correct          # real_data field used as the seed text for inverse corruption
   timeout: 300                 # per-request HTTP timeout in seconds (SDK default: 600)
   max_retries: 2               # SDK retries on 5xx/429 (SDK default: 2)
   request_delay: 10            # seconds to sleep between requests to respect provider TPM limits
   # api_key is auto-resolved from api_keys[provider]; uncomment to override:
   # api_key: "..."
-  # ── Inverse mode (only read when mode == inverse) ──
-  # Corrupt a known-clean sentence according to an error distribution.
-  inverse:
-    source_field: "correct"        # dataset field holding the clean source text
-    profile_size: 200              # raw rows scanned to profile the empirical error
-                                   #   distribution (ERANT type/count dist over real pairs)
-    placeholder_distribution:      # fallback when no empirical profile is available
-      count_mean: 1.5
-      count_max: 5
 
 # ── Profiling (optional LLM used by profile_dataset --topics) ──
 # Same shape as `generation`. If omitted/incomplete, --topics falls back
