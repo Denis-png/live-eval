@@ -4,8 +4,7 @@ Given real (incorrect -> correct) GEC pairs, annotate each with ERRANT and build
 the {type_dist, count_dist} an inverse-mode generator samples from. Only edit
 types in the task's supported vocabulary are kept; a small Laplace prior keeps
 every supported type sample-able even when a finite dataset never shows it.
-Returns None when too few pairs are usable so callers can fall back to a
-placeholder distribution.
+Returns None when too few pairs are usable; callers treat None as a hard error.
 
 Imports only the stdlib at import time; the ERRANT annotator is loaded lazily
 (and can be injected in tests) so importing this module never pulls in spaCy.

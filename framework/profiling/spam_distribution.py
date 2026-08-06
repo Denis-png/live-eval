@@ -4,7 +4,7 @@ Given real SPAM messages, count which of the supported spam signals fire per
 message and build the {type_dist, count_dist} an inverse-mode generator samples
 from. A small Laplace prior keeps every supported signal sample-able even when a
 finite dataset never shows it. Returns None when too few usable SPAM messages
-exist so callers fall back to the placeholder distribution.
+exist; callers treat None as a hard error.
 """
 from collections import Counter
 

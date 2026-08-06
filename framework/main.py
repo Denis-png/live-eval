@@ -271,7 +271,7 @@ def main():
     try:
         results = run_pipeline(config)
     except (RuntimeError, ValueError) as e:
-        # User-facing pipeline failures (0 usable samples, bad source_field,
+        # User-facing pipeline failures (0 usable samples, missing clean field,
         # unknown provider/task) — exit cleanly instead of dumping a traceback.
         sys.exit(f"\n[ERROR] {e}")
 
