@@ -15,9 +15,9 @@ api_keys:
 
 # ── Dataset ─────────────────────────────────────────────────
 dataset:
-  source: local # huggingface | local
+  source: local
   local:
-    path: "framework/data/spam/sms_spam_ham_300.csv"
+    path: "framework/data/spam/sms_spam_sample_300.csv"
     format: csv # m2 | csv | tsv (optional — inferred from the extension)
   # reference_size: 200   # optional cap on labeled real rows loaded as the
   #                       # reference sample (real baseline, profiling, signal
@@ -40,7 +40,7 @@ generation:
   seedless: false              # true = generate from the profile only, no real seeds
   # profile_path: "framework/data/profiles/spam_profile.json"   # default shown; read only when seedless
   provider: "openrouter"           # groq | openai | openrouter | mistral | minimax | anthropic | google
-  model: "xiaomi/mimo-v2.5"
+  model: "deepseek/deepseek-v4-flash"
   temperature: 1.0             # CoT 3-step prompt benefits from higher T
   max_tokens: 1024             # required by Anthropic; ignored by OpenAI-compatible providers
   num_runs: 3                  # repeat N times → outputs mean ± std
@@ -84,6 +84,7 @@ evaluation:
 # ── Task ────────────────────────────────────────────────────
 task:
   name: "spam"
+  variant: "ham"   # tags output folder (spam_ham/) and results.json meta
 
 # ── Task Models (models under evaluation) ───────────────────
 task_models:

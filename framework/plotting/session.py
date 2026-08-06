@@ -59,6 +59,23 @@ def _save(fig, path: str, plt) -> str:
     return path
 
 
+def _load_error_type_counts(session_dir: str) -> dict[str, int]:
+    """Tally error_type across every run_*.json in <session_dir>/generated/."""
+    import glob
+    counts: dict[str, int] = {}
+    run_files = glob.glob(os.path.join(session_dir, "generated", "run_*.json"))
+    for path in run_files:
+        try:
+            with open(path, encoding="utf-8") as f:
+                items = json.load(f)
+            for item in (items or []):
+                et = item.get("error_type") or "unknown"
+                counts[et] = counts.get(et, 0) + 1
+        except Exception as e:
+            print(f"[WARN] could not read {path} for error-type counts: {e}", file=sys.stderr)
+    return counts
+
+
 def render_session(session_dir: str, out_dir: str | None = None) -> list[str]:
     """Render every applicable figure into out_dir (default <session_dir>/plots/).
 
@@ -118,6 +135,17 @@ def render_session(session_dir: str, out_dir: str | None = None) -> list[str]:
                                  os.path.join(out_dir, "fidelity.png"), plt))
         except Exception as e:
             print(f"[WARN] could not render fidelity.png: {e}", file=sys.stderr)
+
+    error_counts = _load_error_type_counts(session_dir)
+    if error_counts:
+        real_rates = (profile or {}).get("real", {}).get("signal_rate") if profile else None
+        try:
+            written.append(_save(
+                plots.plot_error_type_distribution(error_counts, real_rates, meta),
+                os.path.join(out_dir, "error_type_dist.png"), plt,
+            ))
+        except Exception as e:
+            print(f"[WARN] could not render error_type_dist.png: {e}", file=sys.stderr)
 
     if written:
         print(f"Plots written to {out_dir} ({len(written)} figures)")

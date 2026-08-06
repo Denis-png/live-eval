@@ -48,14 +48,14 @@ class SpamTask(BaseTask):
     def get_inverse_prompt(self) -> str | None:
         return self._config.get("inverse_prompt")
 
+    def get_ham_generation_prompt(self) -> str:
+        return self._config["ham_generation_prompt"]
+
     def get_inverse_judge_prompt(self) -> str | None:
         return self._config.get("inverse_judge_prompt")
 
     def get_generation_strategy(self) -> str:
         return "class_conditional"
-
-    def get_ham_generation_prompt(self) -> str:
-        return self._config["ham_generation_prompt"]
 
     def get_error_descriptions(self) -> dict[str, str]:
         return self._config.get("inverse_error_descriptions", {})
@@ -259,8 +259,8 @@ class SpamTask(BaseTask):
         return [{**item, "text": item["text"], "label": item["label"]} for item in synthetic]
 
     def parse_row(self, row: dict) -> dict | None:
-        # Skip spam rows — the generator needs legitimate (HAM) messages as input.
-        if str(row.get("label", "")).lower() in ("spam", "1"):
+        label = str(row.get("label", "")).lower()
+        if label in ("spam", "1"):
             return None
         text = row.get("text") or row.get("message") or row.get("sms")
         if not text:

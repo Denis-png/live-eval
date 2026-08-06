@@ -251,9 +251,12 @@ def aggregate(all_run_scores: list[dict]) -> dict:
 # ── Output paths ──────────────────────────────────────────────
 
 def resolve_output_paths(config: dict, task_name: str, session: str) -> dict:
-    """All artifact paths for one run session, under output.base_dir/<task>/<session>/."""
+    """All artifact paths for one run session, under output.base_dir/<task>/<session>/.
+    If task.variant is set, the folder is named <task>_<variant> instead of <task>."""
     base = (config.get("output") or {}).get("base_dir", "framework/data/runs")
-    session_dir = os.path.join(base, task_name, session)
+    variant = (config.get("task") or {}).get("variant")
+    folder = f"{task_name}_{variant}" if variant else task_name
+    session_dir = os.path.join(base, folder, session)
     return {
         "session_dir": session_dir,
         "generated_dir": os.path.join(session_dir, "generated"),
@@ -314,9 +317,11 @@ def _build_meta(config: dict, task, runs_completed: int,
     else:
         dataset_meta = {"source": "huggingface", "name": ds["name"],
                         "split": ds["split"], "sample_size": config["generation"].get("sample_size")}
+    task_cfg = config.get("task") or {}
     return {
         "created": datetime.now().isoformat(timespec="seconds"),
-        "task": config["task"]["name"],
+        "task": task_cfg.get("name", config["task"]["name"]),
+        "variant": task_cfg.get("variant") or None,
         "strategy": strategy,
         "mode": mode,
         "seedless": seedless,
@@ -555,6 +560,9 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
             f"Check the [SKIP]/failed lines above — typical causes: bad API key, wrong "
             f"model name, model refusals, or unparseable output."
         )
+    if _profile_driven:
+        # Remove the profile text from each item — it is stored once in meta.dataset_profile.
+        synthetic = [{k: v for k, v in item.items() if k != "incorrect"} for item in synthetic]
     return synthetic
 
 
@@ -645,7 +653,7 @@ def run_pipeline(config: dict) -> dict:
     """Run the GET pipeline N times, evaluate the generated benchmark (mean±std)
     and — by default — the same models on the real benchmark, profile real-vs-
     generated fidelity, and write all artifacts under one per-session directory."""
-    task          = load_task(config["task"]["name"])
+    task          = load_task(config["task"]["name"], config.get("task"))
     real_data     = load_real_data(config, task)
     generator     = load_generator(config["generation"])
     judge_call    = _build_judge_call(config, generator)

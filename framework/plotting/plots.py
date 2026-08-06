@@ -179,6 +179,59 @@ def plot_run_variance(model: str, runs: list[dict], generated: dict | None = Non
     return fig
 
 
+def plot_error_type_distribution(
+    synthetic_counts: dict[str, int],
+    real_rates: dict[str, float] | None = None,
+    meta: dict | None = None,
+):
+    """Bar chart of synthetic error-type counts with optional real signal-rate overlay.
+
+    synthetic_counts: {error_type: count} tallied from the run JSONs.
+    real_rates: {signal_type: rate} from profile.real.signal_rate — drawn as a
+        second bar group when present, scaled to the synthetic total so both axes
+        share the same unit (count).  When absent, only the synthetic bars are shown.
+    """
+    labels = sorted(synthetic_counts)
+    synth_vals = [synthetic_counts[l] for l in labels]
+    total = sum(synth_vals) or 1
+
+    has_real = bool(real_rates)
+    if has_real:
+        real_vals = [real_rates.get(l, 0.0) * total for l in labels]
+
+    width = 0.38 if has_real else 0.55
+    x = range(len(labels))
+
+    fig, ax = plt.subplots(figsize=(max(7.0, 1.4 * len(labels) + 2), 4.4))
+    fig.patch.set_facecolor(SURFACE)
+    apply_axes_style(ax)
+
+    if has_real:
+        rb = ax.bar([i - width / 2 - 0.01 for i in x], real_vals, width,
+                    label="real (scaled)", color=SERIES_REAL)
+        ax.bar_label(rb, fmt="%.1f", padding=2, color=INK_MUTED, fontsize=8)
+        gb = ax.bar([i + width / 2 + 0.01 for i in x], synth_vals, width,
+                    label="synthetic", color=SERIES_GENERATED)
+        ax.bar_label(gb, fmt="%d", padding=2, color=INK_MUTED, fontsize=8)
+        ax.legend(frameon=False, labelcolor=INK_MUTED, fontsize=9)
+    else:
+        gb = ax.bar(list(x), synth_vals, width, label="synthetic", color=SERIES_GENERATED)
+        ax.bar_label(gb, fmt="%d", padding=2, color=INK_MUTED, fontsize=8)
+
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(labels, rotation=25, ha="right")
+    ax.set_ylabel("count", color=INK_MUTED)
+    ax.margins(y=0.18)
+
+    fig.suptitle(
+        f"error-type distribution — synthetic{'  vs  real (scaled)' if has_real else ''}"
+        f"\n{_subtitle(meta)}".strip(),
+        color=INK, fontsize=11,
+    )
+    fig.tight_layout()
+    return fig
+
+
 def plot_fidelity(profile: dict, meta: dict | None = None):
     """Real vs generated signal rates + class balance, with the JSD scores in the
     title. Two panels (each one scale) rather than one mixed axis."""
