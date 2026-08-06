@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 import scripts.compare_models as cm
 
@@ -101,6 +102,60 @@ class RunComparisonTests(unittest.TestCase):
     def test_empty_generation_models_raises(self):
         with self.assertRaises(ValueError):
             cm.run_comparison({"generation": {}, "task": {"name": "spam"}, "output": {}})
+
+
+class RunComparisonFailureTests(unittest.TestCase):
+    def _config(self, base_dir):
+        return {
+            "api_keys": {"openrouter": "k"},
+            "dataset": {"name": "d", "split": "train"},
+            "generation": {"provider": "openrouter", "model": "base"},
+            "task": {"name": "spam"},
+            "task_models": [{"name": "m", "type": "roberta"}],
+            "output": {"base_dir": base_dir},
+            "generation_models": [
+                {"provider": "openrouter", "model": "good"},
+                {"provider": "openrouter", "model": "bad"},
+            ],
+        }
+
+    def test_failed_entry_recorded_and_others_complete(self):
+        ok_result = {"m": {"generated": {"accuracy": {"mean": 1.0, "std": 0.0}}}}
+
+        def fake_run(cfg):
+            if cfg["generation"]["model"] == "bad":
+                raise RuntimeError("generation produced 0 samples")
+            return ok_result
+
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch.object(cm, "run_pipeline", side_effect=fake_run):
+                results = cm.run_comparison(self._config(d))
+            self.assertEqual(results["openrouter/good"], ok_result)
+            self.assertEqual(
+                results["openrouter/bad"],
+                {"error": "generation produced 0 samples"},
+            )
+            combined = os.path.join(d, "spam", "comparison", "comparison.json")
+            with open(combined, encoding="utf-8") as f:
+                data = json.load(f)
+            self.assertEqual(data["openrouter/bad"]["error"],
+                             "generation produced 0 samples")
+            self.assertIn("openrouter/good", data)
+
+    def test_all_entries_failed_exits_nonzero(self):
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch.object(
+                cm, "run_pipeline", side_effect=RuntimeError("boom")
+            ):
+                with self.assertRaises(SystemExit) as ctx:
+                    cm.run_comparison(self._config(d))
+            self.assertNotEqual(ctx.exception.code, 0)
+
+    def test_print_table_tolerates_error_entries(self):
+        cm._print_table({
+            "openrouter/good": {"m": {"generated": {"acc": {"mean": 1.0, "std": 0.0}}}},
+            "openrouter/bad": {"error": "boom"},
+        })  # must not raise
 
 
 if __name__ == "__main__":

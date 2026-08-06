@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 from unittest.mock import patch
 
 import framework.pipeline as pipeline
@@ -71,6 +72,37 @@ class PipelineClassConditionalTests(unittest.TestCase):
             prof = json.load(open(os.path.join(base, "profile.json")))
             self.assertIn("fidelity", prof)
             self.assertIn("type_dist_jsd", prof["fidelity"])
+
+    def test_real_baseline_computed_once_across_runs(self):
+        with tempfile.TemporaryDirectory() as d:
+            config = {
+                "task": {"name": "spam"},
+                "dataset": {"source": "huggingface", "huggingface": {"name": "x", "split": "train"},
+                            "reference_size": 10},
+                "generation": {"provider": "openrouter", "model": "m", "num_runs": 2,
+                               "sample_size": 4, "class_balance": 0.5},
+                "evaluation": {"real_baseline": True},
+                "task_models": [{"name": "fake", "type": "roberta"}],
+                "output": {"base_dir": os.path.join(d, "runs")},
+            }
+            with patch.object(pipeline, "load_generator", lambda c: _FakeGen()), \
+                 patch.object(pipeline, "load_real_data",
+                              lambda config, task: [{"incorrect": f"hi there friend {i}"} for i in range(4)]), \
+                 patch.object(SpamTask, "profile_error_distribution",
+                              lambda self, real_data, count_max=5, config=None: _CANNED_DIST), \
+                 patch.object(SpamTask, "get_real_eval_samples",
+                              lambda self, config, real_data: _REAL_REF), \
+                 patch.object(SpamTask, "get_model", lambda self, mc: _FakeModel(mc)), \
+                 mock.patch.object(
+                     pipeline, "_evaluate_real_baseline",
+                     wraps=pipeline._evaluate_real_baseline,
+                 ) as baseline:
+                final = pipeline.run_pipeline(config)
+
+            self.assertEqual(baseline.call_count, 1)
+            self.assertIn("fake", final)
+            self.assertIn("generated", final["fake"])
+            self.assertIn("real", final["fake"])
 
 
 if __name__ == "__main__":
