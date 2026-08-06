@@ -21,7 +21,7 @@ dataset:
     format: csv # m2 | csv | tsv (optional — inferred from the extension)
   # reference_size: 200   # optional cap on labeled real rows loaded as the
   #                       # reference sample (real baseline, profiling, signal
-  #                       # distribution). Omitted → the entire split; set it
+  #                       # distribution, empirical class balance). Omitted → the entire split; set it
   #                       # to speed up CPU real-baseline runs.
 
 # ── Generation (LLM that creates synthetic SPAM/HAM records) ──

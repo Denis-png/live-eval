@@ -258,7 +258,7 @@ class BaseGenerator(ABC):
             real_samples:       list of dicts; `source_field` holds the clean text.
             inverse_prompt:     template with {sentence} (clean text) and {error_spec}.
             error_descriptions: category_key -> human phrase, for building {error_spec}.
-            type_dist:          {category_key: prob}, injected (placeholder for now).
+            type_dist:          {category_key: prob}, empirical, injected by the pipeline.
             count_dist:         {n: prob}, errors-per-sentence, injected.
             sample_size:        number of source sentences to process.
             source_field:       which dataset field is the clean source (default "correct").
