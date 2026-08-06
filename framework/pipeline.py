@@ -1,5 +1,4 @@
 import json
-import math
 import os
 import sys
 from datetime import datetime
@@ -147,51 +146,24 @@ def load_real_data(config: dict, task: BaseTask) -> list[dict]:
     return samples
 
 
-# ── Error distribution (PLACEHOLDER seam) ────────────────────
-# NOTE: This is a temporary placeholder. The real benchmark-preprocessing
-# module (separate work) will replace load_error_distribution's body to compute
-# the empirical error distribution from `real_data`. The signature is fixed so
-# the generator/task layers never change.
-
-def _poisson_pmf(mean: float, n_min: int = 1, n_max: int = 5) -> dict[int, float]:
-    """Normalized Poisson PMF restricted to n in [n_min, n_max]."""
-    raw = {
-        n: (mean ** n) * math.exp(-mean) / math.factorial(n)
-        for n in range(n_min, n_max + 1)
-    }
-    total = sum(raw.values()) or 1.0
-    return {n: p / total for n, p in raw.items()}
-
+# ── Error distribution ───────────────────────────────────────
 
 def load_error_distribution(config: dict, real_data: list[dict], task) -> dict:
-    """Return {"type_dist": {key: prob}, "count_dist": {n: prob}} for inverse mode.
+    """Return {"type_dist": {key: prob}, "count_dist": {n: prob}} derived
+    empirically from the real benchmark via task.profile_error_distribution.
 
-    Delegates to task.profile_error_distribution to derive an empirical
-    distribution from real_data. Falls back to a uniform type distribution over
-    the task's category vocabulary plus a Poisson errors-per-sentence
-    distribution when the task has no empirical profiler or too little data."""
-    pd_cfg = (
-        ((config.get("generation") or {}).get("inverse") or {})
-        .get("placeholder_distribution") or {}
-    )
-    count_max = pd_cfg.get("count_max", 5)
-
-    empirical = task.profile_error_distribution(real_data, count_max=count_max, config=config)
-    if empirical:
-        return empirical
-
-    keys = list(task.get_error_descriptions().keys())
-    if not keys:
-        raise ValueError(
-            "Inverse mode requires task.get_error_descriptions() to be non-empty."
+    Raises RuntimeError when the data is insufficient — generation never runs
+    on a distribution the benchmark doesn't exhibit."""
+    empirical = task.profile_error_distribution(real_data, config=config)
+    if not empirical:
+        raise RuntimeError(
+            f"Could not derive an empirical error distribution for task "
+            f"'{task.get_task_name()}': fewer than 5 usable samples. "
+            "Increase generation.sample_size (GEC), check that "
+            "dataset.reference_size is not set too low (spam), or check "
+            "that the dataset yields valid pairs."
         )
-    type_dist = {k: 1 / len(keys) for k in keys}
-    count_dist = _poisson_pmf(
-        mean=pd_cfg.get("count_mean", 1.5),
-        n_min=1,
-        n_max=count_max,
-    )
-    return {"type_dist": type_dist, "count_dist": count_dist}
+    return empirical
 
 
 # ── Aggregation ──────────────────────────────────────────────
