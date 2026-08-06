@@ -491,6 +491,13 @@ def run_pipeline(config: dict) -> dict:
     num_runs = config["generation"]["num_runs"]
     real_baseline = (config.get("evaluation") or {}).get("real_baseline", True)
 
+    # The real baseline is deterministic (fixed reference sample, fixed task
+    # models): compute it once and reuse it in every per-run checkpoint write.
+    real_scores = (
+        _evaluate_real_baseline(task, config, real_reference, evaluator_fns)
+        if real_baseline else {}
+    )
+
     for run_idx in range(num_runs):
         print(f"\n{'='*50}\nRUN {run_idx + 1} / {num_runs}\n{'='*50}")
         synthetic = _run_generation(generator, task, config, real_data, error_dist,
@@ -516,8 +523,6 @@ def run_pipeline(config: dict) -> dict:
         print(f"\nSynthetic data archived to {saved_path}")
 
         generated_agg = aggregate(all_run_scores)
-        real_scores = _evaluate_real_baseline(task, config, real_reference,
-                                              evaluator_fns) if real_baseline else {}
         final = _nest_results(generated_agg, real_scores, all_run_scores)
         meta = _build_meta(config, task, runs_completed=run_idx + 1,
                            effective_samples_per_run=effective_samples,
