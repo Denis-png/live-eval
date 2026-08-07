@@ -557,7 +557,32 @@ class BaseGenerator(ABC):
         print(f"Generating {sample_size} samples (class-conditional) ...", flush=True)
         judge_dropped = parse_failed = refused = 0
 
+        def _missing_seed(i: int, source) -> bool:
+            """True (and accounted for) iff `source` is falsy. Shared by the
+            cross_class and same_class branches, which both cycle through a
+            seed pool and must skip identically on a missing seed field."""
+            if source:
+                return False
+            print(f"[{i}/{sample_size}] [SKIP] missing seed field {seed_field!r}", flush=True)
+            nonlocal parse_failed
+            parse_failed += 1
+            return True
+
         for i in range(1, sample_size + 1):
+            # cross_class's seed is purely index-based ((i-1) % len(real_seeds)) —
+            # it does not depend on the class drawn below. Resolving it (and
+            # skipping on a missing field) BEFORE any rng draw keeps this
+            # policy's rng-consumption sequence identical to the pre-restructure
+            # implementation: a skipped iteration must burn zero rng draws, or
+            # every later draw in the run shifts. same_class can't do this — its
+            # seed choice depends on the drawn label — but it's new code with no
+            # equivalence requirement to preserve.
+            if seed_policy == "cross_class":
+                seed = real_seeds[(i - 1) % len(real_seeds)]
+                source = seed.get(seed_field)
+                if _missing_seed(i, source):
+                    continue
+
             is_positive = rng.random() < class_prob
             label = positive_label if is_positive else negative_label
 
@@ -569,12 +594,6 @@ class BaseGenerator(ABC):
             technique = ", ".join(keys) if is_positive else "paraphrase"
 
             if seed_policy == "cross_class":
-                seed = real_seeds[(i - 1) % len(real_seeds)]
-                source = seed.get(seed_field)
-                if not source:
-                    print(f"[{i}/{sample_size}] [SKIP] missing seed field {seed_field!r}", flush=True)
-                    parse_failed += 1
-                    continue
                 if is_positive:
                     prompt = inject_prompt.format(sentence=source, error_spec=error_spec)
                     tag = "Corrupted"
@@ -589,9 +608,7 @@ class BaseGenerator(ABC):
                     )
                 seed = pool[(i - 1) % len(pool)]
                 source = seed.get(seed_field)
-                if not source:
-                    print(f"[{i}/{sample_size}] [SKIP] missing seed field {seed_field!r}", flush=True)
-                    parse_failed += 1
+                if _missing_seed(i, source):
                     continue
                 prompt = forward_prompt.format(sentence=source, class_name=label)
                 tag = "Rewritten"

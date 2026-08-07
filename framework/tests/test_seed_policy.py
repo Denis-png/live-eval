@@ -33,6 +33,40 @@ class SeedPolicyTests(unittest.TestCase):
         self.assertEqual(out[0]["label"], "SPAM")
         self.assertIn("see you at lunch", gen.prompts[0])
 
+    def test_cross_class_missing_seed_consumes_no_rng_draw(self):
+        # Regression for a restructuring bug: an earlier version of this loop
+        # drew `is_positive` (and, when positive, sampled categories) BEFORE
+        # resolving/checking the seed, so a row with a falsy seed field
+        # silently burned an rng draw even though that iteration was skipped.
+        # That shifts every later draw and breaks cross_class's required
+        # byte-for-byte equivalence with the pre-restructure implementation,
+        # which resolved the seed — and skipped on a missing one — before
+        # touching rng at all.
+        #
+        # Random(10) is load-bearing: its first two random() calls land on
+        # OPPOSITE sides of class_prob=0.5 (0.5714..., then 0.4288...). Do not
+        # swap it for a "simpler" seed — a seed whose first two draws land on
+        # the SAME side can't tell the correct ordering apart from the buggy
+        # one, since both consume the same class for the surviving sample.
+        #
+        # Row 0 has a falsy seed field and must be skipped before any rng
+        # draw; row 1 is the only sample generated (sample_size=2). Correct
+        # (seed-resolved-first) ordering: skipping row 0 costs zero draws, so
+        # row 1's is_positive draw is the run's FIRST random() call (0.5714,
+        # >= 0.5 -> False -> HAM). Under the buggy ordering, row 0's
+        # is_positive draw would have already consumed that first call, so
+        # row 1 would consume the SECOND call instead (0.4288, < 0.5 -> True
+        # -> SPAM) — a different, wrong, label.
+        gen = FakeGenerator("Rewritten: glad we could catch up again soon")
+        seeds = [{"incorrect": ""}, {"incorrect": "valid seed sentence here"}]
+        common = {**COMMON, "class_prob": 0.5}
+        out = gen.generate_class_conditional(
+            real_seeds=seeds, seed_field="incorrect", sample_size=2,
+            seed_policy="cross_class", rng=random.Random(10), **common,
+        )
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["label"], "HAM")
+
     def test_same_class_picks_a_seed_of_the_drawn_class(self):
         gen = FakeGenerator("Rewritten: CLAIM your FREE reward today")
         seeds = [{"text": "see you at lunch", "label": "HAM"},
