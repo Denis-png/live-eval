@@ -31,6 +31,8 @@ dataset:
 # into a HAM seed, HAM messages by paraphrasing a HAM seed. `generation.mode`
 # is a gec-only field and is deliberately absent below.
 generation:
+  seedless: false              # true = generate from the profile only, no real seeds
+  # profile_path: "framework/data/profiles/spam_profile.json"   # default shown; read only when seedless
   provider: "openrouter"           # groq | openai | openrouter | mistral | minimax | anthropic | google
   model: "xiaomi/mimo-v2.5"
   temperature: 1.0             # CoT 3-step prompt benefits from higher T

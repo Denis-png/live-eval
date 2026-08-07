@@ -38,6 +38,10 @@ def parse_args():
                         help="Evaluate models on the real benchmark too (--real-baseline / --no-real-baseline)")
     parser.add_argument("--plots", action=argparse.BooleanOptionalAction, default=None,
                         help="Render figures into the session's plots/ dir (--plots / --no-plots)")
+    parser.add_argument("--seedless", dest="seedless", action="store_true", default=None,
+                        help="Generate from the benchmark profile only (no real seeds)")
+    parser.add_argument("--no-seedless", dest="seedless", action="store_false",
+                        help="Force seeded generation")
     return parser.parse_args()
 
 
@@ -64,6 +68,8 @@ def apply_overrides(config: dict, args) -> dict:
         config.setdefault("evaluation", {})["real_baseline"] = args.real_baseline
     if getattr(args, "plots", None) is not None:
         config.setdefault("output", {})["plots"] = args.plots
+    if getattr(args, "seedless", None) is not None:
+        config["generation"]["seedless"] = args.seedless
     return config
 
 
@@ -121,6 +127,9 @@ def validate_config(config: dict) -> None:
         mode = gen.get("mode", "forward")
         if mode not in ("forward", "inverse"):
             problems.append(f"'generation.mode' must be 'forward' or 'inverse' (got '{mode}')")
+        seedless = gen.get("seedless", False)
+        if not isinstance(seedless, bool):
+            problems.append(f"'generation.seedless' must be true or false (got {seedless!r})")
 
     if problems:
         raise ValueError(

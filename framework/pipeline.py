@@ -166,6 +166,30 @@ def load_error_distribution(config: dict, real_data: list[dict], task) -> dict:
     return empirical
 
 
+DEFAULT_PROFILE_DIR = "framework/data/profiles"
+
+
+def _load_generation_profile(config: dict, task) -> dict | None:
+    """Load the benchmark profile that drives seedless generation.
+
+    Returns None when generation.seedless is falsy. Runs before the generation
+    loop so a missing or un-topic-profiled profile fails before any API spend."""
+    gen = config.get("generation") or {}
+    if not gen.get("seedless"):
+        return None
+    from framework.profiling.spec_sampler import load_profile
+
+    path = gen.get("profile_path") or os.path.join(
+        DEFAULT_PROFILE_DIR, f"{task.get_task_name()}_profile.json"
+    )
+    topics_key = (
+        "topics_per_label"
+        if task.get_generation_strategy() == "class_conditional"
+        else "topics"
+    )
+    return load_profile(path, topics_key=topics_key)
+
+
 # ── Aggregation ──────────────────────────────────────────────
 
 def _mean_std(values: list[float]) -> dict:
@@ -309,9 +333,14 @@ def _write_results(final: dict, results_path: str, meta: dict) -> str:
 
 # ── Generation dispatch ───────────────────────────────────────
 
-def _run_generation(generator, task, config, real_data, error_dist, judge_call, class_prob):
+def _run_generation(generator, task, config, real_data, error_dist, judge_call, class_prob,
+                    profile=None):
     """Dispatch on the task's generation strategy. Corruption → forward/inverse
-    (unchanged). Class-conditional → labeled SPAM/HAM records."""
+    (unchanged). Class-conditional → labeled SPAM/HAM records.
+
+    `profile` is the pre-loaded seedless generation profile (None when
+    generation.seedless is falsy) — plumbed through for Tasks 5 and 8, which
+    add the seedless dispatch itself; this function does not yet act on it."""
     gen_cfg = config["generation"]
     sample_size = gen_cfg["sample_size"]
     strategy = task.get_generation_strategy()
@@ -475,6 +504,7 @@ def run_pipeline(config: dict) -> dict:
         load_error_distribution(config, real_data, task)
         if (strategy == "class_conditional" or mode == "inverse") else None
     )
+    profile = _load_generation_profile(config, task)
 
     # Real reference feeds class balance, the real baseline, and profiling.
     real_reference = task.get_real_eval_samples(config, real_data)
@@ -501,7 +531,7 @@ def run_pipeline(config: dict) -> dict:
     for run_idx in range(num_runs):
         print(f"\n{'='*50}\nRUN {run_idx + 1} / {num_runs}\n{'='*50}")
         synthetic = _run_generation(generator, task, config, real_data, error_dist,
-                                    judge_call, class_prob)
+                                    judge_call, class_prob, profile=profile)
         all_generated.extend(synthetic)
 
         eval_samples = task.get_eval_samples(synthetic)

@@ -23,6 +23,8 @@ dataset:
 # ── Generation (LLM that creates synthetic corrupted sentences) ──
 generation:
   mode: "inverse"                  # forward | inverse — the full switch; modes need no extra config
+  seedless: false              # true = generate from the profile only, no real seeds
+  # profile_path: "framework/data/profiles/gec_profile.json"   # default shown; read only when seedless
   provider: "openrouter"           # groq | openai | openrouter | mistral | minimax | anthropic | google
   model: "minimax-m3"
   temperature: 1.0             # CoT 3-step prompt benefits from higher T
