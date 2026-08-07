@@ -271,18 +271,17 @@ def _build_meta(config: dict, task, runs_completed: int,
     (re)written after every run so an interrupted session keeps the runs it
     already paid for.
 
-    `mode` only means something for the `corruption` strategy (GEC); a
-    class_conditional task (spam) always generates the same way regardless
-    of any `generation.mode` a config happens to carry, so `mode` is written
-    as None there rather than echoing a config value that isn't actually
-    read — see `_run_generation`'s dispatch, which checks `strategy` first."""
+    `mode` is meaningful for every strategy now: `corruption` (GEC) defaults
+    to "forward" when omitted, `class_conditional` (spam) defaults to
+    "inverse" — matching `_run_generation`'s own per-strategy default, so
+    this echoes the mode that actually ran rather than a stray config value."""
     gen = config["generation"]
     ds = resolve_dataset_config(config.get("dataset") or {})
     judge = config.get("judge") or {}
     judge_active = bool(judge) and judge.get("enabled", True) is not False
     num_runs = gen["num_runs"]
     strategy = task.get_generation_strategy()
-    mode = gen.get("mode", "forward") if strategy != "class_conditional" else None
+    mode = gen.get("mode", "inverse" if strategy == "class_conditional" else "forward")
     if ds["source"] == "local":
         dataset_meta = {"source": "local", "path": ds["path"],
                         "format": ds["format"] or None,
@@ -311,21 +310,6 @@ def _build_meta(config: dict, task, runs_completed: int,
     }
 
 
-def class_conditional_mode_notice(config: dict, task, strategy: str) -> str | None:
-    """`generation.mode` only affects the `corruption` strategy — a
-    class_conditional task (spam) always generates the same way regardless of
-    it (see `_run_generation`'s dispatch). Return a warning when a config for
-    such a task still explicitly sets `mode`, or None when there's nothing to
-    warn about."""
-    if strategy != "class_conditional" or "mode" not in config["generation"]:
-        return None
-    return (
-        f"[NOTE] task '{task.get_task_name()}' uses class_conditional generation — "
-        f"generation.mode ('{config['generation']['mode']}') has no effect and is "
-        f"ignored. Remove it from the config."
-    )
-
-
 def _write_results(final: dict, results_path: str, meta: dict) -> str:
     with open(results_path, "w", encoding="utf-8") as f:
         json.dump({"meta": meta, "results": final}, f, indent=2)
@@ -337,8 +321,14 @@ def _write_results(final: dict, results_path: str, meta: dict) -> str:
 def _run_generation(generator, task, config, real_data, error_dist, judge_call, class_prob,
                     profile=None):
     """Dispatch on the task's generation strategy. Corruption → forward/inverse,
-    now including the seedless forward/inverse cells for GEC (Task 5); the
-    class_conditional (spam) branch does not yet act on `profile` (Task 8).
+    including the seedless forward/inverse cells for GEC (Task 5). class_conditional
+    (spam) now dispatches its own four cells on (mode, seedless) — Task 8:
+    inverse+seeded (today's unchanged production behavior) injects/paraphrases
+    real HAM seeds via seed_policy="cross_class"; inverse+seedless does the same
+    but over carriers synthesized from the profile in place of real seeds;
+    forward+seeded imitates within a class via seed_policy="same_class" over
+    `task.get_seed_pool(..., "forward")`; forward+seedless drops real seeds
+    entirely via seed_policy="none" over per-label profile specs.
 
     `profile` is the pre-loaded seedless generation profile (None when
     generation.seedless is falsy). When `generation.seedless` is true, per-sample
@@ -351,12 +341,15 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
     strategy = task.get_generation_strategy()
 
     if strategy == "class_conditional":
-        # Post-parse_row contract: the seed text always lives in "incorrect".
-        seed_field = "incorrect"
-        synthetic = generator.generate_class_conditional(
-            real_seeds=real_data,
-            seed_field=seed_field,
-            seed_policy="cross_class",
+        # No config sets "mode" explicitly today (spam.json's config comment
+        # says so) — the default MUST resolve to "inverse" so that omitting
+        # the key keeps reproducing today's production behavior unchanged.
+        mode = gen_cfg.get("mode", "inverse")
+        seedless = bool(gen_cfg.get("seedless"))
+        # Required regardless of seed_policy — generate_class_conditional's
+        # signature has no defaults for these, even though same_class/none
+        # policies use forward_prompt/seedless_prompts instead of inject_prompt.
+        common_kwargs = dict(
             class_prob=class_prob,
             type_dist=error_dist["type_dist"],
             count_dist=error_dist["count_dist"],
@@ -370,6 +363,75 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
             judge_call=judge_call,
             request_delay=gen_cfg.get("request_delay", 0.0),
         )
+
+        if mode == "inverse":
+            if seedless:
+                from framework.profiling.spec_sampler import render_spec, sample_content_spec
+                carrier_prompt = task.get_carrier_prompt()
+                if not carrier_prompt:
+                    raise RuntimeError(
+                        f"{task.get_task_name()} does not support mode=inverse with "
+                        f"seedless=true (no carrier_prompt)."
+                    )
+                rng = random.Random()
+                specs = [
+                    render_spec(sample_content_spec(profile, rng, label="HAM"))
+                    for _ in range(sample_size)
+                ]
+                carriers = generator.generate_carriers(
+                    specs, carrier_prompt, "Message",
+                    request_delay=gen_cfg.get("request_delay", 0.0),
+                )
+                real_seeds = [{"text": text} for text in carriers]
+                seed_field = "text"
+            else:
+                # Post-parse_row contract: the seed text always lives in "incorrect".
+                real_seeds = real_data
+                seed_field = "incorrect"
+            synthetic = generator.generate_class_conditional(
+                real_seeds=real_seeds,
+                seed_field=seed_field,
+                seed_policy="cross_class",
+                **common_kwargs,
+            )
+        elif seedless:
+            from framework.profiling.spec_sampler import render_spec, sample_content_spec
+            seedless_prompts = task.get_seedless_class_prompts()
+            if not seedless_prompts:
+                raise RuntimeError(
+                    f"{task.get_task_name()} does not support mode=forward with "
+                    f"seedless=true (no seedless_class_prompts)."
+                )
+            rng = random.Random()
+            specs_by_label = {
+                label: [
+                    render_spec(sample_content_spec(profile, rng, label=label))
+                    for _ in range(sample_size)
+                ]
+                for label in ("SPAM", "HAM")
+            }
+            synthetic = generator.generate_class_conditional(
+                seed_policy="none",
+                specs_by_label=specs_by_label,
+                seedless_prompts=seedless_prompts,
+                **common_kwargs,
+            )
+        else:
+            forward_prompt = task.get_forward_prompt()
+            if not forward_prompt:
+                raise RuntimeError(
+                    f"{task.get_task_name()} does not support mode=forward with "
+                    f"seedless=false (no forward_prompt)."
+                )
+            real_seeds = task.get_seed_pool(config, real_data, "forward")
+            synthetic = generator.generate_class_conditional(
+                real_seeds=real_seeds,
+                seed_field="text",
+                label_field="label",
+                seed_policy="same_class",
+                forward_prompt=forward_prompt,
+                **common_kwargs,
+            )
     else:
         mode = gen_cfg.get("mode", "forward")
         seedless = bool(gen_cfg.get("seedless"))
@@ -540,9 +602,6 @@ def run_pipeline(config: dict) -> dict:
     strategy = task.get_generation_strategy()
     mode = config["generation"].get("mode", "forward")
     seedless = bool(config["generation"].get("seedless"))
-    notice = class_conditional_mode_notice(config, task, strategy)
-    if notice:
-        print(notice, file=sys.stderr)
     error_dist = (
         load_error_distribution(config, real_data, task)
         if (strategy == "class_conditional" or mode == "inverse" or seedless) else None

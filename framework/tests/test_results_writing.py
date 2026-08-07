@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 
-from framework.pipeline import _build_meta, _write_results, class_conditional_mode_notice
+from framework.pipeline import _build_meta, _write_results
 
 
 class _CorruptionTask:
@@ -102,41 +102,24 @@ class BuildMetaTests(unittest.TestCase):
                            real_baseline=True)
         self.assertEqual(meta["class_balance"], 0.3)
 
-    def test_class_conditional_task_gets_null_mode_regardless_of_config(self):
-        # cfg carries generation.mode: "inverse" (a leftover/stray value) but a
-        # class_conditional task (spam) never reads it — meta must not echo it.
-        cfg = _config("r.json")
+    def test_class_conditional_task_echoes_configured_mode(self):
+        # spam now has real forward/inverse modes — meta must echo whatever
+        # generation.mode the config actually set, same as a corruption task.
+        cfg = _config("r.json")  # generation.mode: "inverse"
         meta = _build_meta(cfg, _ClassConditionalTask(), runs_completed=1,
                            effective_samples_per_run=[1], real_baseline=True)
         self.assertEqual(meta["strategy"], "class_conditional")
-        self.assertIsNone(meta["mode"])
+        self.assertEqual(meta["mode"], "inverse")
 
-    def test_class_conditional_task_null_mode_even_without_config_mode_key(self):
+    def test_class_conditional_task_defaults_to_inverse_without_config_mode_key(self):
+        # Omitting generation.mode must keep reproducing today's production
+        # behavior (cross_class over real seeds), so the recorded default is
+        # "inverse", not the corruption strategy's "forward" default.
         cfg = _config("r.json")
         del cfg["generation"]["mode"]
         meta = _build_meta(cfg, _ClassConditionalTask(), runs_completed=1,
                            effective_samples_per_run=[1], real_baseline=True)
-        self.assertIsNone(meta["mode"])
-
-
-class ClassConditionalModeNoticeTests(unittest.TestCase):
-    def test_warns_when_class_conditional_task_config_sets_mode(self):
-        cfg = _config("r.json")  # generation.mode: "inverse"
-        notice = class_conditional_mode_notice(cfg, _ClassConditionalTask(), "class_conditional")
-        self.assertIsNotNone(notice)
-        self.assertIn("generation.mode", notice)
-        self.assertIn("inverse", notice)
-
-    def test_silent_when_class_conditional_config_omits_mode(self):
-        cfg = _config("r.json")
-        del cfg["generation"]["mode"]
-        notice = class_conditional_mode_notice(cfg, _ClassConditionalTask(), "class_conditional")
-        self.assertIsNone(notice)
-
-    def test_silent_for_corruption_strategy_even_with_mode_set(self):
-        cfg = _config("r.json")
-        notice = class_conditional_mode_notice(cfg, _CorruptionTask(), "corruption")
-        self.assertIsNone(notice)
+        self.assertEqual(meta["mode"], "inverse")
 
 
 class WriteResultsTests(unittest.TestCase):
