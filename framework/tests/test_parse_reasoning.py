@@ -64,7 +64,7 @@ class GenerateClassConditionalReasoningTests(unittest.TestCase):
             real_seeds=[{"incorrect": "neva mind it's ok"}], seed_field="incorrect",
             class_prob=1.0, type_dist={"phishing_link": 1.0}, count_dist={1: 1.0},
             error_descriptions={"phishing_link": "add a link"},
-            inject_prompt="{sentence} {error_spec}", ham_prompt="{sentence}",
+            inject_prompt="{sentence} {error_spec}", negative_prompt="{sentence}",
             positive_label="SPAM", negative_label="HAM", sample_size=1, rng=Random(0),
         )
         self.assertEqual(len(out), 1)

@@ -25,7 +25,7 @@ def _run(responses, class_prob, judge_prompt=None, judge_call=None):
     out = gen.generate_class_conditional(
         real_seeds=seeds, seed_field="incorrect", class_prob=class_prob,
         type_dist={"phishing_link": 1.0}, count_dist={1: 1.0},
-        error_descriptions=_DESC, inject_prompt=_INJECT, ham_prompt=_HAM,
+        error_descriptions=_DESC, inject_prompt=_INJECT, negative_prompt=_HAM,
         positive_label="SPAM", negative_label="HAM", sample_size=len(responses),
         judge_prompt=judge_prompt, judge_call=judge_call, rng=Random(0),
     )

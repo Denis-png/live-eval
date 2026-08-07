@@ -504,35 +504,53 @@ class BaseGenerator(ABC):
 
     def generate_class_conditional(
         self,
-        real_seeds: list[dict],
-        seed_field: str,
+        *,
         class_prob: float,
         type_dist: dict[str, float],
         count_dist: dict[int, float],
         error_descriptions: dict[str, str],
         inject_prompt: str,
-        ham_prompt: str,
+        negative_prompt: str,
         positive_label: str,
         negative_label: str,
         sample_size: int,
+        seed_policy: str = "cross_class",
+        real_seeds: list[dict] | None = None,
+        seed_field: str | None = None,
+        forward_prompt: str | None = None,
+        seedless_prompts: dict[str, str] | None = None,
+        specs_by_label: dict[str, list[str]] | None = None,
+        label_field: str = "label",
         judge_prompt: str | None = None,
         judge_call: Callable[[str], str] | None = None,
         request_delay: float = 0.0,
         rng=None,
     ) -> list[dict]:
-        """Symmetric class-conditional generation for classification tasks.
+        """Symmetric class-conditional generation for classification tasks. One
+        loop serves all seeding strategies, selected by `seed_policy`:
 
-        Per sample: draw the target class (P(positive) = class_prob). Positive →
-        inject the sampled signal mix into a seed via inject_prompt (a `Corrupted:`
-        line). Negative → paraphrase the seed via ham_prompt (a `Rewritten:` line).
+        - "cross_class" (default, today's behavior): every draw seeds from the
+          same `real_seeds` pool regardless of which class was drawn. Positive →
+          inject the sampled signal mix into the seed via `inject_prompt` (a
+          `Corrupted:` line). Negative → paraphrase the seed via `negative_prompt`
+          (a `Rewritten:` line).
+        - "same_class": the seed is drawn from the subset of `real_seeds` whose
+          `label_field` matches the drawn class, and both classes are produced via
+          `forward_prompt` (a `Rewritten:` line). Raises RuntimeError if that
+          subset is empty.
+        - "none": no real seed at all — content comes from a per-label spec pool
+          (`specs_by_label`) rendered through `seedless_prompts[label]` (a
+          `Message:` line). The record's "seed" field is "".
+
         Both classes are LLM-authored, so a classifier cannot separate them on
-        authorship artifacts. Seeds are cycled if sample_size exceeds their count.
+        authorship artifacts. Seeds/specs are cycled if sample_size exceeds their
+        count.
 
         Returns records {"text", "label", "technique", "seed"}."""
         rng = rng or random.Random()
         synthetic = []
         judge_fn = judge_call or self.call_api
-        if not real_seeds:
+        if seed_policy in ("cross_class", "same_class") and not real_seeds:
             return synthetic
 
         run_start = time.monotonic()
@@ -540,22 +558,53 @@ class BaseGenerator(ABC):
         judge_dropped = parse_failed = refused = 0
 
         for i in range(1, sample_size + 1):
-            seed = real_seeds[(i - 1) % len(real_seeds)]
-            source = seed.get(seed_field)
-            if not source:
-                print(f"[{i}/{sample_size}] [SKIP] missing seed field {seed_field!r}", flush=True)
-                parse_failed += 1
-                continue
-
             is_positive = rng.random() < class_prob
+            label = positive_label if is_positive else negative_label
+
+            keys: list[str] = []
+            error_spec = ""
             if is_positive:
                 keys = _sample_categories(type_dist, count_dist, rng)
                 error_spec = "; ".join(error_descriptions.get(k, k) for k in keys)
-                prompt = inject_prompt.format(sentence=source, error_spec=error_spec)
-                tag, label, technique = "Corrupted", positive_label, ", ".join(keys)
+            technique = ", ".join(keys) if is_positive else "paraphrase"
+
+            if seed_policy == "cross_class":
+                seed = real_seeds[(i - 1) % len(real_seeds)]
+                source = seed.get(seed_field)
+                if not source:
+                    print(f"[{i}/{sample_size}] [SKIP] missing seed field {seed_field!r}", flush=True)
+                    parse_failed += 1
+                    continue
+                if is_positive:
+                    prompt = inject_prompt.format(sentence=source, error_spec=error_spec)
+                    tag = "Corrupted"
+                else:
+                    prompt = negative_prompt.format(sentence=source)
+                    tag = "Rewritten"
+            elif seed_policy == "same_class":
+                pool = [row for row in real_seeds if row.get(label_field) == label]
+                if not pool:
+                    raise RuntimeError(
+                        f"seed_policy='same_class' needs seeds labeled {label!r}; the pool has none."
+                    )
+                seed = pool[(i - 1) % len(pool)]
+                source = seed.get(seed_field)
+                if not source:
+                    print(f"[{i}/{sample_size}] [SKIP] missing seed field {seed_field!r}", flush=True)
+                    parse_failed += 1
+                    continue
+                prompt = forward_prompt.format(sentence=source, class_name=label)
+                tag = "Rewritten"
+            elif seed_policy == "none":
+                source = None
+                spec = specs_by_label[label][(i - 1) % len(specs_by_label[label])]
+                if is_positive:
+                    prompt = seedless_prompts[label].format(spec=spec, error_spec=error_spec)
+                else:
+                    prompt = seedless_prompts[label].format(spec=spec)
+                tag = "Message"
             else:
-                prompt = ham_prompt.format(sentence=source)
-                tag, label, technique = "Rewritten", negative_label, "paraphrase"
+                raise ValueError(f"unknown seed_policy: {seed_policy!r}")
 
             t0 = time.monotonic()
             try:
@@ -571,7 +620,7 @@ class BaseGenerator(ABC):
                     print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s — [SKIP] parse failed: {raw[:60]!r}", flush=True)
                     parse_failed += 1
                     continue
-                if text.strip() == source.strip():
+                if source and text.strip() == source.strip():
                     print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s — [SKIP] identical to seed", flush=True)
                     continue
                 if len(text.split()) < 3:
@@ -588,7 +637,7 @@ class BaseGenerator(ABC):
                         judge_dropped += 1
                         continue
 
-                synthetic.append({"text": text, "label": label, "technique": technique, "seed": source})
+                synthetic.append({"text": text, "label": label, "technique": technique, "seed": source or ""})
                 suffix = f" + judge {judge_dt:.1f}s" if judge_prompt else ""
                 print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s{suffix} ✓ ({label}: {technique})", flush=True)
                 if request_delay > 0:
