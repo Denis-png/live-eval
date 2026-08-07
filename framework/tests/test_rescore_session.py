@@ -103,15 +103,29 @@ class RescoreSessionTests(unittest.TestCase):
             self.assertFalse(out["meta"]["partial"])
 
     def test_mode_and_strategy_recomputed_from_task_not_stale_meta(self):
-        # _write_session seeds a stale "mode": "inverse" (pre-dates the
-        # provenance fix) — spam is class_conditional, so mode must become
-        # None and strategy must be filled in, regardless of the seed value.
+        # _write_session seeds "mode": "inverse" — spam is class_conditional
+        # and now has a real mode, so it must be preserved (not nulled) while
+        # strategy is filled in from the task, regardless of the seed value.
         with tempfile.TemporaryDirectory() as d:
             _write_session(d)
             self._run(d)
             out = json.load(open(os.path.join(d, "results.json")))
             self.assertEqual(out["meta"]["strategy"], "class_conditional")
-            self.assertIsNone(out["meta"]["mode"])
+            self.assertEqual(out["meta"]["mode"], "inverse")
+
+    def test_mode_defaults_per_strategy_when_absent_from_stale_meta(self):
+        # A session from before mode was ever recorded has no "mode" key at
+        # all. class_conditional (spam) must default to "inverse" — the same
+        # default _build_meta/_run_generation use — not GEC's "forward", and
+        # not None.
+        with tempfile.TemporaryDirectory() as d:
+            _write_session(d)
+            stale = json.load(open(os.path.join(d, "results.json")))
+            del stale["meta"]["mode"]
+            json.dump(stale, open(os.path.join(d, "results.json"), "w"))
+            self._run(d)
+            out = json.load(open(os.path.join(d, "results.json")))
+            self.assertEqual(out["meta"]["mode"], "inverse")
 
     def test_task_mismatch_raises(self):
         with tempfile.TemporaryDirectory() as d:

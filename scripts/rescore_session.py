@@ -119,7 +119,13 @@ def rescore_session(session_dir, config, *, skip_eval=False, skip_profile=False,
             # older sessions predate the mode/strategy provenance fix and may
             # have a stale mode string with no strategy key at all.
             "strategy": strategy,
-            "mode": (meta.get("mode", "forward") if strategy != "class_conditional" else None),
+            # Carried over from the old meta — rescoring has no access to the
+            # original generation config, only the persisted meta — and
+            # defaulted per-strategy exactly like _build_meta/_run_generation:
+            # "inverse" for class_conditional (spam), "forward" otherwise.
+            # Every strategy has a real mode now, so it is always preserved,
+            # never nulled out.
+            "mode": meta.get("mode", "inverse" if strategy == "class_conditional" else "forward"),
             # Recomputed from the actual run-file count, not carried over from
             # the old meta — keeps a merged/reconciled session's provenance
             # honest (e.g. two 3-run sessions merged into one 6-run session).
