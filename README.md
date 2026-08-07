@@ -95,9 +95,12 @@ so it can be inspected later.
    - `generation`      — generator provider, model, temperature, `num_runs`, and
                          `sample_size` (**the single sample-size knob** — synthetic
                          samples generated per run; the real pool is loaded to match).
-                         `mode` (forward | inverse) applies to **corruption** tasks
-                         (GEC); spam is **class-conditional** and ignores it. Spam
-                         also reads `class_balance` (`empirical` | float = P(SPAM)).
+                         Two independent knobs select the generation cell for
+                         **every** task, corruption or class-conditional — see
+                         "Generation Strategies" below:
+                         `mode` (`forward` | `inverse`) and `seedless`
+                         (`true` | `false`, default `false`). Spam also reads
+                         `class_balance` (`empirical` | float = P(SPAM)).
    - `evaluation.real_baseline` — also score the task models on the real benchmark
                          (default `true`; see "Real baseline & fidelity").
    - `task.name`       — `gec` or `spam`
@@ -125,6 +128,7 @@ config file. CLI flags override values in the YAML:
     python -m framework.main \
         --config framework/configs/gec/config.yaml \
         --mode inverse \
+        --seedless \
         --provider anthropic \
         --model claude-haiku-4-5 \
         --runs 3 \
@@ -133,9 +137,11 @@ config file. CLI flags override values in the YAML:
         --no-judge \
         --no-real-baseline
 
-`--judge/--no-judge` toggles the LLM-as-judge filter;
+`--mode forward|inverse` and `--seedless`/`--no-seedless` select the generation cell
+(see "Generation Strategies"); `--judge/--no-judge` toggles the LLM-as-judge filter;
 `--real-baseline/--no-real-baseline` toggles the real-benchmark baseline;
-`--output` sets `output.base_dir`.
+`--output` sets `output.base_dir`. `--seedless` needs a profile built up front — see
+"Seedless prerequisite: profiling" below.
 
 > Note: `python framework/main.py` will NOT work — `framework` must be
 > importable as a package, so use `python -m framework.main`.
@@ -148,29 +154,80 @@ all abort before any API call with an error naming the offending config path.
 
 ## Generation Strategies
 
-Each task declares a **generation strategy** (`task.get_generation_strategy()`); the
-pipeline dispatches on it. `generation.mode` only applies to the corruption strategy.
+Each task declares a **generation strategy** (`task.get_generation_strategy()`) — the
+task *shape*, `corruption` (GEC) or `class_conditional` (Spam) — which the pipeline
+dispatches on. Independently of that shape, **every task** reads two generation
+knobs that together select one of four **cells**:
 
-- **`corruption`** (GEC) — corrupt a source text. `generation.mode` selects:
-  - **`forward`** — the generator rewrites each source sentence into a corrupted
-    variant, choosing an error type itself.
-  - **`inverse`** — the generator corrupts the known-clean `correct` field according
-    to an **empirical error distribution** (ERRANT-profiled) so the injected error
-    mix matches the benchmark.
+- **`generation.mode`** (`forward` | `inverse`) — *what real signal drives content*,
+  regardless of whether that signal comes from a real seed or a synthesized one (see
+  `seedless` below).
+- **`generation.seedless`** (`true` | `false`, default `false`) — *whether real
+  benchmark text ever reaches the generation prompt*. `false` ("seeded") passes a
+  real sample from the dataset as a seed. `true` drops real seeds entirely: a
+  benchmark **profile** (built once per clone by `profile_dataset`, see
+  "Seedless prerequisite: profiling" below) is sampled instead to synthesize the
+  content spec (topic, length, style) that goes into the prompt — the LLM invents
+  the text from that spec rather than transforming a real sentence.
 
-- **`class_conditional`** (Spam) — spam detection is classification (text → label), so
-  generation is inherently **label → text**: sample a target class from the balance
-  (`class_balance`, default the real dataset's empirical `P(SPAM)`), then synthesize an
-  example of that class. **SPAM** is produced by injecting an empirically-profiled mix
-  of spam **signals** (link, money, ALL-CAPS, urgency, keywords) into a legitimate (HAM)
-  seed; **HAM** is produced by paraphrasing a HAM seed. Because **both classes are
-  LLM-authored**, a classifier can't separate them on "was this written by an LLM"
-  artifacts. Spam **ignores `generation.mode`**.
+`mode` and `seedless` combine freely; a task shape only needs to support the cells it
+declares prompts for (see "Fail-fast" below).
 
-| Task | strategy | generation |
+### The four cells, per task shape
+
+**`corruption` (GEC)** — corrupt a source text:
+
+| | `seedless: false` (seeded) | `seedless: true` |
+|---|---|---|
+| **`mode: forward`** | `generate()` rewrites a real seed sentence into a corrupted variant; the generator picks the error type itself. | `generate_seedless_pairs()`: no real seed — a profile-sampled content spec drives the LLM to invent an original/corrupted pair directly. Needs `seedless_forward_prompt`. |
+| **`mode: inverse`** | `generate_inverse()` corrupts the real benchmark's known-clean `correct` field according to an **empirical error distribution** (ERRANT-profiled) so the injected error mix matches the benchmark. | A carrier (clean sentence) is synthesized from a profile content spec via `generate_carriers()` (needs `carrier_prompt`), then fed through the same `generate_inverse()` in place of a real seed — the empirical error distribution still drives the injected errors. |
+
+**`class_conditional` (Spam)** — classification is inherently label → text: sample a
+target class from the balance (`class_balance`, default the real dataset's empirical
+`P(SPAM)`), then synthesize an example of that class. Because **both classes are
+LLM-authored** in every cell, a classifier can't separate them on "was this written by
+an LLM" artifacts.
+
+| | `seedless: false` (seeded) | `seedless: true` |
+|---|---|---|
+| **`mode: inverse`** (default) | `seed_policy="cross_class"`: SPAM = inject an empirically-profiled mix of spam **signals** (link, money, ALL-CAPS, urgency, keywords) into a real HAM seed; HAM = paraphrase a real HAM seed. | Same cross-class flow, but the HAM seed is a carrier synthesized from the profile via `generate_carriers()` (needs `carrier_prompt`) instead of a real message. |
+| **`mode: forward`** | `seed_policy="same_class"`: each class imitates within itself — rewrites a real labeled seed of that class (SPAM or HAM) into a new message of the same kind. Needs `forward_prompt`. | `seed_policy="none"`: per-label profile-sampled content specs, no real seed at all. Needs `seedless_class_prompts`. |
+
+### Setting it
+
+    generation:
+      mode: "inverse"        # forward | inverse — see the tables above
+      seedless: false         # true = drop real seeds, generate from the profile only
+
+CLI overrides: `--mode forward|inverse`, `--seedless`/`--no-seedless`.
+
+### Fail-fast
+
+A task that hasn't defined the prompt a requested cell needs (e.g. GEC has no
+`get_seedless_class_prompts` — that accessor is `class_conditional`-only) raises
+`RuntimeError` before any API call, naming the task, the `(mode, seedless)` cell, and
+the missing accessor — never a silent fallback to a different cell.
+
+### Seedless prerequisite: profiling
+
+Every `seedless: true` cell reads a benchmark **profile** JSON instead of real text.
+Profiles are **gitignored** (`framework/data/**/*.json`) — build one after every fresh
+clone, before the first seedless run:
+
+    python -m framework.profile_dataset --task gec \
+      --config framework/configs/gec/config.yaml --topics --topic-sample-size 20 \
+      --output framework/data/profiles/gec_profile.json
+
+`--topics` is required for seedless generation — it adds the LLM-driven `topics`
+(GEC) / `topics_per_label` (Spam) block the content-spec sampler needs; without it,
+`_load_generation_profile` raises `RuntimeError` naming the missing block. The default
+profile path is `framework/data/profiles/<task>_profile.json`; override per-run with
+`generation.profile_path`.
+
+| Task | strategy | cells |
 |------|----------|------------|
-| GEC  | `corruption` | forward (free) or inverse (ERRANT-profiled) |
-| Spam | `class_conditional` | SPAM = signal injection, HAM = paraphrase; class balance from `class_balance` |
+| GEC  | `corruption` | forward / inverse × seeded / seedless (see table above) |
+| Spam | `class_conditional` | inverse / forward × seeded / seedless; class balance from `class_balance` |
 
 ## Real baseline & fidelity
 
@@ -286,9 +343,11 @@ the first model runs.
 3. Register the task in `framework/pipeline.py::load_task()`.
 4. Add model classes under `framework/models/<task>/` and evaluator
    functions under `framework/evaluators/<task>/`.
-5. Create `framework/configs/<task>/config.yaml` with `task.name: <task>` and
-   only the fields that task's generation strategy actually reads (see
-   `spam/config.yaml`'s comment on why it omits `generation.mode`).
+5. Create `framework/configs/<task>/config.yaml` with `task.name: <task>` and only
+   the fields that task's generation strategy actually reads. `mode` and `seedless`
+   apply to every task shape (see "Generation Strategies"); a config may omit
+   `mode` and rely on its per-strategy default (`forward` for corruption,
+   `inverse` for class-conditional — see `spam/config.yaml`'s comment).
 
 ---
 
