@@ -31,6 +31,14 @@ _STYLE_PHRASES = {
 }
 
 
+def _topic_mapping(block: dict) -> dict:
+    """Topic mapping from either profile shape: the nested {"topics": {...}}
+    envelope written by profile_topics, or a bare {name: {...}} mapping."""
+    if isinstance(block, dict) and "topics" in block:
+        return block["topics"] or {}
+    return block or {}
+
+
 def load_profile(path: str, topics_key: str = "topics") -> dict:
     """Load and validate a benchmark profile for seedless generation."""
     if not os.path.exists(path):
@@ -52,6 +60,27 @@ def load_profile(path: str, topics_key: str = "topics") -> dict:
             f"without LLM topic profiling, which seedless generation needs. "
             f"{_PROFILE_HELP}"
         )
+    # Validate that the inner topic mapping is non-empty, distinguishing
+    # "no topics block" from "profiled but labeled nothing".
+    if topics_key == "topics_per_label":
+        # At least one label must have topics.
+        topics_per_label = profile.get(topics_key, {})
+        if not any(_topic_mapping(topics_per_label.get(label, {}))
+                   for label in topics_per_label):
+            raise RuntimeError(
+                f"Profile {path!r} has {topics_key!r}, but no label has any "
+                f"topics — the profile was written without successful topic "
+                f"labeling. {_PROFILE_HELP}"
+            )
+    else:
+        # Single topics block must be non-empty.
+        topics_block = profile.get(topics_key, {})
+        if not _topic_mapping(topics_block):
+            raise RuntimeError(
+                f"Profile {path!r} has {topics_key!r}, but it is empty — "
+                f"the profile was written without successful topic labeling. "
+                f"{_PROFILE_HELP}"
+            )
     return profile
 
 
@@ -78,13 +107,14 @@ def _weighted_choice(weights: dict, rng, what: str):
 def _slice_blocks(profile: dict, label: str | None, side: str) -> tuple[dict, dict, dict]:
     """Return (topics, word_length_block, style_rates) for the requested slice."""
     if label is not None:
-        topics = (profile.get("topics_per_label") or {}).get(label) or {}
-        topics = topics.get("topics") or {}
+        topics_block = (profile.get("topics_per_label") or {}).get(label) or {}
+        topics = _topic_mapping(topics_block)
         lengths = ((profile.get("length_distributions_per_label") or {})
                    .get(label) or {}).get("words") or {}
         style = (profile.get("style_per_label") or {}).get(label) or {}
         return topics, lengths, style
-    topics = (profile.get("topics") or {}).get("topics") or profile.get("topics") or {}
+    topics_block = (profile.get("topics") or {})
+    topics = _topic_mapping(topics_block)
     lengths = ((profile.get("length_distributions") or {}).get(side) or {}).get("words") or {}
     style = (profile.get("style") or {}).get(side) or {}
     return topics, lengths, style

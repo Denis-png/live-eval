@@ -110,6 +110,63 @@ class LoadProfileTests(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_empty_inner_topics_raises(self):
+        # Envelope exists but inner topics is empty (profiled but labeled nothing).
+        profile = {"profile_version": 2, "topics": {"n_sampled": 50, "n_labeled": 0, "topics": {}}}
+        path = _write(profile)
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                load_profile(path)
+            self.assertIn("empty", str(ctx.exception))
+        finally:
+            os.unlink(path)
+
+    def test_empty_per_label_topics_raises(self):
+        # topics_per_label exists but all labels have empty inner topics.
+        profile = {
+            "profile_version": 2,
+            "topics_per_label": {
+                "HAM": {"topics": {}},
+                "SPAM": {"topics": {}},
+            }
+        }
+        path = _write(profile)
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                load_profile(path, topics_key="topics_per_label")
+            self.assertIn("no label has any topics", str(ctx.exception))
+        finally:
+            os.unlink(path)
+
+    def test_partially_empty_per_label_topics_loads(self):
+        # One label empty, one populated — should load successfully.
+        profile = {
+            "profile_version": 2,
+            "topics_per_label": {
+                "HAM": {"topics": {"chat": {"fraction": 1.0, "description": "Chat.", "examples": []}}},
+                "SPAM": {"topics": {}},
+            }
+        }
+        path = _write(profile)
+        try:
+            loaded = load_profile(path, topics_key="topics_per_label")
+            self.assertEqual(loaded["profile_version"], 2)
+        finally:
+            os.unlink(path)
+
+    def test_bare_mapping_still_works(self):
+        # Bare mapping shape (test fixtures) should still load and work.
+        path = _write(GEC_PROFILE)
+        try:
+            loaded = load_profile(path)
+            self.assertEqual(loaded["profile_version"], 2)
+            # Verify sampling works with bare mapping.
+            rng = random.Random(0)
+            spec = sample_content_spec(loaded, rng, side="correct")
+            self.assertIn("topic", spec)
+        finally:
+            os.unlink(path)
+
 
 class SampleContentSpecTests(unittest.TestCase):
     def test_length_falls_inside_the_drawn_bin(self):
