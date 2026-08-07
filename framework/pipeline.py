@@ -538,12 +538,13 @@ def run_pipeline(config: dict) -> dict:
 
     strategy = task.get_generation_strategy()
     mode = config["generation"].get("mode", "forward")
+    seedless = bool(config["generation"].get("seedless"))
     notice = class_conditional_mode_notice(config, task, strategy)
     if notice:
         print(notice, file=sys.stderr)
     error_dist = (
         load_error_distribution(config, real_data, task)
-        if (strategy == "class_conditional" or mode == "inverse") else None
+        if (strategy == "class_conditional" or mode == "inverse" or seedless) else None
     )
     profile = _load_generation_profile(config, task)
 
