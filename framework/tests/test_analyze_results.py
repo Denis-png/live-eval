@@ -61,16 +61,17 @@ class DedupTests(unittest.TestCase):
         self.assertEqual(dropped, [])
 
 
-def _row(gen_model, eval_model, mean, runs, mode=None, real=0.9, task="spam"):
+def _row(gen_model, eval_model, mean, runs, strategy=None, real=0.9, task="spam"):
     metric = "f1" if task == "spam" else "errant.f0.5"
-    return {"task": task, "mode": mode, "gen_model": gen_model, "eval_model": eval_model,
-            "metric": metric, "gen_mean": mean, "gen_std": 0.01, "real": real, "runs": runs}
+    return {"task": task, "strategy": strategy, "gen_model": gen_model,
+            "eval_model": eval_model, "metric": metric, "gen_mean": mean,
+            "gen_std": 0.01, "real": real, "runs": runs}
 
 
 class ModeAwarePlottingTests(unittest.TestCase):
-    """spam has no real mode (SpamTask.get_generation_strategy() is always
-    class_conditional) — its rows all carry mode=None. Filenames/figures must
-    reflect that there's no mode axis, not literally embed the string "None"."""
+    """Rows with strategy=None (no split axis) must not literally embed the
+    string "None" into filenames/figures — same treatment a single-strategy
+    task (e.g. spam with no seedless runs mixed in) gets."""
 
     def test_model_impact_filename_has_no_mode_suffix_when_mode_is_none(self):
         rows = [
@@ -84,8 +85,8 @@ class ModeAwarePlottingTests(unittest.TestCase):
 
     def test_model_impact_filename_keeps_mode_suffix_for_real_modes(self):
         rows = [
-            _row("model-a", "ev1", 0.7, [0.68, 0.70, 0.72], mode="inverse", task="gec"),
-            _row("model-b", "ev1", 0.5, [0.48, 0.50, 0.52], mode="inverse", task="gec"),
+            _row("model-a", "ev1", 0.7, [0.68, 0.70, 0.72], strategy="inverse", task="gec"),
+            _row("model-b", "ev1", 0.5, [0.48, 0.50, 0.52], strategy="inverse", task="gec"),
         ]
         with tempfile.TemporaryDirectory() as out_dir:
             path = plot_model_impact(rows, "gec", "inverse", out_dir)
