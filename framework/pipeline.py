@@ -1,5 +1,6 @@
 import json
 import os
+import random
 import sys
 from datetime import datetime
 
@@ -335,12 +336,16 @@ def _write_results(final: dict, results_path: str, meta: dict) -> str:
 
 def _run_generation(generator, task, config, real_data, error_dist, judge_call, class_prob,
                     profile=None):
-    """Dispatch on the task's generation strategy. Corruption → forward/inverse
-    (unchanged). Class-conditional → labeled SPAM/HAM records.
+    """Dispatch on the task's generation strategy. Corruption → forward/inverse,
+    now including the seedless forward/inverse cells for GEC (Task 5); the
+    class_conditional (spam) branch does not yet act on `profile` (Task 8).
 
     `profile` is the pre-loaded seedless generation profile (None when
-    generation.seedless is falsy) — plumbed through for Tasks 5 and 8, which
-    add the seedless dispatch itself; this function does not yet act on it."""
+    generation.seedless is falsy). When `generation.seedless` is true, per-sample
+    content specs are drawn from it and no real benchmark text reaches the
+    generation prompt: forward mode calls `generate_seedless_pairs` directly;
+    inverse mode synthesizes carriers via `generate_carriers` and feeds them into
+    the unchanged `generate_inverse` in place of real seeds."""
     gen_cfg = config["generation"]
     sample_size = gen_cfg["sample_size"]
     strategy = task.get_generation_strategy()
@@ -366,7 +371,29 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
         )
     else:
         mode = gen_cfg.get("mode", "forward")
+        seedless = bool(gen_cfg.get("seedless"))
+        if seedless:
+            from framework.profiling.spec_sampler import render_spec, sample_content_spec
+            rng = random.Random()
+            side = task.get_profile_side(mode)
+            specs = [
+                render_spec(sample_content_spec(profile, rng, side=side))
+                for _ in range(sample_size)
+            ]
+
         if mode == "inverse":
+            if seedless:
+                carrier_prompt = task.get_carrier_prompt()
+                if not carrier_prompt:
+                    raise RuntimeError(
+                        f"{task.get_task_name()} does not support mode=inverse with "
+                        f"seedless=true (no carrier_prompt)."
+                    )
+                carriers = generator.generate_carriers(
+                    specs, carrier_prompt, "Sentence",
+                    request_delay=gen_cfg.get("request_delay", 0.0),
+                )
+                real_data = [{"correct": text} for text in carriers]
             # Post-parse_row contract: every corruption task normalizes rows to
             # {"incorrect", "correct"}; inverse mode corrupts the clean side.
             source_field = "correct"
@@ -383,6 +410,20 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                 sample_size=sample_size, source_field=source_field,
                 judge_prompt=task.get_inverse_judge_prompt() if judge_call else None,
                 judge_call=judge_call, request_delay=gen_cfg.get("request_delay", 0.0),
+            )
+        elif seedless:
+            prompt = task.get_seedless_forward_prompt()
+            if not prompt:
+                raise RuntimeError(
+                    f"{task.get_task_name()} does not support mode=forward with "
+                    f"seedless=true (no seedless_forward_prompt)."
+                )
+            synthetic = generator.generate_seedless_pairs(
+                specs, prompt, task.get_error_descriptions(),
+                error_dist["type_dist"], error_dist["count_dist"],
+                judge_prompt=task.get_judge_prompt() if judge_call else None,
+                judge_call=judge_call, rng=rng,
+                request_delay=gen_cfg.get("request_delay", 0.0),
             )
         else:
             synthetic = generator.generate(

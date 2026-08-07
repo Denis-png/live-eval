@@ -121,6 +121,18 @@ def _parse_generation(raw: str) -> tuple[str | None, str | None, str | None]:
     )
 
 
+def _accept_pair(corrupted: str | None, gold: str | None) -> str | None:
+    """Return a rejection reason for a generated (corrupted, gold) pair, or None
+    when the pair is acceptable. Shared by seeded and seedless forward loops."""
+    if not corrupted or not gold:
+        return "parse failed"
+    if corrupted.strip() == gold.strip():
+        return "identical corrupted/gold"
+    if len(corrupted.split()) < 3:
+        return f"too short: {corrupted!r}"
+    return None
+
+
 def _judgement_passes(raw: str) -> bool:
     """True iff the judge marks the sample valid AND the correction correct.
     Missing fields default to True (keep) to mirror Denis's parse_judge_output."""
@@ -184,19 +196,17 @@ class BaseGenerator(ABC):
                 raw = self.call_api(prompt)
                 gen_dt = time.monotonic() - t0
                 error_type, corrupted, gold = _parse_generation(raw)
-                if not corrupted or not gold:
-                    if _looks_like_refusal(raw):
-                        print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] model refused: {raw[:60]!r}", flush=True)
-                        refused += 1
+                reason = _accept_pair(corrupted, gold)
+                if reason:
+                    if reason == "parse failed":
+                        if _looks_like_refusal(raw):
+                            print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] model refused: {raw[:60]!r}", flush=True)
+                            refused += 1
+                        else:
+                            print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] parse failed: {raw[:60]!r}", flush=True)
+                            parse_failed += 1
                     else:
-                        print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] parse failed: {raw[:60]!r}", flush=True)
-                        parse_failed += 1
-                    continue
-                if corrupted.strip() == gold.strip():
-                    print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] identical corrupted/gold", flush=True)
-                    continue
-                if len(corrupted.split()) < 3:
-                    print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] too short: {corrupted!r}", flush=True)
+                        print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] {reason}", flush=True)
                     continue
 
                 judge_dt = 0.0
@@ -348,6 +358,80 @@ class BaseGenerator(ABC):
         print(f"Generation phase done in {total_dt:.1f}s.")
         print(
             f"Generated {len(synthetic)} synthetic samples (inverse) "
+            f"(judge dropped: {judge_dropped}, parse failed: {parse_failed}, "
+            f"refused: {refused})."
+        )
+        return synthetic
+
+    def generate_seedless_pairs(
+        self,
+        specs: list[str],
+        prompt: str,
+        error_descriptions: dict[str, str],
+        type_dist: dict[str, float],
+        count_dist: dict[int, float],
+        judge_prompt: str | None = None,
+        judge_call: Callable[[str], str] | None = None,
+        rng=None,
+        request_delay: float = 0.0,
+    ) -> list[dict]:
+        """Forward generation with no real seed: the content comes from a
+        profile spec and the error type from the empirical distribution.
+
+        Returns the same records as generate(): {"original", "corrupted",
+        "error_type"}."""
+        rng = rng or random.Random()
+        synthetic: list[dict] = []
+        judge_fn = judge_call or self.call_api
+        judge_dropped = parse_failed = refused = 0
+
+        total = len(specs)
+        run_start = time.monotonic()
+        print(f"Generating {total} samples (seedless forward) ...", flush=True)
+
+        for i, spec in enumerate(specs, 1):
+            keys = _sample_categories(type_dist, count_dist, rng)
+            error_spec = "; ".join(error_descriptions.get(k, k) for k in keys)
+            t0 = time.monotonic()
+            try:
+                raw = self.call_api(prompt.format(spec=spec, error_spec=error_spec))
+                gen_dt = time.monotonic() - t0
+                error_type, corrupted, gold = _parse_generation(raw)
+                reason = _accept_pair(corrupted, gold)
+                if reason:
+                    if reason == "parse failed" and _looks_like_refusal(raw):
+                        print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] model refused: {raw[:60]!r}", flush=True)
+                        refused += 1
+                    else:
+                        print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] {reason}", flush=True)
+                        parse_failed += reason == "parse failed"
+                    continue
+
+                judge_dt = 0.0
+                if judge_prompt:
+                    t1 = time.monotonic()
+                    judge_raw = judge_fn(judge_prompt.format(sentence=corrupted, correction=gold))
+                    judge_dt = time.monotonic() - t1
+                    if not _judgement_passes(judge_raw):
+                        print(f"[{i}/{total}] gen {gen_dt:.1f}s + judge {judge_dt:.1f}s — [JUDGE] dropped: {corrupted[:50]}", flush=True)
+                        judge_dropped += 1
+                        continue
+
+                synthetic.append({
+                    "original": gold,
+                    "corrupted": corrupted,
+                    "error_type": error_type or ", ".join(keys),
+                })
+                suffix = f" + judge {judge_dt:.1f}s" if judge_prompt else ""
+                print(f"[{i}/{total}] gen {gen_dt:.1f}s{suffix} ✓ ({error_type or ', '.join(keys)})", flush=True)
+                if request_delay > 0:
+                    time.sleep(request_delay)
+            except Exception as e:
+                print(f"[{i}/{total}] failed after {time.monotonic() - t0:.1f}s: {e}", flush=True)
+
+        print(f"Generation phase done in {time.monotonic() - run_start:.1f}s.")
+        print(
+            f"Generated {len(synthetic)} synthetic samples (seedless forward) "
             f"(judge dropped: {judge_dropped}, parse failed: {parse_failed}, "
             f"refused: {refused})."
         )
