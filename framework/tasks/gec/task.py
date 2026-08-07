@@ -45,6 +45,17 @@ class GECTask(BaseTask):
             out[t] = f"{ops[op]} {cats[cat]}"
         return out
 
+    def get_carrier_prompt(self) -> str | None:
+        return self._config.get("carrier_prompt")
+
+    def get_seedless_forward_prompt(self) -> str | None:
+        return self._config.get("seedless_forward_prompt")
+
+    def get_profile_side(self, mode: str) -> str:
+        """Forward samples the shape of learner (incorrect) text; inverse
+        synthesizes a clean carrier, so it samples the correct side."""
+        return "incorrect" if mode == "forward" else "correct"
+
     def get_evaluator_fns(self) -> dict:
         from framework.evaluators.gleu import compute_gleu
         from framework.evaluators.gec.errant import compute_errant

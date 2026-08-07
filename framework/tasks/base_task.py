@@ -72,6 +72,39 @@ class BaseTask(ABC):
         Return {} if the task does not support inverse generation."""
         return {}
 
+    def get_carrier_prompt(self) -> str | None:
+        """Prompt that synthesizes ONE seed text from a profile content spec.
+        Template placeholder: {spec}. Return None if the task has no seedless
+        support."""
+        return None
+
+    def get_seedless_forward_prompt(self) -> str | None:
+        """Forward-mode prompt driven by a content spec instead of a real seed.
+        Placeholders: {spec}, {error_spec}. Return None if unsupported."""
+        return None
+
+    def get_forward_prompt(self) -> str | None:
+        """Same-class imitation prompt for classification forward mode.
+        Placeholders: {sentence}, {class_name}. Return None if unsupported."""
+        return None
+
+    def get_seedless_class_prompts(self) -> dict[str, str]:
+        """{label: prompt} for direct per-class seedless generation.
+        Placeholders: {spec} and, for the positive class, {error_spec}."""
+        return {}
+
+    def get_profile_side(self, mode: str) -> str:
+        """Which profile sub-block ("incorrect"/"correct") seedless generation
+        should sample content from for this mode. Ignored by tasks whose
+        profiles are keyed per label."""
+        return "correct"
+
+    def get_seed_pool(self, config: dict, real_data: list[dict], mode: str) -> list[dict]:
+        """Rows used as generation seeds. Defaults to the parsed real data;
+        override when a mode needs a differently-shaped pool (e.g. labeled
+        rows of both classes for classification forward mode)."""
+        return real_data
+
     def get_generation_strategy(self) -> str:
         """How the pipeline generates synthetic data for this task:
           "corruption"        — corrupt a source text (forward/inverse); text→text tasks.
