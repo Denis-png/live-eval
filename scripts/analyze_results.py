@@ -275,8 +275,8 @@ def plot_model_impact(rows, task, strategy, out_dir):
                            ha="right", fontsize=8)
     axes[0].set_ylabel(metric, fontsize=9)
     _legend_models_modes(fig, sel, modes=False, real_line=True)
-    label = f"{task} {strategy}" if strategy is not None else task
-    suffix = f"_{strategy}" if strategy is not None else ""
+    label = f"{task} {strategy}" if strategy != "-" else task
+    suffix = f"_{strategy}" if strategy != "-" else ""
     fig.suptitle(f"{label}: per-run {metric} by generation model "
                  f"(dashed = real benchmark)", fontsize=11, y=1.04)
     return _save(fig, os.path.join(out_dir, f"model_impact_{task}{suffix}.png"))

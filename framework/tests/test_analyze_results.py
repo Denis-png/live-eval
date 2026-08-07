@@ -1,14 +1,17 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from scripts.analyze_results import (
+    _strategy_of,
     dedup_sessions,
     eta_squared,
     kendall_tau_b,
     plot_mode_effect,
     plot_model_impact,
 )
+import scripts.analyze_results as ar
 
 
 class EtaSquaredTests(unittest.TestCase):
@@ -69,19 +72,38 @@ def _row(gen_model, eval_model, mean, runs, strategy=None, real=0.9, task="spam"
 
 
 class ModeAwarePlottingTests(unittest.TestCase):
-    """Rows with strategy=None (no split axis) must not literally embed the
-    string "None" into filenames/figures — same treatment a single-strategy
-    task (e.g. spam with no seedless runs mixed in) gets."""
+    """Rows whose strategy is the "-" sentinel (no split axis) must not embed
+    it into filenames/figures — same treatment a single-strategy task (e.g.
+    spam with no seedless runs mixed in) gets."""
 
-    def test_model_impact_filename_has_no_mode_suffix_when_mode_is_none(self):
+    def test_model_impact_filename_has_no_suffix_for_legacy_sessions_without_mode(self):
+        # Realistic legacy session: written before mode/strategy existed for
+        # spam, so meta has mode=None and no "seedless" key at all.
+        # _strategy_of derives "-" from that — never None — so the row's
+        # strategy must come from _strategy_of, not be hand-set to None,
+        # or this test would pass while the real code path (which only ever
+        # sees "-") stays broken.
+        legacy_strategy = _strategy_of({"mode": None, "task": "spam", "model": "m"})
+        self.assertEqual(legacy_strategy, "-")
         rows = [
-            _row("model-a", "ev1", 0.7, [0.68, 0.70, 0.72]),
-            _row("model-b", "ev1", 0.5, [0.48, 0.50, 0.52]),
+            _row("model-a", "ev1", 0.7, [0.68, 0.70, 0.72], strategy=legacy_strategy),
+            _row("model-b", "ev1", 0.5, [0.48, 0.50, 0.52], strategy=legacy_strategy),
         ]
-        with tempfile.TemporaryDirectory() as out_dir:
-            path = plot_model_impact(rows, "spam", None, out_dir)
-            self.assertIsNotNone(path)
-            self.assertEqual(os.path.basename(path), "model_impact_spam.png")
+        captured = {}
+
+        def _fake_save(fig, path):
+            captured["title"] = fig._suptitle.get_text()
+            import matplotlib.pyplot as plt
+            plt.close(fig)
+            return path
+
+        with tempfile.TemporaryDirectory() as out_dir, \
+             mock.patch.object(ar, "_save", side_effect=_fake_save):
+            path = plot_model_impact(rows, "spam", legacy_strategy, out_dir)
+        self.assertIsNotNone(path)
+        self.assertEqual(os.path.basename(path), "model_impact_spam.png")
+        self.assertTrue(captured["title"].startswith("spam:"))
+        self.assertNotIn("-", captured["title"].split(":", 1)[0])
 
     def test_model_impact_filename_keeps_mode_suffix_for_real_modes(self):
         rows = [
