@@ -122,6 +122,52 @@ class BuildMetaTests(unittest.TestCase):
         self.assertEqual(meta["mode"], "inverse")
 
 
+class SeedlessMetaTests(unittest.TestCase):
+    """Task 9: meta["seedless"] / meta["profile_path"] are new, additive keys.
+
+    meta["strategy"] already means the task's generation SHAPE ("corruption"
+    vs "class_conditional") and must NOT be repurposed to encode seedless-ness
+    — that was the brief's mistake; these tests pin the corrected contract."""
+
+    def _meta(self, task, mode, seedless, profile_path=None):
+        cfg = _config("r.json")
+        cfg["generation"]["mode"] = mode
+        cfg["generation"]["seedless"] = seedless
+        if profile_path is not None:
+            cfg["generation"]["profile_path"] = profile_path
+        return _build_meta(cfg, task, runs_completed=1,
+                           effective_samples_per_run=[1], real_baseline=True)
+
+    def test_seedless_and_profile_path_for_each_mode_seedless_combination(self):
+        for mode in ("forward", "inverse"):
+            for seedless in (False, True):
+                meta = self._meta(_CorruptionTask(), mode, seedless,
+                                  profile_path="prof.json" if seedless else None)
+                self.assertEqual(meta["seedless"], seedless)
+                self.assertEqual(meta["profile_path"], "prof.json" if seedless else None)
+                # strategy stays the task shape, untouched by mode/seedless.
+                self.assertEqual(meta["strategy"], "corruption")
+                self.assertEqual(meta["mode"], mode)
+
+    def test_seedless_defaults_false_and_profile_path_none_when_absent(self):
+        # Configs predating this feature have no "seedless" key at all.
+        cfg = _config("r.json")
+        meta = _build_meta(cfg, _CorruptionTask(), runs_completed=1,
+                           effective_samples_per_run=[1], real_baseline=True)
+        self.assertFalse(meta["seedless"])
+        self.assertIsNone(meta["profile_path"])
+
+    def test_profile_path_ignored_when_not_seedless(self):
+        meta = self._meta(_CorruptionTask(), "inverse", False, profile_path="prof.json")
+        self.assertIsNone(meta["profile_path"])
+
+    def test_class_conditional_strategy_not_repurposed_by_seedless(self):
+        meta = self._meta(_ClassConditionalTask(), "inverse", True, profile_path="prof.json")
+        self.assertEqual(meta["strategy"], "class_conditional")
+        self.assertTrue(meta["seedless"])
+        self.assertEqual(meta["profile_path"], "prof.json")
+
+
 class WriteResultsTests(unittest.TestCase):
     def test_writes_meta_and_results(self):
         with tempfile.TemporaryDirectory() as d:

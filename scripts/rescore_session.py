@@ -126,6 +126,11 @@ def rescore_session(session_dir, config, *, skip_eval=False, skip_profile=False,
             # Every strategy has a real mode now, so it is always preserved,
             # never nulled out.
             "mode": meta.get("mode", "inverse" if strategy == "class_conditional" else "forward"),
+            # Task 9: seedless provenance. Carried over from the old meta,
+            # defaulting to False for sessions written before this key
+            # existed — profile_path needs no equivalent entry here since it
+            # already survives untouched via the {**meta, ...} spread above.
+            "seedless": meta.get("seedless", False),
             # Recomputed from the actual run-file count, not carried over from
             # the old meta — keeps a merged/reconciled session's provenance
             # honest (e.g. two 3-run sessions merged into one 6-run session).

@@ -127,6 +127,29 @@ class RescoreSessionTests(unittest.TestCase):
             out = json.load(open(os.path.join(d, "results.json")))
             self.assertEqual(out["meta"]["mode"], "inverse")
 
+    def test_seedless_survives_rescore(self):
+        # Task 9: profile provenance is whatever the original run recorded —
+        # rescoring has no generation config to rebuild it from, so it must
+        # ride through the meta spread untouched.
+        with tempfile.TemporaryDirectory() as d:
+            _write_session(d)
+            stale = json.load(open(os.path.join(d, "results.json")))
+            stale["meta"]["seedless"] = True
+            stale["meta"]["profile_path"] = "profile.json"
+            json.dump(stale, open(os.path.join(d, "results.json"), "w"))
+            self._run(d)
+            out = json.load(open(os.path.join(d, "results.json")))
+            self.assertTrue(out["meta"]["seedless"])
+            self.assertEqual(out["meta"]["profile_path"], "profile.json")
+
+    def test_seedless_defaults_false_for_legacy_meta_without_key(self):
+        # _write_session's meta predates the seedless key entirely.
+        with tempfile.TemporaryDirectory() as d:
+            _write_session(d)
+            self._run(d)
+            out = json.load(open(os.path.join(d, "results.json")))
+            self.assertFalse(out["meta"]["seedless"])
+
     def test_task_mismatch_raises(self):
         with tempfile.TemporaryDirectory() as d:
             _write_session(d)

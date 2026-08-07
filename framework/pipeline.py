@@ -282,6 +282,7 @@ def _build_meta(config: dict, task, runs_completed: int,
     num_runs = gen["num_runs"]
     strategy = task.get_generation_strategy()
     mode = gen.get("mode", "inverse" if strategy == "class_conditional" else "forward")
+    seedless = bool(gen.get("seedless"))
     if ds["source"] == "local":
         dataset_meta = {"source": "local", "path": ds["path"],
                         "format": ds["format"] or None,
@@ -294,6 +295,8 @@ def _build_meta(config: dict, task, runs_completed: int,
         "task": config["task"]["name"],
         "strategy": strategy,
         "mode": mode,
+        "seedless": seedless,
+        "profile_path": gen.get("profile_path") if seedless else None,
         "provider": gen["provider"],
         "model": gen["model"],
         "num_runs": num_runs,
