@@ -43,7 +43,8 @@ MODEL_COLORS = {
     "deepseek/deepseek-v4-flash": "#56B4E9",
 }
 FALLBACK_COLOR = "#52514e"
-MODE_MARKERS = {"forward": "o", "inverse": "^"}
+MODE_MARKERS = {"forward": "o", "inverse": "^",
+                "forward+seedless": "D", "inverse+seedless": "v"}
 HEADLINE = {"spam": "f1", "gec": "errant.f0.5"}
 IDENTITY_METRICS = {
     "spam": ["accuracy", "precision", "recall", "f1"],
@@ -103,10 +104,21 @@ def _strategy_of(meta: dict) -> str:
     Derived rather than stored, so sessions written before seedless existed
     (no `seedless` key) group correctly as their plain mode.
 
+    `mode` defaults the same way the writers (`_build_meta` / `_run_generation`)
+    do: a session that has no `mode` at all — including archived spam sessions,
+    where the old `_build_meta` forced `"mode": null` — resolves per its task
+    shape (`meta["strategy"]`): "inverse" for class_conditional, "forward"
+    otherwise. This is required so a legacy null-mode session lines up with a
+    freshly re-run session of the identical config (which now records its
+    mode explicitly) instead of forming its own stray "-" bucket that dedup
+    never supersedes and that drops out of single-model-group plots. Legacy
+    sessions lacking BOTH `mode` and `strategy` fall back to "forward", the
+    historical default.
+
     Note: this is NOT `meta["strategy"]` — that key already means the task's
     generation shape ("corruption" / "class_conditional") and is untouched
     here."""
-    mode = meta.get("mode") or "-"
+    mode = meta.get("mode") or ("inverse" if meta.get("strategy") == "class_conditional" else "forward")
     return f"{mode}+seedless" if meta.get("seedless") else mode
 
 
