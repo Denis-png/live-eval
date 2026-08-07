@@ -65,9 +65,15 @@ class LoadGenerationProfileTests(unittest.TestCase):
             self.assertEqual(profile["profile_version"], 2)
 
     def test_default_path_is_derived_from_task_name(self):
-        with self.assertRaises(RuntimeError) as ctx:
-            _load_generation_profile(_base_config(seedless=True), FakeTask())
-        self.assertIn("framework/data/profiles/gec_profile.json", str(ctx.exception))
+        # Pin DEFAULT_PROFILE_DIR to a directory that cannot exist rather than
+        # relying on the real default (framework/data/profiles/) being empty —
+        # the seedless prerequisite (profile_dataset --topics) legitimately
+        # writes gec_profile.json there for local dev, and this test must not
+        # depend on that ambient file being absent.
+        with mock.patch.object(pipeline, "DEFAULT_PROFILE_DIR", "/nonexistent/profiles/dir"):
+            with self.assertRaises(RuntimeError) as ctx:
+                _load_generation_profile(_base_config(seedless=True), FakeTask())
+        self.assertIn("/nonexistent/profiles/dir/gec_profile.json", str(ctx.exception))
 
     def test_classification_profile_validated_against_per_label_topics(self):
         with tempfile.TemporaryDirectory() as d:
