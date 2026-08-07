@@ -83,6 +83,24 @@ class SpamCellDispatchTests(unittest.TestCase):
         self.assertIn("carrier_prompt", message)
         self.assertFalse(self.generator.generate_carriers.called)
 
+    def test_forward_seeded_missing_class_raises_before_any_generator_call(self):
+        """IMPORTANT 5: mode=forward on spam but reference rows carry one
+        class only must raise BEFORE any API call — not lazily inside
+        generate_class_conditional's loop after rng happens to draw the
+        missing class, burning 1-25 paid calls depending on rng and
+        discarding everything generated."""
+        rows = [{"text": "hi there friend", "label": "HAM"}]  # no SPAM rows at all
+        config = _config("forward", False)
+        config["dataset"] = {"source": "local", "local": {"path": "data/spam_ref.csv"}}
+        with mock.patch.object(SpamTask, "_load_reference_rows", return_value=rows):
+            with self.assertRaises(RuntimeError) as ctx:
+                _run_generation(self.generator, self.task, config,
+                                [{"incorrect": "x"}], DIST, None, 0.5, profile=None)
+        message = str(ctx.exception)
+        self.assertIn("SPAM", message)
+        self.assertIn("data/spam_ref.csv", message)
+        self.assertFalse(self.generator.generate_class_conditional.called)
+
     def test_forward_seedless_raises_without_seedless_class_prompts(self):
         """A spam task double that lacks seedless_class_prompts has no per-label
         template to drive the seed_policy="none" cell — must fail fast."""

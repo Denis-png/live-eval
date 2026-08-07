@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 
-from framework.pipeline import _build_meta, _write_results
+from framework.pipeline import DEFAULT_PROFILE_DIR, _build_meta, _write_results
 
 
 class _CorruptionTask:
@@ -16,7 +16,8 @@ class _CorruptionTask:
 
 
 class _ClassConditionalTask:
-    """Fake task where mode never applies (mirrors spam)."""
+    """Fake task with a real forward/inverse mode, defaulting to "inverse"
+    (mirrors spam)."""
     def get_generation_strategy(self):
         return "class_conditional"
 
@@ -166,6 +167,24 @@ class SeedlessMetaTests(unittest.TestCase):
         self.assertEqual(meta["strategy"], "class_conditional")
         self.assertTrue(meta["seedless"])
         self.assertEqual(meta["profile_path"], "prof.json")
+
+    def test_profile_path_resolves_to_default_when_seedless_and_unset(self):
+        # IMPORTANT 2: both shipped configs leave generation.profile_path
+        # commented out, relying on the default _load_generation_profile
+        # resolves internally (framework/data/profiles/<task>_profile.json).
+        # _build_meta must record that SAME resolved default, not None —
+        # profiles are gitignored, so this is the only surviving record of
+        # what generated a seedless benchmark.
+        meta = self._meta(_CorruptionTask(), "forward", True)  # no profile_path key
+        self.assertEqual(
+            meta["profile_path"], os.path.join(DEFAULT_PROFILE_DIR, "gec_profile.json")
+        )
+
+    def test_profile_path_resolves_to_default_for_class_conditional_task(self):
+        meta = self._meta(_ClassConditionalTask(), "inverse", True)  # no profile_path key
+        self.assertEqual(
+            meta["profile_path"], os.path.join(DEFAULT_PROFILE_DIR, "spam_profile.json")
+        )
 
 
 class WriteResultsTests(unittest.TestCase):

@@ -170,6 +170,22 @@ def load_error_distribution(config: dict, real_data: list[dict], task) -> dict:
 DEFAULT_PROFILE_DIR = "framework/data/profiles"
 
 
+def _resolve_profile_path(config: dict, task) -> str:
+    """The profile path seedless generation actually uses: generation.profile_path
+    if the config sets one, else the default framework/data/profiles/<task>_profile.json.
+
+    Single source of truth for that default, shared by `_load_generation_profile`
+    (which loads the file) and `_build_meta` (which records the path as
+    provenance). Profiles are gitignored, so `_build_meta`'s copy is the only
+    surviving record of what generated a seedless benchmark — it must resolve
+    the SAME default `_load_generation_profile` used, not just echo a possibly-
+    unset config key."""
+    gen = config.get("generation") or {}
+    return gen.get("profile_path") or os.path.join(
+        DEFAULT_PROFILE_DIR, f"{task.get_task_name()}_profile.json"
+    )
+
+
 def _load_generation_profile(config: dict, task) -> dict | None:
     """Load the benchmark profile that drives seedless generation.
 
@@ -180,9 +196,7 @@ def _load_generation_profile(config: dict, task) -> dict | None:
         return None
     from framework.profiling.spec_sampler import load_profile
 
-    path = gen.get("profile_path") or os.path.join(
-        DEFAULT_PROFILE_DIR, f"{task.get_task_name()}_profile.json"
-    )
+    path = _resolve_profile_path(config, task)
     topics_key = (
         "topics_per_label"
         if task.get_generation_strategy() == "class_conditional"
@@ -274,7 +288,17 @@ def _build_meta(config: dict, task, runs_completed: int,
     `mode` is meaningful for every strategy now: `corruption` (GEC) defaults
     to "forward" when omitted, `class_conditional` (spam) defaults to
     "inverse" — matching `_run_generation`'s own per-strategy default, so
-    this echoes the mode that actually ran rather than a stray config value."""
+    this echoes the mode that actually ran rather than a stray config value.
+
+    `seedless` mirrors generation.seedless (False when the key is absent).
+    `profile_path` is the resolved path of the profile that actually drove
+    generation when seedless is true — generation.profile_path if the config
+    set one, else the same default `_load_generation_profile` resolves
+    internally (see `_resolve_profile_path`, shared by both) — and None when
+    seedless is false. Profiles are gitignored, so this is the only record of
+    what generated a seedless benchmark; it must NOT be left None in the
+    common case where seedless is true and profile_path is left unset (both
+    shipped configs ship it commented out)."""
     gen = config["generation"]
     ds = resolve_dataset_config(config.get("dataset") or {})
     judge = config.get("judge") or {}
@@ -296,7 +320,7 @@ def _build_meta(config: dict, task, runs_completed: int,
         "strategy": strategy,
         "mode": mode,
         "seedless": seedless,
-        "profile_path": gen.get("profile_path") if seedless else None,
+        "profile_path": _resolve_profile_path(config, task) if seedless else None,
         "provider": gen["provider"],
         "model": gen["model"],
         "num_runs": num_runs,
@@ -320,6 +344,14 @@ def _write_results(final: dict, results_path: str, meta: dict) -> str:
 
 
 # ── Generation dispatch ───────────────────────────────────────
+
+def _dataset_display_name(config: dict) -> str:
+    """Human-readable name of the configured dataset, for error messages that
+    need to point at what to fix: the local file path, or the HuggingFace
+    dataset name."""
+    ds = resolve_dataset_config(config.get("dataset") or {})
+    return ds["path"] if ds["source"] == "local" else ds["name"]
+
 
 def _run_generation(generator, task, config, real_data, error_dist, judge_call, class_prob,
                     profile=None):
@@ -427,10 +459,27 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                     f"seedless=false (no forward_prompt)."
                 )
             real_seeds = task.get_seed_pool(config, real_data, "forward")
+            # seed_policy="same_class" needs seeds of BOTH classes (it draws
+            # from the subset matching the label rng picked). Check that BEFORE
+            # any API call: the in-loop guard in generate_class_conditional
+            # catches this too, but only after rng happens to draw the missing
+            # class — anywhere from 1 to `sample_size` paid calls in, discarding
+            # everything generated so far.
+            label_field = "label"
+            present_labels = {row.get(label_field) for row in real_seeds}
+            for label in (common_kwargs["positive_label"], common_kwargs["negative_label"]):
+                if label not in present_labels:
+                    raise RuntimeError(
+                        f"seed_policy='same_class' needs seeds labeled {label!r}, but "
+                        f"the reference rows from dataset "
+                        f"'{_dataset_display_name(config)}' carry no {label!r} class "
+                        f"— check the dataset and {task.get_task_name()}'s "
+                        f"get_seed_pool()."
+                    )
             synthetic = generator.generate_class_conditional(
                 real_seeds=real_seeds,
                 seed_field="text",
-                label_field="label",
+                label_field=label_field,
                 seed_policy="same_class",
                 forward_prompt=forward_prompt,
                 **common_kwargs,
