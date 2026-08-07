@@ -102,6 +102,53 @@ class GecSeedlessDispatchTests(unittest.TestCase):
         samples = generator.generate_inverse.call_args.kwargs["real_samples"]
         self.assertEqual(samples, [{"correct": "A clean sentence here."}])
 
+    def test_inverse_seedless_raises_without_carrier_prompt(self):
+        """A task that lacks a carrier_prompt has no way to synthesize a seedless
+        carrier for inverse mode — must fail fast, not silently skip to seeded
+        behavior or crash deeper inside generate_carriers."""
+        from framework.pipeline import _run_generation
+        from framework.tasks.gec.task import GECTask
+
+        task = GECTask()
+        generator = mock.Mock()
+        profile = {"profile_version": 2, "topics": {"t": {"fraction": 1.0}},
+                   "length_distributions": {"correct": {"words": {
+                       "bins": {"6-10": 1.0}, "quantiles": {"p90": 9}}}},
+                   "style": {"correct": {}}}
+        with mock.patch.object(GECTask, "get_carrier_prompt", return_value=None):
+            with self.assertRaises(RuntimeError) as ctx:
+                _run_generation(generator, task, self._config("inverse", True), [],
+                                {"type_dist": {"R:SPELL": 1.0}, "count_dist": {1: 1.0}},
+                                None, 0.5, profile=profile)
+        message = str(ctx.exception)
+        self.assertIn("gec", message)
+        self.assertIn("mode=inverse", message)
+        self.assertIn("carrier_prompt", message)
+        self.assertFalse(generator.generate_carriers.called)
+
+    def test_forward_seedless_raises_without_seedless_forward_prompt(self):
+        """A task that lacks a seedless_forward_prompt has no template to drive
+        generate_seedless_pairs — must fail fast rather than call it with None."""
+        from framework.pipeline import _run_generation
+        from framework.tasks.gec.task import GECTask
+
+        task = GECTask()
+        generator = mock.Mock()
+        profile = {"profile_version": 2, "topics": {"t": {"fraction": 1.0}},
+                   "length_distributions": {"incorrect": {"words": {
+                       "bins": {"6-10": 1.0}, "quantiles": {"p90": 9}}}},
+                   "style": {"incorrect": {}}}
+        with mock.patch.object(GECTask, "get_seedless_forward_prompt", return_value=None):
+            with self.assertRaises(RuntimeError) as ctx:
+                _run_generation(generator, task, self._config("forward", True), [],
+                                {"type_dist": {"R:SPELL": 1.0}, "count_dist": {1: 1.0}},
+                                None, 0.5, profile=profile)
+        message = str(ctx.exception)
+        self.assertIn("gec", message)
+        self.assertIn("mode=forward", message)
+        self.assertIn("seedless_forward_prompt", message)
+        self.assertFalse(generator.generate_seedless_pairs.called)
+
 
 if __name__ == "__main__":
     unittest.main()

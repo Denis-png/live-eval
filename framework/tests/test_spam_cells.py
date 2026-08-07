@@ -70,6 +70,32 @@ class SpamCellDispatchTests(unittest.TestCase):
         self.assertTrue(all(len(v) == 2 for v in kwargs["specs_by_label"].values()))
         self.assertFalse(self.generator.generate_carriers.called)
 
+    def test_inverse_seedless_raises_without_carrier_prompt(self):
+        """A spam task double that lacks a carrier_prompt has no way to
+        synthesize a seedless HAM carrier for inverse mode — must fail fast."""
+        with mock.patch.object(SpamTask, "get_carrier_prompt", return_value=None):
+            with self.assertRaises(RuntimeError) as ctx:
+                _run_generation(self.generator, self.task, _config("inverse", True), [],
+                                DIST, None, 0.5, profile=PROFILE)
+        message = str(ctx.exception)
+        self.assertIn("spam", message)
+        self.assertIn("mode=inverse", message)
+        self.assertIn("carrier_prompt", message)
+        self.assertFalse(self.generator.generate_carriers.called)
+
+    def test_forward_seedless_raises_without_seedless_class_prompts(self):
+        """A spam task double that lacks seedless_class_prompts has no per-label
+        template to drive the seed_policy="none" cell — must fail fast."""
+        with mock.patch.object(SpamTask, "get_seedless_class_prompts", return_value={}):
+            with self.assertRaises(RuntimeError) as ctx:
+                _run_generation(self.generator, self.task, _config("forward", True), [],
+                                DIST, None, 0.5, profile=PROFILE)
+        message = str(ctx.exception)
+        self.assertIn("spam", message)
+        self.assertIn("mode=forward", message)
+        self.assertIn("seedless_class_prompts", message)
+        self.assertFalse(self.generator.generate_class_conditional.called)
+
 
 if __name__ == "__main__":
     unittest.main()
