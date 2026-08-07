@@ -353,6 +353,71 @@ class BaseGenerator(ABC):
         )
         return synthetic
 
+    def generate_carriers(
+        self,
+        specs: list[str],
+        carrier_prompt: str,
+        tag: str,
+        request_delay: float = 0.0,
+    ) -> list[str]:
+        """Synthesize seed texts from profile-derived content specs.
+
+        Seedless *inverse* generation needs clean source texts but no real
+        benchmark text: these carriers are drop-in replacements for real seeds
+        in generate_inverse() / generate_class_conditional(). Fail-soft like the
+        other loops — a refused or unparseable carrier is skipped, not raised.
+
+        Args:
+            specs:          already-rendered spec strings (see
+                            profiling.spec_sampler.render_spec).
+            carrier_prompt: template with a {spec} placeholder.
+            tag:            expected response field, e.g. "Sentence".
+            request_delay:  seconds to sleep after each successful request.
+        """
+        carriers: list[str] = []
+        total = len(specs)
+        refused = parse_failed = 0
+        run_start = time.monotonic()
+        if total:
+            print(f"Synthesizing {total} carriers ...", flush=True)
+
+        for i, spec in enumerate(specs, 1):
+            prompt = carrier_prompt.format(spec=spec)
+            t0 = time.monotonic()
+            try:
+                raw = self.call_api(prompt)
+                dt = time.monotonic() - t0
+                # Refusal check BEFORE _parse_tagged: its bare single-line
+                # fallback would otherwise accept a one-line refusal as the
+                # carrier text. An explicit tag field always wins.
+                tag_re = re.compile(rf"(?im)^\s*{re.escape(tag)}:\s*(.+?)\s*$")
+                if tag_re.search(raw) is None and _looks_like_refusal(raw):
+                    print(f"[{i}/{total}] carrier {dt:.1f}s — [SKIP] model refused: {raw[:60]!r}", flush=True)
+                    refused += 1
+                    continue
+                text = _parse_tagged(raw, tag)
+                if not text:
+                    print(f"[{i}/{total}] carrier {dt:.1f}s — [SKIP] parse failed: {raw[:60]!r}", flush=True)
+                    parse_failed += 1
+                    continue
+                if len(text.split()) < 3:
+                    print(f"[{i}/{total}] carrier {dt:.1f}s — [SKIP] too short: {text!r}", flush=True)
+                    continue
+                carriers.append(text)
+                print(f"[{i}/{total}] carrier {dt:.1f}s ✓", flush=True)
+                if request_delay > 0:
+                    time.sleep(request_delay)
+            except Exception as e:
+                print(f"[{i}/{total}] carrier failed after {time.monotonic() - t0:.1f}s: {e}", flush=True)
+
+        if total:
+            print(
+                f"Synthesized {len(carriers)} carriers in "
+                f"{time.monotonic() - run_start:.1f}s "
+                f"(parse failed: {parse_failed}, refused: {refused})."
+            )
+        return carriers
+
     def generate_class_conditional(
         self,
         real_seeds: list[dict],
