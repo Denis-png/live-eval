@@ -1,8 +1,10 @@
 """Cross-session analysis of generated-vs-real benchmark results.
 
 Scans one or more results roots for session dirs (anything holding a
-results.json), keeps the best session per (task, mode, generation model), and
-argues the three questions the archive exists to answer:
+results.json), keeps the best session per (task, strategy, generation model)
+— strategy being mode plus the seedless flag, so a seedless run never
+shadows or merges with a seeded run of the same mode — and argues the three
+questions the archive exists to answer:
 
   1. fidelity   — how close are generated scores to real ones, and do generated
                   benchmarks rank the evaluated models the way the real one does
@@ -41,7 +43,8 @@ MODEL_COLORS = {
     "deepseek/deepseek-v4-flash": "#56B4E9",
 }
 FALLBACK_COLOR = "#52514e"
-MODE_MARKERS = {"forward": "o", "inverse": "^"}
+MODE_MARKERS = {"forward": "o", "inverse": "^",
+                "forward+seedless": "D", "inverse+seedless": "v"}
 HEADLINE = {"spam": "f1", "gec": "errant.f0.5"}
 IDENTITY_METRICS = {
     "spam": ["accuracy", "precision", "recall", "f1"],
@@ -94,6 +97,31 @@ def kendall_tau_b(x, y):
     return (concordant - discordant) / denom
 
 
+# ── Strategy grouping ─────────────────────────────────────────
+
+def _strategy_of(meta: dict) -> str:
+    """Generation-cell label for grouping: mode plus the seedless flag.
+    Derived rather than stored, so sessions written before seedless existed
+    (no `seedless` key) group correctly as their plain mode.
+
+    `mode` defaults the same way the writers (`_build_meta` / `_run_generation`)
+    do: a session that has no `mode` at all — including archived spam sessions,
+    where the old `_build_meta` forced `"mode": null` — resolves per its task
+    shape (`meta["strategy"]`): "inverse" for class_conditional, "forward"
+    otherwise. This is required so a legacy null-mode session lines up with a
+    freshly re-run session of the identical config (which now records its
+    mode explicitly) instead of forming its own stray "-" bucket that dedup
+    never supersedes and that drops out of single-model-group plots. Legacy
+    sessions lacking BOTH `mode` and `strategy` fall back to "forward", the
+    historical default.
+
+    Note: this is NOT `meta["strategy"]` — that key already means the task's
+    generation shape ("corruption" / "class_conditional") and is untouched
+    here."""
+    mode = meta.get("mode") or ("inverse" if meta.get("strategy") == "class_conditional" else "forward")
+    return f"{mode}+seedless" if meta.get("seedless") else mode
+
+
 # ── Session discovery ─────────────────────────────────────────
 
 def discover_sessions(roots):
@@ -119,18 +147,18 @@ def discover_sessions(roots):
 
 
 def dedup_sessions(sessions):
-    """One session per (task, mode, generation model): most completed runs wins,
-    then the newest. Returns (kept, dropped)."""
+    """One session per (task, strategy, generation model): most completed runs
+    wins, then the newest. Returns (kept, dropped)."""
     best = {}
     for s in sessions:
         m = s["meta"]
-        key = (m["task"], m.get("mode", "forward"), m["model"])
+        key = (m["task"], _strategy_of(m), m["model"])
         rank = (m.get("runs_completed", 0), m.get("created", ""))
         if key not in best or rank > (best[key]["meta"].get("runs_completed", 0),
                                       best[key]["meta"].get("created", "")):
             best[key] = s
     kept = sorted(best.values(), key=lambda s: (s["meta"]["task"],
-                                                s["meta"].get("mode", ""),
+                                                _strategy_of(s["meta"]),
                                                 s["meta"]["model"]))
     dropped = [s for s in sessions if s not in kept]
     return kept, dropped
@@ -140,7 +168,7 @@ def dedup_sessions(sessions):
 
 def session_rows(session):
     """Flatten one session into rows:
-    {task, mode, gen_model, eval_model, metric, gen_mean, gen_std, real, runs}."""
+    {task, strategy, gen_model, eval_model, metric, gen_mean, gen_std, real, runs}."""
     meta = session["meta"]
     rows = []
     for eval_model, blocks in session["results"].items():
@@ -150,7 +178,7 @@ def session_rows(session):
         for metric in _visible(gen.keys()):
             mean, std = gen[metric]
             rows.append({
-                "task": meta["task"], "mode": meta.get("mode", "forward"),
+                "task": meta["task"], "strategy": _strategy_of(meta),
                 "gen_model": meta["model"], "eval_model": eval_model,
                 "metric": metric, "gen_mean": mean, "gen_std": std,
                 "real": real.get(metric),
@@ -178,7 +206,7 @@ def _plt():
 
 def plot_identity(rows, task, out_dir):
     """Generated vs real scatter with the y=x fidelity diagonal, one panel per
-    metric. Color = generation model, marker = mode, error bar = run std."""
+    metric. Color = generation model, marker = strategy, error bar = run std."""
     from framework.plotting.style import INK_MUTED, SURFACE, apply_axes_style
     plt = _plt()
     metrics = [m for m in IDENTITY_METRICS[task]
@@ -196,7 +224,7 @@ def plot_identity(rows, task, out_dir):
             if r["metric"] != metric or r["real"] is None:
                 continue
             ax.errorbar(r["real"], r["gen_mean"], yerr=r["gen_std"],
-                        marker=MODE_MARKERS.get(r["mode"], "s"), linestyle="none",
+                        marker=MODE_MARKERS.get(r["strategy"], "s"), linestyle="none",
                         markersize=6, color=_color(r["gen_model"]),
                         markeredgecolor="white", markeredgewidth=0.5,
                         elinewidth=1, capsize=2, zorder=3)
@@ -205,24 +233,24 @@ def plot_identity(rows, task, out_dir):
         ax.set_ylim(-0.03, 1.03)
         ax.set_xlabel("real score", fontsize=9)
     axes[0].set_ylabel("generated score", fontsize=9)
-    # Only show the mode legend/marker split when the task actually has more
-    # than one real mode present (spam's mode is always None — a single
-    # marker shape then, encoded by color alone, same as any single-mode task).
-    has_mode_axis = len({r["mode"] for r in rows if r["mode"] is not None}) > 1
-    _legend_models_modes(fig, rows, modes=has_mode_axis)
+    # Only show the strategy legend/marker split when the task actually has
+    # more than one distinct strategy present (a single-strategy task gets one
+    # marker shape, encoded by color alone — same treatment spam gets today).
+    has_strategy_axis = len({r["strategy"] for r in rows}) > 1
+    _legend_models_modes(fig, rows, modes=has_strategy_axis)
     fig.suptitle(f"{task}: generated vs real (diagonal = perfect fidelity; "
                  f"below = generated harder)", fontsize=11, y=1.04)
     return _save(fig, os.path.join(out_dir, f"identity_{task}.png"))
 
 
-def plot_model_impact(rows, task, mode, out_dir):
+def plot_model_impact(rows, task, strategy, out_dir):
     """Per-run headline scores by generation model (position encodes the model),
     real baseline as dashed reference, eta^2 annotated per evaluated model."""
     from framework.plotting.style import (INK, SERIES_REAL, SURFACE,
                                           apply_axes_style)
     plt = _plt()
     metric = HEADLINE[task]
-    sel = [r for r in rows if r["task"] == task and r["mode"] == mode
+    sel = [r for r in rows if r["task"] == task and r["strategy"] == strategy
            and r["metric"] == metric and r["runs"]]
     eval_models = sorted({r["eval_model"] for r in sel})
     gen_models = sorted({r["gen_model"] for r in sel})
@@ -259,8 +287,8 @@ def plot_model_impact(rows, task, mode, out_dir):
                            ha="right", fontsize=8)
     axes[0].set_ylabel(metric, fontsize=9)
     _legend_models_modes(fig, sel, modes=False, real_line=True)
-    label = f"{task} {mode}" if mode is not None else task
-    suffix = f"_{mode}" if mode is not None else ""
+    label = f"{task} {strategy}" if strategy != "-" else task
+    suffix = f"_{strategy}" if strategy != "-" else ""
     fig.suptitle(f"{label}: per-run {metric} by generation model "
                  f"(dashed = real benchmark)", fontsize=11, y=1.04)
     return _save(fig, os.path.join(out_dir, f"model_impact_{task}{suffix}.png"))
@@ -274,7 +302,7 @@ def plot_mode_effect(rows, task, out_dir):
     sel = [r for r in rows if r["task"] == task and r["metric"] == metric]
     both = sorted({m for m in {r["gen_model"] for r in sel}
                    if {"forward", "inverse"} <=
-                   {r["mode"] for r in sel if r["gen_model"] == m}})
+                   {r["strategy"] for r in sel if r["gen_model"] == m}})
     if not both:
         return None
     eval_models = sorted({r["eval_model"] for r in sel})
@@ -285,9 +313,12 @@ def plot_mode_effect(rows, task, out_dir):
     for ax, ev in zip(axes, eval_models):
         apply_axes_style(ax)
         for gm in both:
-            pts = {r["mode"]: r for r in sel
+            pts = {r["strategy"]: r for r in sel
                    if r["eval_model"] == ev and r["gen_model"] == gm}
-            if len(pts) < 2:
+            # Membership, not len(pts) < 2: with seedless variants in the mix,
+            # pts can hold >=2 keys (e.g. "inverse" + "inverse+seedless")
+            # without actually pairing forward with inverse.
+            if not {"forward", "inverse"} <= set(pts):
                 continue
             xs, ys = [0, 1], [pts["forward"]["gen_mean"], pts["inverse"]["gen_mean"]]
             ax.errorbar(xs, ys, yerr=[pts["forward"]["gen_std"], pts["inverse"]["gen_std"]],
@@ -319,10 +350,10 @@ def plot_fidelity_jsd(sessions, task, out_dir):
     sel = [s for s in sel if all(k in s["profile"]["fidelity"] for k in keys)]
     if not sel:
         return None
-    sel.sort(key=lambda s: (s["meta"].get("mode") or "", s["meta"]["model"]))
+    sel.sort(key=lambda s: (_strategy_of(s["meta"]), s["meta"]["model"]))
     labels = [
-        (f"{s['meta']['mode']}\n{_short(s['meta']['model'])}" if s["meta"].get("mode")
-         else _short(s["meta"]["model"]))
+        (f"{_strategy_of(s['meta'])}\n{_short(s['meta']['model'])}"
+         if _strategy_of(s["meta"]) != "-" else _short(s["meta"]["model"]))
         for s in sel
     ]
     fig, axes = plt.subplots(1, 2, figsize=(1.1 * len(sel) + 5, 3.4), sharey=True)
@@ -368,12 +399,12 @@ def _save(fig, path):
 
 # ── Report ────────────────────────────────────────────────────
 
-def rank_preservation(rows, task, mode, gen_model):
+def rank_preservation(rows, task, strategy, gen_model):
     """Kendall tau-b between real and generated eval-model orderings on the
     task's headline metric, plus the orderings themselves."""
     metric = HEADLINE[task]
-    sel = [r for r in rows if (r["task"], r["mode"], r["gen_model"], r["metric"])
-           == (task, mode, gen_model, metric) and r["real"] is not None]
+    sel = [r for r in rows if (r["task"], r["strategy"], r["gen_model"], r["metric"])
+           == (task, strategy, gen_model, metric) and r["real"] is not None]
     if len(sel) < 2:
         return None
     sel.sort(key=lambda r: r["eval_model"])
@@ -395,18 +426,18 @@ def build_summary(sessions, rows):
     for s in sessions:
         m = s["meta"]
         summary["sessions"].append({
-            "dir": s["dir"], "task": m["task"], "mode": m.get("mode"),
+            "dir": s["dir"], "task": m["task"], "strategy": _strategy_of(m),
             "gen_model": m["model"], "runs": m.get("runs_completed"),
             "has_per_run_scores": any(b.get("runs") for b in s["results"].values()),
             "has_profile": s.get("profile") is not None,
         })
 
-    configs = sorted({(r["task"], r["mode"], r["gen_model"]) for r in rows})
-    for task, mode, gm in configs:
-        key = f"{task}/{mode}/{gm}"
+    configs = sorted({(r["task"], r["strategy"], r["gen_model"]) for r in rows})
+    for task, strategy, gm in configs:
+        key = f"{task}/{strategy}/{gm}"
         headline = HEADLINE[task]
-        sel = [r for r in rows if (r["task"], r["mode"], r["gen_model"]) ==
-               (task, mode, gm) and r["real"] is not None]
+        sel = [r for r in rows if (r["task"], r["strategy"], r["gen_model"]) ==
+               (task, strategy, gm) and r["real"] is not None]
         if sel:
             gaps = [abs(r["gen_mean"] - r["real"]) for r in sel]
             head = [r["gen_mean"] - r["real"] for r in sel if r["metric"] == headline]
@@ -415,15 +446,15 @@ def build_summary(sessions, rows):
                 "headline_gap_mean": (round(sum(head) / len(head), 4) if head else None),
                 "harder_than_real": (sum(head) / len(head) < 0) if head else None,
             }
-        rp = rank_preservation(rows, task, mode, gm)
+        rp = rank_preservation(rows, task, strategy, gm)
         if rp:
             summary["rank_preservation"][key] = rp
 
     for task in sorted({r["task"] for r in rows}):
-        for mode in sorted({r["mode"] for r in rows if r["task"] == task}):
+        for strategy in sorted({r["strategy"] for r in rows if r["task"] == task}):
             metric = HEADLINE[task]
-            sel = [r for r in rows if (r["task"], r["mode"], r["metric"]) ==
-                   (task, mode, metric) and r["runs"]]
+            sel = [r for r in rows if (r["task"], r["strategy"], r["metric"]) ==
+                   (task, strategy, metric) and r["runs"]]
             per_eval = {}
             for ev in sorted({r["eval_model"] for r in sel}):
                 groups = [r["runs"] for r in sel if r["eval_model"] == ev]
@@ -440,17 +471,17 @@ def build_summary(sessions, rows):
                     "n_gen_models": len(groups),
                 }
             if per_eval:
-                summary["model_impact"][f"{task}/{mode}"] = per_eval
+                summary["model_impact"][f"{task}/{strategy}"] = per_eval
 
         both = sorted({m for m in {r["gen_model"] for r in rows if r["task"] == task}
                        if {"forward", "inverse"} <=
-                       {r["mode"] for r in rows
+                       {r["strategy"] for r in rows
                         if r["task"] == task and r["gen_model"] == m}})
         for gm in both:
             metric = HEADLINE[task]
             deltas = {}
             for ev in sorted({r["eval_model"] for r in rows if r["task"] == task}):
-                pts = {r["mode"]: r["gen_mean"] for r in rows
+                pts = {r["strategy"]: r["gen_mean"] for r in rows
                        if (r["task"], r["gen_model"], r["eval_model"], r["metric"]) ==
                        (task, gm, ev, metric)}
                 if {"forward", "inverse"} <= set(pts):
@@ -468,10 +499,10 @@ def write_markdown(summary, sessions, rows, figures, out_path):
              f"_Generated {summary['created']} by scripts/analyze_results.py_", ""]
 
     lines += ["## Run inventory", "",
-              "| task | mode | generation model | runs | per-run scores | profile |",
+              "| task | strategy | generation model | runs | per-run scores | profile |",
               "|---|---|---|---|---|---|"]
     for s in summary["sessions"]:
-        lines.append(f"| {s['task']} | {s['mode'] or '-'} | {s['gen_model']} | {s['runs']} "
+        lines.append(f"| {s['task']} | {s['strategy']} | {s['gen_model']} | {s['runs']} "
                      f"| {'yes' if s['has_per_run_scores'] else 'no'} "
                      f"| {'yes' if s['has_profile'] else 'no'} |")
 
@@ -479,13 +510,13 @@ def write_markdown(summary, sessions, rows, figures, out_path):
     for task in sorted({r["task"] for r in rows}):
         metric = HEADLINE[task]
         lines += [f"### {task} — {metric}", "",
-                  "| mode | generation model | evaluated model | generated | real | gap |",
+                  "| strategy | generation model | evaluated model | generated | real | gap |",
                   "|---|---|---|---|---|---|"]
         sel = [r for r in rows if r["task"] == task and r["metric"] == metric]
-        for r in sorted(sel, key=lambda r: (r["mode"] or "", r["gen_model"], r["eval_model"])):
+        for r in sorted(sel, key=lambda r: (r["strategy"], r["gen_model"], r["eval_model"])):
             real = f"{r['real']:.3f}" if r["real"] is not None else "-"
             gap = (f"{r['gen_mean'] - r['real']:+.3f}" if r["real"] is not None else "-")
-            lines.append(f"| {r['mode'] or '-'} | {_short(r['gen_model'])} "
+            lines.append(f"| {r['strategy']} | {_short(r['gen_model'])} "
                          f"| {_short(r['eval_model'])} "
                          f"| {r['gen_mean']:.3f} ± {r['gen_std']:.3f} | {real} | {gap} |")
         lines.append("")
@@ -546,7 +577,7 @@ def main():
     kept, dropped = dedup_sessions(sessions)
     for s in dropped:
         print(f"[dedup] ignoring {s['dir']} "
-              f"(superseded for {s['meta']['task']}/{s['meta'].get('mode')}/"
+              f"(superseded for {s['meta']['task']}/{_strategy_of(s['meta'])}/"
               f"{s['meta']['model']})")
     rows = [r for s in kept for r in session_rows(s)]
     if not rows:
@@ -560,8 +591,8 @@ def main():
     for task in tasks:
         task_rows = [r for r in rows if r["task"] == task]
         figures.append(plot_identity(task_rows, task, out_dir))
-        for mode in sorted({r["mode"] for r in task_rows}):
-            figures.append(plot_model_impact(task_rows, task, mode, out_dir))
+        for strategy in sorted({r["strategy"] for r in task_rows}):
+            figures.append(plot_model_impact(task_rows, task, strategy, out_dir))
         figures.append(plot_mode_effect(task_rows, task, out_dir))
         figures.append(plot_fidelity_jsd(kept, task, out_dir))
 

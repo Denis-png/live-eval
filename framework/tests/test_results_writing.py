@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 
-from framework.pipeline import _build_meta, _write_results, class_conditional_mode_notice
+from framework.pipeline import DEFAULT_PROFILE_DIR, _build_meta, _write_results
 
 
 class _CorruptionTask:
@@ -16,7 +16,8 @@ class _CorruptionTask:
 
 
 class _ClassConditionalTask:
-    """Fake task where mode never applies (mirrors spam)."""
+    """Fake task with a real forward/inverse mode, defaulting to "inverse"
+    (mirrors spam)."""
     def get_generation_strategy(self):
         return "class_conditional"
 
@@ -102,41 +103,88 @@ class BuildMetaTests(unittest.TestCase):
                            real_baseline=True)
         self.assertEqual(meta["class_balance"], 0.3)
 
-    def test_class_conditional_task_gets_null_mode_regardless_of_config(self):
-        # cfg carries generation.mode: "inverse" (a leftover/stray value) but a
-        # class_conditional task (spam) never reads it — meta must not echo it.
-        cfg = _config("r.json")
+    def test_class_conditional_task_echoes_configured_mode(self):
+        # spam now has real forward/inverse modes — meta must echo whatever
+        # generation.mode the config actually set, same as a corruption task.
+        cfg = _config("r.json")  # generation.mode: "inverse"
         meta = _build_meta(cfg, _ClassConditionalTask(), runs_completed=1,
                            effective_samples_per_run=[1], real_baseline=True)
         self.assertEqual(meta["strategy"], "class_conditional")
-        self.assertIsNone(meta["mode"])
+        self.assertEqual(meta["mode"], "inverse")
 
-    def test_class_conditional_task_null_mode_even_without_config_mode_key(self):
+    def test_class_conditional_task_defaults_to_inverse_without_config_mode_key(self):
+        # Omitting generation.mode must keep reproducing today's production
+        # behavior (cross_class over real seeds), so the recorded default is
+        # "inverse", not the corruption strategy's "forward" default.
         cfg = _config("r.json")
         del cfg["generation"]["mode"]
         meta = _build_meta(cfg, _ClassConditionalTask(), runs_completed=1,
                            effective_samples_per_run=[1], real_baseline=True)
-        self.assertIsNone(meta["mode"])
+        self.assertEqual(meta["mode"], "inverse")
 
 
-class ClassConditionalModeNoticeTests(unittest.TestCase):
-    def test_warns_when_class_conditional_task_config_sets_mode(self):
-        cfg = _config("r.json")  # generation.mode: "inverse"
-        notice = class_conditional_mode_notice(cfg, _ClassConditionalTask(), "class_conditional")
-        self.assertIsNotNone(notice)
-        self.assertIn("generation.mode", notice)
-        self.assertIn("inverse", notice)
+class SeedlessMetaTests(unittest.TestCase):
+    """Task 9: meta["seedless"] / meta["profile_path"] are new, additive keys.
 
-    def test_silent_when_class_conditional_config_omits_mode(self):
+    meta["strategy"] already means the task's generation SHAPE ("corruption"
+    vs "class_conditional") and must NOT be repurposed to encode seedless-ness
+    — that was the brief's mistake; these tests pin the corrected contract."""
+
+    def _meta(self, task, mode, seedless, profile_path=None):
         cfg = _config("r.json")
-        del cfg["generation"]["mode"]
-        notice = class_conditional_mode_notice(cfg, _ClassConditionalTask(), "class_conditional")
-        self.assertIsNone(notice)
+        cfg["generation"]["mode"] = mode
+        cfg["generation"]["seedless"] = seedless
+        if profile_path is not None:
+            cfg["generation"]["profile_path"] = profile_path
+        return _build_meta(cfg, task, runs_completed=1,
+                           effective_samples_per_run=[1], real_baseline=True)
 
-    def test_silent_for_corruption_strategy_even_with_mode_set(self):
+    def test_seedless_and_profile_path_for_each_mode_seedless_combination(self):
+        for mode in ("forward", "inverse"):
+            for seedless in (False, True):
+                meta = self._meta(_CorruptionTask(), mode, seedless,
+                                  profile_path="prof.json" if seedless else None)
+                self.assertEqual(meta["seedless"], seedless)
+                self.assertEqual(meta["profile_path"], "prof.json" if seedless else None)
+                # strategy stays the task shape, untouched by mode/seedless.
+                self.assertEqual(meta["strategy"], "corruption")
+                self.assertEqual(meta["mode"], mode)
+
+    def test_seedless_defaults_false_and_profile_path_none_when_absent(self):
+        # Configs predating this feature have no "seedless" key at all.
         cfg = _config("r.json")
-        notice = class_conditional_mode_notice(cfg, _CorruptionTask(), "corruption")
-        self.assertIsNone(notice)
+        meta = _build_meta(cfg, _CorruptionTask(), runs_completed=1,
+                           effective_samples_per_run=[1], real_baseline=True)
+        self.assertFalse(meta["seedless"])
+        self.assertIsNone(meta["profile_path"])
+
+    def test_profile_path_ignored_when_not_seedless(self):
+        meta = self._meta(_CorruptionTask(), "inverse", False, profile_path="prof.json")
+        self.assertIsNone(meta["profile_path"])
+
+    def test_class_conditional_strategy_not_repurposed_by_seedless(self):
+        meta = self._meta(_ClassConditionalTask(), "inverse", True, profile_path="prof.json")
+        self.assertEqual(meta["strategy"], "class_conditional")
+        self.assertTrue(meta["seedless"])
+        self.assertEqual(meta["profile_path"], "prof.json")
+
+    def test_profile_path_resolves_to_default_when_seedless_and_unset(self):
+        # IMPORTANT 2: both shipped configs leave generation.profile_path
+        # commented out, relying on the default _load_generation_profile
+        # resolves internally (framework/data/profiles/<task>_profile.json).
+        # _build_meta must record that SAME resolved default, not None —
+        # profiles are gitignored, so this is the only surviving record of
+        # what generated a seedless benchmark.
+        meta = self._meta(_CorruptionTask(), "forward", True)  # no profile_path key
+        self.assertEqual(
+            meta["profile_path"], os.path.join(DEFAULT_PROFILE_DIR, "gec_profile.json")
+        )
+
+    def test_profile_path_resolves_to_default_for_class_conditional_task(self):
+        meta = self._meta(_ClassConditionalTask(), "inverse", True)  # no profile_path key
+        self.assertEqual(
+            meta["profile_path"], os.path.join(DEFAULT_PROFILE_DIR, "spam_profile.json")
+        )
 
 
 class WriteResultsTests(unittest.TestCase):

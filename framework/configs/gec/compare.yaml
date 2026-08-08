@@ -20,6 +20,8 @@ dataset:
 
 generation:
   mode: "inverse"
+  seedless: false              # true = generate from the profile only, no real seeds
+  # profile_path: "framework/data/profiles/gec_profile.json"   # default shown; read only when seedless
   provider: "openrouter"           # superseded per generation_models entry
   model: "minimax-m3"
   temperature: 1.0

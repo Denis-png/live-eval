@@ -1,7 +1,8 @@
 # Spam multi-model comparison — fills the model-impact grid for spam.
-# Spam always generates class-conditionally (no forward/inverse mode — see
-# generation/config.yaml's comment); this config exists purely to run more
-# generation models over the same sample, not to vary mode.
+# Spam always generates class-conditionally, but still has real inverse/forward
+# modes (see spam/config.yaml's generation comment); this config omits `mode`
+# on purpose so every entry below defaults to "inverse" — it exists purely to
+# run more generation models over the same sample, not to vary mode.
 # Run with:  .venv/bin/python -m scripts.compare_models --config framework/configs/spam/compare.yaml
 api_keys:
   groq: "${GROQ_API_KEY}"
@@ -20,6 +21,8 @@ dataset:
     format: csv
 
 generation:
+  seedless: false              # true = generate from the profile only, no real seeds
+  # profile_path: "framework/data/profiles/spam_profile.json"   # default shown; read only when seedless
   provider: "openrouter"           # superseded per generation_models entry
   model: "minimax-m3"
   temperature: 1.0

@@ -23,6 +23,22 @@ class SpamTask(BaseTask):
     def get_error_types(self) -> list[str]:
         return self._config["error_types"]
 
+    def get_carrier_prompt(self) -> str | None:
+        return self._config.get("carrier_prompt")
+
+    def get_forward_prompt(self) -> str | None:
+        return self._config.get("forward_prompt")
+
+    def get_seedless_class_prompts(self) -> dict[str, str]:
+        return self._config.get("seedless_class_prompts", {})
+
+    def get_seed_pool(self, config: dict, real_data: list[dict], mode: str) -> list[dict]:
+        """Forward mode imitates within a class, so it needs labeled seeds of
+        BOTH classes — parse_row keeps HAM only. Inverse keeps today's pool."""
+        if mode != "forward":
+            return real_data
+        return [r for r in self._load_reference_rows(config) if r.get("text")]
+
     def get_prompt_instruction(self) -> str:
         return self._config["prompt"]
 

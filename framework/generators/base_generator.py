@@ -121,6 +121,18 @@ def _parse_generation(raw: str) -> tuple[str | None, str | None, str | None]:
     )
 
 
+def _accept_pair(corrupted: str | None, gold: str | None) -> str | None:
+    """Return a rejection reason for a generated (corrupted, gold) pair, or None
+    when the pair is acceptable. Shared by seeded and seedless forward loops."""
+    if not corrupted or not gold:
+        return "parse failed"
+    if corrupted.strip() == gold.strip():
+        return "identical corrupted/gold"
+    if len(corrupted.split()) < 3:
+        return f"too short: {corrupted!r}"
+    return None
+
+
 def _judgement_passes(raw: str) -> bool:
     """True iff the judge marks the sample valid AND the correction correct.
     Missing fields default to True (keep) to mirror Denis's parse_judge_output."""
@@ -184,19 +196,17 @@ class BaseGenerator(ABC):
                 raw = self.call_api(prompt)
                 gen_dt = time.monotonic() - t0
                 error_type, corrupted, gold = _parse_generation(raw)
-                if not corrupted or not gold:
-                    if _looks_like_refusal(raw):
-                        print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] model refused: {raw[:60]!r}", flush=True)
-                        refused += 1
+                reason = _accept_pair(corrupted, gold)
+                if reason:
+                    if reason == "parse failed":
+                        if _looks_like_refusal(raw):
+                            print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] model refused: {raw[:60]!r}", flush=True)
+                            refused += 1
+                        else:
+                            print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] parse failed: {raw[:60]!r}", flush=True)
+                            parse_failed += 1
                     else:
-                        print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] parse failed: {raw[:60]!r}", flush=True)
-                        parse_failed += 1
-                    continue
-                if corrupted.strip() == gold.strip():
-                    print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] identical corrupted/gold", flush=True)
-                    continue
-                if len(corrupted.split()) < 3:
-                    print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] too short: {corrupted!r}", flush=True)
+                        print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] {reason}", flush=True)
                     continue
 
                 judge_dt = 0.0
@@ -353,60 +363,266 @@ class BaseGenerator(ABC):
         )
         return synthetic
 
+    def generate_seedless_pairs(
+        self,
+        specs: list[str],
+        prompt: str,
+        error_descriptions: dict[str, str],
+        type_dist: dict[str, float],
+        count_dist: dict[int, float],
+        judge_prompt: str | None = None,
+        judge_call: Callable[[str], str] | None = None,
+        rng=None,
+        request_delay: float = 0.0,
+    ) -> list[dict]:
+        """Forward generation with no real seed: the content comes from a
+        profile spec and the error type from the empirical distribution.
+
+        Returns the same records as generate(): {"original", "corrupted",
+        "error_type"}."""
+        rng = rng or random.Random()
+        synthetic: list[dict] = []
+        judge_fn = judge_call or self.call_api
+        judge_dropped = parse_failed = refused = 0
+
+        total = len(specs)
+        run_start = time.monotonic()
+        print(f"Generating {total} samples (seedless forward) ...", flush=True)
+
+        for i, spec in enumerate(specs, 1):
+            keys = _sample_categories(type_dist, count_dist, rng)
+            error_spec = "; ".join(error_descriptions.get(k, k) for k in keys)
+            t0 = time.monotonic()
+            try:
+                raw = self.call_api(prompt.format(spec=spec, error_spec=error_spec))
+                gen_dt = time.monotonic() - t0
+                error_type, corrupted, gold = _parse_generation(raw)
+                reason = _accept_pair(corrupted, gold)
+                if reason:
+                    if reason == "parse failed" and _looks_like_refusal(raw):
+                        print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] model refused: {raw[:60]!r}", flush=True)
+                        refused += 1
+                    else:
+                        print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] {reason}", flush=True)
+                        parse_failed += reason == "parse failed"
+                    continue
+
+                judge_dt = 0.0
+                if judge_prompt:
+                    t1 = time.monotonic()
+                    judge_raw = judge_fn(judge_prompt.format(sentence=corrupted, correction=gold))
+                    judge_dt = time.monotonic() - t1
+                    if not _judgement_passes(judge_raw):
+                        print(f"[{i}/{total}] gen {gen_dt:.1f}s + judge {judge_dt:.1f}s — [JUDGE] dropped: {corrupted[:50]}", flush=True)
+                        judge_dropped += 1
+                        continue
+
+                synthetic.append({
+                    "original": gold,
+                    "corrupted": corrupted,
+                    "error_type": error_type or ", ".join(keys),
+                })
+                suffix = f" + judge {judge_dt:.1f}s" if judge_prompt else ""
+                print(f"[{i}/{total}] gen {gen_dt:.1f}s{suffix} ✓ ({error_type or ', '.join(keys)})", flush=True)
+                if request_delay > 0:
+                    time.sleep(request_delay)
+            except Exception as e:
+                print(f"[{i}/{total}] failed after {time.monotonic() - t0:.1f}s: {e}", flush=True)
+
+        print(f"Generation phase done in {time.monotonic() - run_start:.1f}s.")
+        print(
+            f"Generated {len(synthetic)} synthetic samples (seedless forward) "
+            f"(judge dropped: {judge_dropped}, parse failed: {parse_failed}, "
+            f"refused: {refused})."
+        )
+        return synthetic
+
+    def generate_carriers(
+        self,
+        specs: list[str],
+        carrier_prompt: str,
+        tag: str,
+        request_delay: float = 0.0,
+    ) -> list[str]:
+        """Synthesize seed texts from profile-derived content specs.
+
+        Seedless *inverse* generation needs clean source texts but no real
+        benchmark text: these carriers are drop-in replacements for real seeds
+        in generate_inverse() / generate_class_conditional(). Fail-soft like the
+        other loops — a refused or unparseable carrier is skipped, not raised.
+
+        Args:
+            specs:          already-rendered spec strings (see
+                            profiling.spec_sampler.render_spec).
+            carrier_prompt: template with a {spec} placeholder.
+            tag:            expected response field, e.g. "Sentence".
+            request_delay:  seconds to sleep after each successful request.
+        """
+        carriers: list[str] = []
+        total = len(specs)
+        refused = parse_failed = 0
+        run_start = time.monotonic()
+        if total:
+            print(f"Synthesizing {total} carriers ...", flush=True)
+
+        for i, spec in enumerate(specs, 1):
+            prompt = carrier_prompt.format(spec=spec)
+            t0 = time.monotonic()
+            try:
+                raw = self.call_api(prompt)
+                dt = time.monotonic() - t0
+                # Refusal check BEFORE _parse_tagged: its bare single-line
+                # fallback would otherwise accept a one-line refusal as the
+                # carrier text. An explicit tag field always wins.
+                tag_re = re.compile(rf"(?im)^\s*{re.escape(tag)}:\s*(.+?)\s*$")
+                if tag_re.search(raw) is None and _looks_like_refusal(raw):
+                    print(f"[{i}/{total}] carrier {dt:.1f}s — [SKIP] model refused: {raw[:60]!r}", flush=True)
+                    refused += 1
+                    continue
+                text = _parse_tagged(raw, tag)
+                if not text:
+                    print(f"[{i}/{total}] carrier {dt:.1f}s — [SKIP] parse failed: {raw[:60]!r}", flush=True)
+                    parse_failed += 1
+                    continue
+                if len(text.split()) < 3:
+                    print(f"[{i}/{total}] carrier {dt:.1f}s — [SKIP] too short: {text!r}", flush=True)
+                    continue
+                carriers.append(text)
+                print(f"[{i}/{total}] carrier {dt:.1f}s ✓", flush=True)
+                if request_delay > 0:
+                    time.sleep(request_delay)
+            except Exception as e:
+                print(f"[{i}/{total}] carrier failed after {time.monotonic() - t0:.1f}s: {e}", flush=True)
+
+        if total:
+            print(
+                f"Synthesized {len(carriers)} carriers in "
+                f"{time.monotonic() - run_start:.1f}s "
+                f"(parse failed: {parse_failed}, refused: {refused})."
+            )
+        return carriers
+
     def generate_class_conditional(
         self,
-        real_seeds: list[dict],
-        seed_field: str,
+        *,
         class_prob: float,
         type_dist: dict[str, float],
         count_dist: dict[int, float],
         error_descriptions: dict[str, str],
         inject_prompt: str,
-        ham_prompt: str,
+        negative_prompt: str,
         positive_label: str,
         negative_label: str,
         sample_size: int,
+        seed_policy: str = "cross_class",
+        real_seeds: list[dict] | None = None,
+        seed_field: str | None = None,
+        forward_prompt: str | None = None,
+        seedless_prompts: dict[str, str] | None = None,
+        specs_by_label: dict[str, list[str]] | None = None,
+        label_field: str = "label",
         judge_prompt: str | None = None,
         judge_call: Callable[[str], str] | None = None,
         request_delay: float = 0.0,
         rng=None,
     ) -> list[dict]:
-        """Symmetric class-conditional generation for classification tasks.
+        """Symmetric class-conditional generation for classification tasks. One
+        loop serves all seeding strategies, selected by `seed_policy`:
 
-        Per sample: draw the target class (P(positive) = class_prob). Positive →
-        inject the sampled signal mix into a seed via inject_prompt (a `Corrupted:`
-        line). Negative → paraphrase the seed via ham_prompt (a `Rewritten:` line).
+        - "cross_class" (default, today's behavior): every draw seeds from the
+          same `real_seeds` pool regardless of which class was drawn. Positive →
+          inject the sampled signal mix into the seed via `inject_prompt` (a
+          `Corrupted:` line). Negative → paraphrase the seed via `negative_prompt`
+          (a `Rewritten:` line).
+        - "same_class": the seed is drawn from the subset of `real_seeds` whose
+          `label_field` matches the drawn class, and both classes are produced via
+          `forward_prompt` (a `Rewritten:` line). Raises RuntimeError if that
+          subset is empty.
+        - "none": no real seed at all — content comes from a per-label spec pool
+          (`specs_by_label`) rendered through `seedless_prompts[label]` (a
+          `Message:` line). The record's "seed" field is "".
+
         Both classes are LLM-authored, so a classifier cannot separate them on
-        authorship artifacts. Seeds are cycled if sample_size exceeds their count.
+        authorship artifacts. Seeds/specs are cycled if sample_size exceeds their
+        count.
 
         Returns records {"text", "label", "technique", "seed"}."""
         rng = rng or random.Random()
         synthetic = []
         judge_fn = judge_call or self.call_api
-        if not real_seeds:
+        if seed_policy in ("cross_class", "same_class") and not real_seeds:
             return synthetic
 
         run_start = time.monotonic()
         print(f"Generating {sample_size} samples (class-conditional) ...", flush=True)
         judge_dropped = parse_failed = refused = 0
+        judge_skip_notice_printed = False
+
+        def _missing_seed(i: int, source) -> bool:
+            """True (and accounted for) iff `source` is falsy. Shared by the
+            cross_class and same_class branches, which both cycle through a
+            seed pool and must skip identically on a missing seed field."""
+            if source:
+                return False
+            print(f"[{i}/{sample_size}] [SKIP] missing seed field {seed_field!r}", flush=True)
+            nonlocal parse_failed
+            parse_failed += 1
+            return True
 
         for i in range(1, sample_size + 1):
-            seed = real_seeds[(i - 1) % len(real_seeds)]
-            source = seed.get(seed_field)
-            if not source:
-                print(f"[{i}/{sample_size}] [SKIP] missing seed field {seed_field!r}", flush=True)
-                parse_failed += 1
-                continue
+            # cross_class's seed is purely index-based ((i-1) % len(real_seeds)) —
+            # it does not depend on the class drawn below. Resolving it (and
+            # skipping on a missing field) BEFORE any rng draw keeps this
+            # policy's rng-consumption sequence identical to the pre-restructure
+            # implementation: a skipped iteration must burn zero rng draws, or
+            # every later draw in the run shifts. same_class can't do this — its
+            # seed choice depends on the drawn label — but it's new code with no
+            # equivalence requirement to preserve.
+            if seed_policy == "cross_class":
+                seed = real_seeds[(i - 1) % len(real_seeds)]
+                source = seed.get(seed_field)
+                if _missing_seed(i, source):
+                    continue
 
             is_positive = rng.random() < class_prob
+            label = positive_label if is_positive else negative_label
+
+            keys: list[str] = []
+            error_spec = ""
             if is_positive:
                 keys = _sample_categories(type_dist, count_dist, rng)
                 error_spec = "; ".join(error_descriptions.get(k, k) for k in keys)
-                prompt = inject_prompt.format(sentence=source, error_spec=error_spec)
-                tag, label, technique = "Corrupted", positive_label, ", ".join(keys)
+            technique = ", ".join(keys) if is_positive else "paraphrase"
+
+            if seed_policy == "cross_class":
+                if is_positive:
+                    prompt = inject_prompt.format(sentence=source, error_spec=error_spec)
+                    tag = "Corrupted"
+                else:
+                    prompt = negative_prompt.format(sentence=source)
+                    tag = "Rewritten"
+            elif seed_policy == "same_class":
+                pool = [row for row in real_seeds if row.get(label_field) == label]
+                if not pool:
+                    raise RuntimeError(
+                        f"seed_policy='same_class' needs seeds labeled {label!r}; the pool has none."
+                    )
+                seed = pool[(i - 1) % len(pool)]
+                source = seed.get(seed_field)
+                if _missing_seed(i, source):
+                    continue
+                prompt = forward_prompt.format(sentence=source, class_name=label)
+                tag = "Rewritten"
+            elif seed_policy == "none":
+                source = None
+                spec = specs_by_label[label][(i - 1) % len(specs_by_label[label])]
+                if is_positive:
+                    prompt = seedless_prompts[label].format(spec=spec, error_spec=error_spec)
+                else:
+                    prompt = seedless_prompts[label].format(spec=spec)
+                tag = "Message"
             else:
-                prompt = ham_prompt.format(sentence=source)
-                tag, label, technique = "Rewritten", negative_label, "paraphrase"
+                raise ValueError(f"unknown seed_policy: {seed_policy!r}")
 
             t0 = time.monotonic()
             try:
@@ -422,7 +638,7 @@ class BaseGenerator(ABC):
                     print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s — [SKIP] parse failed: {raw[:60]!r}", flush=True)
                     parse_failed += 1
                     continue
-                if text.strip() == source.strip():
+                if source and text.strip() == source.strip():
                     print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s — [SKIP] identical to seed", flush=True)
                     continue
                 if len(text.split()) < 3:
@@ -430,7 +646,7 @@ class BaseGenerator(ABC):
                     continue
 
                 judge_dt = 0.0
-                if judge_prompt:
+                if judge_prompt and source:
                     t1 = time.monotonic()
                     judge_raw = judge_fn(judge_prompt.format(sentence=text, correction=source))
                     judge_dt = time.monotonic() - t1
@@ -438,8 +654,18 @@ class BaseGenerator(ABC):
                         print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s + judge {judge_dt:.1f}s — [JUDGE] dropped: {text[:50]}", flush=True)
                         judge_dropped += 1
                         continue
+                elif judge_prompt and not judge_skip_notice_printed:
+                    # seed_policy="none" has no seed to compare against — the judge
+                    # prompts ask whether `text` matches/relates to a counterpart
+                    # seed, so calling it with correction=None (rendered "None")
+                    # would make every sample look wrong and get dropped. Skip the
+                    # judge step entirely for this policy; note it once so a run's
+                    # log doesn't look like judging silently never happened.
+                    print(f"[{i}/{sample_size}] judge configured but skipped: no seed "
+                          f"to compare against (seed_policy='none').", flush=True)
+                    judge_skip_notice_printed = True
 
-                synthetic.append({"text": text, "label": label, "technique": technique, "seed": source})
+                synthetic.append({"text": text, "label": label, "technique": technique, "seed": source or ""})
                 suffix = f" + judge {judge_dt:.1f}s" if judge_prompt else ""
                 print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s{suffix} ✓ ({label}: {technique})", flush=True)
                 if request_delay > 0:

@@ -12,10 +12,11 @@ class FakeModel:
         return ["SPAM"] * len(texts)
 
 
-def _write_session(d, *, created, n_runs, model="m3"):
+def _write_session(d, *, created, n_runs, model="m3", mode=None, seedless=False):
     os.makedirs(os.path.join(d, "generated"))
     meta = {
-        "created": created, "task": "spam", "mode": None, "strategy": "class_conditional",
+        "created": created, "task": "spam", "mode": mode, "seedless": seedless,
+        "strategy": "class_conditional",
         "provider": "openrouter", "model": model, "num_runs": n_runs,
         "runs_completed": n_runs, "partial": False,
         "dataset": {"source": "local", "path": "x.csv", "format": "csv", "sample_size": 2},
@@ -82,6 +83,42 @@ class MergeSessionsTests(unittest.TestCase):
             _write_session(a, created="2026-07-08T00:00:00", n_runs=2)
             with self.assertRaises(ValueError):
                 merge_sessions([a], out, _config())
+
+    def test_forward_and_inverse_sessions_refuse_to_merge(self):
+        # IMPORTANT 4: forward and inverse are genuinely different generation
+        # cells now (not just a label on an identical process), so merging
+        # across them must be refused.
+        with tempfile.TemporaryDirectory() as root:
+            a, b, out = (os.path.join(root, x) for x in ("a", "b", "out"))
+            _write_session(a, created="2026-07-08T00:00:00", n_runs=2, mode="forward")
+            _write_session(b, created="2026-07-14T00:00:00", n_runs=2, mode="inverse")
+            with self.assertRaises(ValueError):
+                merge_sessions([a, b], out, _config())
+
+    def test_seedless_and_seeded_sessions_of_the_same_mode_refuse_to_merge(self):
+        with tempfile.TemporaryDirectory() as root:
+            a, b, out = (os.path.join(root, x) for x in ("a", "b", "out"))
+            _write_session(a, created="2026-07-08T00:00:00", n_runs=2,
+                           mode="inverse", seedless=False)
+            _write_session(b, created="2026-07-14T00:00:00", n_runs=2,
+                           mode="inverse", seedless=True)
+            with self.assertRaises(ValueError):
+                merge_sessions([a, b], out, _config())
+
+    def test_legacy_null_mode_still_merges_with_new_style_inverse(self):
+        # A legacy session with "mode": null (the old _build_meta forced it)
+        # and a new-style session recording "mode": "inverse" explicitly are
+        # the SAME cell (class_conditional's per-strategy default is
+        # "inverse") — merging them must still succeed.
+        with tempfile.TemporaryDirectory() as root:
+            a, b, out = (os.path.join(root, x) for x in ("a", "b", "out"))
+            _write_session(a, created="2026-07-08T00:00:00", n_runs=2, mode=None)
+            _write_session(b, created="2026-07-14T00:00:00", n_runs=2, mode="inverse")
+            with patch("framework.tasks.spam.task.SpamTask.get_model",
+                       lambda self, cfg: FakeModel()):
+                merge_sessions([a, b], out, _config())
+            run_files = sorted(os.listdir(os.path.join(out, "generated")))
+            self.assertEqual(run_files, [f"run_{i}.json" for i in range(1, 5)])
 
 
 if __name__ == "__main__":

@@ -1,14 +1,19 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from scripts.analyze_results import (
+    MODE_MARKERS,
+    _legend_models_modes,
+    _strategy_of,
     dedup_sessions,
     eta_squared,
     kendall_tau_b,
     plot_mode_effect,
     plot_model_impact,
 )
+import scripts.analyze_results as ar
 
 
 class EtaSquaredTests(unittest.TestCase):
@@ -61,31 +66,62 @@ class DedupTests(unittest.TestCase):
         self.assertEqual(dropped, [])
 
 
-def _row(gen_model, eval_model, mean, runs, mode=None, real=0.9, task="spam"):
+def _row(gen_model, eval_model, mean, runs, strategy=None, real=0.9, task="spam"):
     metric = "f1" if task == "spam" else "errant.f0.5"
-    return {"task": task, "mode": mode, "gen_model": gen_model, "eval_model": eval_model,
-            "metric": metric, "gen_mean": mean, "gen_std": 0.01, "real": real, "runs": runs}
+    return {"task": task, "strategy": strategy, "gen_model": gen_model,
+            "eval_model": eval_model, "metric": metric, "gen_mean": mean,
+            "gen_std": 0.01, "real": real, "runs": runs}
 
 
 class ModeAwarePlottingTests(unittest.TestCase):
-    """spam has no real mode (SpamTask.get_generation_strategy() is always
-    class_conditional) — its rows all carry mode=None. Filenames/figures must
-    reflect that there's no mode axis, not literally embed the string "None"."""
+    """Rows whose strategy is the "-" sentinel (no split axis) must not embed
+    it into filenames/figures — same treatment a single-strategy task (e.g.
+    spam with no seedless runs mixed in) gets.
 
-    def test_model_impact_filename_has_no_mode_suffix_when_mode_is_none(self):
+    Note: `_strategy_of` itself no longer produces "-" for ANY meta, legacy or
+    otherwise (see IMPORTANT 1 / test_analyze_strategy_grouping.py) — a
+    legacy spam session with mode=None now resolves to "inverse", not "-",
+    which is exactly the fix (it lets that session group with, and be
+    superseded by, a fresh "inverse" re-run instead of forming its own stray
+    bucket). The "-" branch in plot_model_impact below is therefore dead code
+    reachable only by passing it directly, as this test does — kept as a
+    defensive fallback and tested in isolation from `_strategy_of`."""
+
+    def test_model_impact_filename_has_no_suffix_for_dash_strategy(self):
         rows = [
-            _row("model-a", "ev1", 0.7, [0.68, 0.70, 0.72]),
-            _row("model-b", "ev1", 0.5, [0.48, 0.50, 0.52]),
+            _row("model-a", "ev1", 0.7, [0.68, 0.70, 0.72], strategy="-"),
+            _row("model-b", "ev1", 0.5, [0.48, 0.50, 0.52], strategy="-"),
         ]
-        with tempfile.TemporaryDirectory() as out_dir:
-            path = plot_model_impact(rows, "spam", None, out_dir)
-            self.assertIsNotNone(path)
-            self.assertEqual(os.path.basename(path), "model_impact_spam.png")
+        captured = {}
+
+        def _fake_save(fig, path):
+            captured["title"] = fig._suptitle.get_text()
+            import matplotlib.pyplot as plt
+            plt.close(fig)
+            return path
+
+        with tempfile.TemporaryDirectory() as out_dir, \
+             mock.patch.object(ar, "_save", side_effect=_fake_save):
+            path = plot_model_impact(rows, "spam", "-", out_dir)
+        self.assertIsNotNone(path)
+        self.assertEqual(os.path.basename(path), "model_impact_spam.png")
+        self.assertTrue(captured["title"].startswith("spam:"))
+        self.assertNotIn("-", captured["title"].split(":", 1)[0])
+
+    def test_legacy_spam_session_now_resolves_to_inverse_not_dash(self):
+        # Regression guard for IMPORTANT 1: a realistic legacy spam session
+        # (mode=None, strategy="class_conditional" — _build_meta always
+        # writes "strategy") must group as "inverse", not fall into the dash
+        # bucket the test above exercises directly.
+        legacy_strategy = _strategy_of(
+            {"mode": None, "strategy": "class_conditional", "task": "spam", "model": "m"}
+        )
+        self.assertEqual(legacy_strategy, "inverse")
 
     def test_model_impact_filename_keeps_mode_suffix_for_real_modes(self):
         rows = [
-            _row("model-a", "ev1", 0.7, [0.68, 0.70, 0.72], mode="inverse", task="gec"),
-            _row("model-b", "ev1", 0.5, [0.48, 0.50, 0.52], mode="inverse", task="gec"),
+            _row("model-a", "ev1", 0.7, [0.68, 0.70, 0.72], strategy="inverse", task="gec"),
+            _row("model-b", "ev1", 0.5, [0.48, 0.50, 0.52], strategy="inverse", task="gec"),
         ]
         with tempfile.TemporaryDirectory() as out_dir:
             path = plot_model_impact(rows, "gec", "inverse", out_dir)
@@ -98,6 +134,34 @@ class ModeAwarePlottingTests(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as out_dir:
             self.assertIsNone(plot_mode_effect(rows, "spam", out_dir))
+
+
+class SeedlessModeMarkersTests(unittest.TestCase):
+    """MUST-FIX MINOR A: the two seedless cells need their own markers (they
+    used to both fall back to the shared "s" marker, indistinguishable from
+    each other and from an unrecognized strategy) and a legend row."""
+
+    def test_mode_markers_has_distinct_entries_for_seedless_cells(self):
+        for key in ("forward+seedless", "inverse+seedless"):
+            self.assertIn(key, MODE_MARKERS)
+        markers = list(MODE_MARKERS.values())
+        self.assertEqual(len(markers), len(set(markers)), "marker shapes collide")
+        # The fallback marker plot_identity uses for an unrecognized strategy
+        # (see MODE_MARKERS.get(r["strategy"], "s")) must stay free so a
+        # genuinely-unknown strategy remains visually distinct in the legend.
+        self.assertNotIn("s", markers)
+
+    def test_legend_includes_seedless_mode_labels(self):
+        plt = ar._plt()
+        fig = plt.figure()
+        try:
+            rows = [{"gen_model": "m", "strategy": "forward+seedless"}]
+            _legend_models_modes(fig, rows, modes=True)
+            labels = {h.get_label() for h in fig.legends[0].legend_handles}
+        finally:
+            plt.close(fig)
+        self.assertIn("forward+seedless", labels)
+        self.assertIn("inverse+seedless", labels)
 
 
 if __name__ == "__main__":
