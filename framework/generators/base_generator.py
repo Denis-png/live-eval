@@ -556,6 +556,7 @@ class BaseGenerator(ABC):
         run_start = time.monotonic()
         print(f"Generating {sample_size} samples (class-conditional) ...", flush=True)
         judge_dropped = parse_failed = refused = 0
+        judge_skip_notice_printed = False
 
         def _missing_seed(i: int, source) -> bool:
             """True (and accounted for) iff `source` is falsy. Shared by the
@@ -645,7 +646,7 @@ class BaseGenerator(ABC):
                     continue
 
                 judge_dt = 0.0
-                if judge_prompt:
+                if judge_prompt and source:
                     t1 = time.monotonic()
                     judge_raw = judge_fn(judge_prompt.format(sentence=text, correction=source))
                     judge_dt = time.monotonic() - t1
@@ -653,6 +654,16 @@ class BaseGenerator(ABC):
                         print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s + judge {judge_dt:.1f}s — [JUDGE] dropped: {text[:50]}", flush=True)
                         judge_dropped += 1
                         continue
+                elif judge_prompt and not judge_skip_notice_printed:
+                    # seed_policy="none" has no seed to compare against — the judge
+                    # prompts ask whether `text` matches/relates to a counterpart
+                    # seed, so calling it with correction=None (rendered "None")
+                    # would make every sample look wrong and get dropped. Skip the
+                    # judge step entirely for this policy; note it once so a run's
+                    # log doesn't look like judging silently never happened.
+                    print(f"[{i}/{sample_size}] judge configured but skipped: no seed "
+                          f"to compare against (seed_policy='none').", flush=True)
+                    judge_skip_notice_printed = True
 
                 synthetic.append({"text": text, "label": label, "technique": technique, "seed": source or ""})
                 suffix = f" + judge {judge_dt:.1f}s" if judge_prompt else ""

@@ -104,6 +104,35 @@ class SeedPolicyTests(unittest.TestCase):
         self.assertIn("topic: prizes", gen.prompts[0])
         self.assertIn("insert a link", gen.prompts[0])
 
+    def test_none_policy_skips_judge_when_no_seed_to_compare(self):
+        # IMPORTANT 3: seed_policy="none" has no seed ("source" is None), so
+        # judge_prompt.format(sentence=text, correction=source) would render
+        # "Counterpart: None" — spam's inverse_judge_prompt asks whether the
+        # counterpart is a natural legitimate message, sees "None", and
+        # rejects everything. Judging must be skipped entirely for this
+        # policy (not called with correction=None) so the sample survives
+        # and the judge is never invoked at all.
+        gen = FakeGenerator("Message: FREE prize, click http://x.com")
+        judge_calls = []
+
+        def rejecting_judge(prompt):
+            judge_calls.append(prompt)
+            return "Redundancy: trivial\nCorrection: incorrect"
+
+        out = gen.generate_class_conditional(
+            real_seeds=None, sample_size=1, seed_policy="none",
+            seedless_prompts={"SPAM": "spam {spec} using {error_spec}",
+                              "HAM": "ham {spec}"},
+            specs_by_label={"SPAM": ["topic: prizes; roughly 12 words"],
+                            "HAM": ["topic: chat; roughly 8 words"]},
+            judge_prompt="Is {sentence} vs counterpart {correction} legit?",
+            judge_call=rejecting_judge,
+            rng=random.Random(0), **COMMON,
+        )
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["label"], "SPAM")
+        self.assertEqual(judge_calls, [])
+
     def test_none_policy_negative_class_uses_its_own_prompt(self):
         gen = FakeGenerator("Message: are we still on for lunch tomorrow")
         common = {**COMMON, "class_prob": 0.0}

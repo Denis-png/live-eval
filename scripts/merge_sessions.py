@@ -1,10 +1,21 @@
-"""Merge N sessions for the SAME (task, generation model) into one session.
+"""Merge N sessions for the SAME (task, generation model, mode, seedless) cell
+into one session.
 
-One-off consolidation tool: for spam, `generation.mode` never affected
-generation (see `SpamTask.get_generation_strategy`), so a model that was run
-once under a "forward" label and once under an "inverse" label produced two
-sets of real, independent replicate runs of the identical process — not two
-different things. This concatenates their `generated/run_*.json` (renumbered)
+One-off consolidation tool. Forward and inverse are genuinely different
+generation cells now — not just a label on an otherwise-identical process —
+and seedless is a third, independent axis, so a session may only be merged
+with another that matches on all four: task, generation model, mode, and
+seedless. Only sessions that are real, independent replicate runs of the
+IDENTICAL process get concatenated.
+
+`mode` is compared via the same per-strategy default `scripts.analyze_results
+._strategy_of` uses (mode-or-else-inverse-for-class_conditional-else-forward),
+so an archived session with `"mode": null` (the old `_build_meta` forced that
+for spam) still lines up correctly against a new-style session of the same
+cell that records its resolved mode explicitly, instead of being rejected as
+a false mismatch or — worse — merged with a session from a different cell.
+
+This concatenates the matching sessions' `generated/run_*.json` (renumbered)
 into one output session, then reuses `scripts.rescore_session.rescore_session`
 to recompute results.json/profile.json from the combined run count. No new
 LLM calls; no new scoring logic.
@@ -23,6 +34,7 @@ import sys
 import yaml
 
 from framework.main import _expand_env_vars, _load_dotenv
+from scripts.analyze_results import _strategy_of
 from scripts.rescore_session import _load_json, _run_files, rescore_session
 
 
@@ -31,12 +43,13 @@ def merge_sessions(session_dirs, out_dir, config, *, plots=False):
         raise ValueError("merge_sessions needs at least 2 source session dirs")
 
     metas = [_load_json(os.path.join(d, "results.json"))["meta"] for d in session_dirs]
-    task, model = metas[0]["task"], metas[0]["model"]
+    task, model, cell = metas[0]["task"], metas[0]["model"], _strategy_of(metas[0])
     for d, m in zip(session_dirs, metas):
-        if (m["task"], m["model"]) != (task, model):
+        if (m["task"], m["model"], _strategy_of(m)) != (task, model, cell):
             raise ValueError(
-                f"session {d} is ({m['task']}, {m['model']}), expected ({task}, {model}) "
-                f"— merge_sessions only combines replicate runs of the SAME task+model."
+                f"session {d} is ({m['task']}, {m['model']}, {_strategy_of(m)}), expected "
+                f"({task}, {model}, {cell}) — merge_sessions only combines replicate runs "
+                f"of the SAME task+model+mode+seedless cell."
             )
 
     real_samples = [_load_json(os.path.join(d, "real_sample.json"))
