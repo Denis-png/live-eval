@@ -1,0 +1,64 @@
+api_keys:
+  groq: "${GROQ_API_KEY}"
+  openai: "${OPENAI_API_KEY}"
+  openrouter: "${OPENROUTER_API_KEY}"
+  mistral: "${MISTRAL_API_KEY}"
+  minimax: "${MINIMAX_API_KEY}"
+  anthropic: "${ANTHROPIC_API_KEY}"
+  google: "${GOOGLE_API_KEY}"
+  huggingface: "${HF_TOKEN}"
+
+# ── Dataset ─────────────────────────────────────────────────────────────────
+# TweetEval sentiment: 3-class Twitter data (NEG=0, NEU=1, POS=2).
+# Same benchmark used to train the bertweet and RoBERTa sentiment models below.
+dataset:
+  source: huggingface
+  huggingface:
+    name: "cardiffnlp/tweet_eval"
+    subset: "sentiment"
+    split: "test"
+    streaming: true
+
+# ── Generation ───────────────────────────────────────────────────────────────
+# Strategy: "corruption" (default) — the LLM rewrites a real tweet, injecting
+# one of the sentiment error types defined in configs/tasks/sentiment.json.
+# Only "forward" mode is meaningful for corruption tasks (text→text, no class
+# conditioning). Judge is disabled — the prompt format is deterministic enough.
+generation:
+  mode: forward
+  seedless: false
+  provider: "openrouter"
+  model: "deepseek/deepseek-v4-flash"
+  temperature: 0.9
+  max_tokens: 512
+  num_runs: 3
+  sample_size: 150
+  timeout: 300
+  max_retries: 2
+  request_delay: 2
+
+judge:
+  enabled: false
+
+evaluation:
+  real_baseline: true
+
+task:
+  name: "sentiment"
+  variant: "corruption"
+
+# ── Task Models ──────────────────────────────────────────────────────────────
+# Both models were fine-tuned on TweetEval sentiment — the same benchmark
+# we draw our seeds from, so results are comparable to published scores.
+task_models:
+  - name: "finiteautomata/bertweet-base-sentiment-analysis"
+    type: "bertweet"
+  - name: "lxyuan/distilbert-base-multilingual-cased-sentiments-student"
+    type: "multilingual"
+
+compute:
+  device: cpu
+
+output:
+  base_dir: "framework/data/runs"
+  plots: true
