@@ -44,7 +44,7 @@ generation:
   temperature: 1.0             # CoT 3-step prompt benefits from higher T
   max_tokens: 1024             # required by Anthropic; ignored by OpenAI-compatible providers
   num_runs: 3                  # repeat N times → outputs mean ± std
-  sample_size: 150            # synthetic samples per run (single source of truth;
+  sample_size: 150             # synthetic samples per run (single source of truth;
                               # dataset pool is loaded to match)
   class_balance: empirical     # P(SPAM) for class-conditional generation: empirical | a float 0-1
   timeout: 300                 # per-request HTTP timeout in seconds (SDK default: 600)
