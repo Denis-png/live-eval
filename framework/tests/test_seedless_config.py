@@ -157,7 +157,7 @@ class ErrorDistLoadedForSeedlessForwardTests(unittest.TestCase):
             config = _pipeline_config(seedless=True, base_dir=os.path.join(d, "runs"))
             loader = mock.Mock(return_value={"type_dist": {"R:VERB:TENSE": 1.0},
                                              "count_dist": {1: 1.0}})
-            with mock.patch.object(pipeline, "load_task", lambda name: _FakeCorruptionTask()), \
+            with mock.patch.object(pipeline, "load_task", lambda name, task_cfg=None: _FakeCorruptionTask()), \
                  mock.patch.object(pipeline, "load_generator", lambda c: _FakeGenerator()), \
                  mock.patch.object(pipeline, "load_real_data", lambda cfg, task: []), \
                  mock.patch.object(pipeline, "_load_generation_profile", lambda cfg, task: _FAKE_PROFILE), \
@@ -169,7 +169,7 @@ class ErrorDistLoadedForSeedlessForwardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             config = _pipeline_config(seedless=False, base_dir=os.path.join(d, "runs"))
             loader = mock.Mock(return_value={"type_dist": {}, "count_dist": {}})
-            with mock.patch.object(pipeline, "load_task", lambda name: _FakeCorruptionTask()), \
+            with mock.patch.object(pipeline, "load_task", lambda name, task_cfg=None: _FakeCorruptionTask()), \
                  mock.patch.object(pipeline, "load_generator", lambda c: _FakeGenerator()), \
                  mock.patch.object(pipeline, "load_real_data", lambda cfg, task: []), \
                  mock.patch.object(pipeline, "load_error_distribution", loader):
