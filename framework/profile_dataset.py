@@ -102,6 +102,46 @@ def _build_topic_call(config: dict):
     return pipeline.load_generator(cfg).call_api
 
 
+def _fmt_length(words: dict[str, Any]) -> str:
+    """One-line digest of a length_distribution's "words" block."""
+    bins = words.get("bins") or {}
+    quantiles = words.get("quantiles") or {}
+    busiest = max(bins, key=bins.get) if bins else "-"
+    return (f"mostly {busiest} words "
+            f"(p50 {quantiles.get('p50', 0)}, p90 {quantiles.get('p90', 0)})")
+
+
+def _fmt_style(style: dict[str, Any], limit: int = 4) -> str:
+    """Top style features by rate. punctuation_density is a mean, not a rate,
+    so it is reported separately rather than ranked alongside the others."""
+    rates = sorted(
+        ((k[:-5].replace("_", " "), v) for k, v in style.items()
+         if k.endswith("_rate") and v),
+        key=lambda kv: -kv[1],
+    )
+    head = ", ".join(f"{name} {rate:.0%}" for name, rate in rates[:limit]) or "none"
+    return f"{head}; punct density {style.get('punctuation_density', 0):.2f}"
+
+
+def _fmt_vocab(vocab: dict[str, Any]) -> str:
+    return (f"TTR {vocab.get('type_token_ratio', 0):.3f}, "
+            f"hapax {vocab.get('hapax_fraction', 0):.0%}, "
+            f"avg word {vocab.get('avg_word_length', 0):.1f} chars")
+
+
+def _fmt_syntax(syntax: dict[str, Any]) -> str:
+    top_pos = sorted((syntax.get("pos_dist") or {}).items(), key=lambda kv: -kv[1])[:3]
+    return (f"depth {(syntax.get('parse_depth') or {}).get('mean', 0):.1f}, "
+            f"clauses {(syntax.get('clauses_per_text') or {}).get('mean', 0):.1f}, "
+            f"top POS " + "/".join(f"{pos} {rate:.0%}" for pos, rate in top_pos))
+
+
+def _fmt_topics(block: dict[str, Any], limit: int = 3) -> str:
+    top = sorted((block.get("topics") or {}).items(),
+                 key=lambda item: -item[1]["fraction"])[:limit]
+    return ", ".join(f"{name} ({b['fraction']:.0%})" for name, b in top) or "none"
+
+
 def _profile_gec(config: dict[str, Any], output: str, topic_call=None, topic_sample_size: int = 200) -> str:
     """Profile normalized GEC rows using the existing dataset loader."""
     from framework.pipeline import load_real_data, load_task
@@ -147,14 +187,20 @@ def _profile_gec(config: dict[str, Any], output: str, topic_call=None, topic_sam
     print(f"Avg incorrect word count : {profile['incorrect_word_count']['mean']}")
     print(f"Avg correct word count   : {profile['correct_word_count']['mean']}")
     print(f"Avg similarity           : {profile['similarity']['stats']['mean']}")
-    print(f"Output                   : {output_path}")
+    lengths = (profile.get("length_distributions") or {}).get("correct") or {}
+    if lengths.get("words"):
+        print(f"Correct length           : {_fmt_length(lengths['words'])}")
+    style = (profile.get("style") or {}).get("correct")
+    if style:
+        print(f"Correct style            : {_fmt_style(style)}")
+    vocabulary = (profile.get("vocabulary") or {}).get("correct")
+    if vocabulary:
+        print(f"Correct vocabulary       : {_fmt_vocab(vocabulary)}")
+    if profile.get("syntax"):
+        print(f"Correct syntax           : {_fmt_syntax(profile['syntax'])}")
     if "topics" in profile:
-        top = sorted(
-            profile["topics"]["topics"].items(),
-            key=lambda item: -item[1]["fraction"],
-        )[:3]
-        print("Top topics               : "
-              + ", ".join(f"{name} ({block['fraction']:.0%})" for name, block in top))
+        print(f"Top topics               : {_fmt_topics(profile['topics'])}")
+    print(f"Output                   : {output_path}")
     return output_path
 
 
@@ -201,10 +247,23 @@ def _profile_spam(config: dict[str, Any], output: str, topic_call=None, topic_sa
         print(f"  {label}:")
         for signal, rate in stats.items():
             print(f"    {signal:<16}: {rate:.2%}")
-    for label, block in (profile.get("topics_per_label") or {}).items():
-        top = sorted(block["topics"].items(), key=lambda item: -item[1]["fraction"])[:3]
-        print(f"  {label} topics: "
-              + ", ".join(f"{name} ({b['fraction']:.0%})" for name, b in top))
+    lengths = profile.get("length_distributions_per_label") or {}
+    styles = profile.get("style_per_label") or {}
+    vocabularies = profile.get("vocabulary_per_label") or {}
+    topics = profile.get("topics_per_label") or {}
+    if lengths or styles or vocabularies or topics:
+        print()
+        print("Characteristics per label:")
+        for label in sorted(set(lengths) | set(styles) | set(vocabularies) | set(topics)):
+            print(f"  {label}:")
+            if (lengths.get(label) or {}).get("words"):
+                print(f"    length    : {_fmt_length(lengths[label]['words'])}")
+            if styles.get(label):
+                print(f"    style     : {_fmt_style(styles[label])}")
+            if vocabularies.get(label):
+                print(f"    vocabulary: {_fmt_vocab(vocabularies[label])}")
+            if topics.get(label):
+                print(f"    topics    : {_fmt_topics(topics[label])}")
     print(f"\nOutput     : {output_path}")
     return output_path
 

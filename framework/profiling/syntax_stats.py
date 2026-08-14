@@ -7,6 +7,7 @@ anyway. All spaCy access is lazy: importing this module never imports spaCy.
 
 from __future__ import annotations
 
+import sys
 from collections import Counter
 
 from framework.profiling.dataset_profiler import numeric_stats
@@ -45,7 +46,8 @@ def syntax_profile(texts: list[str], nlp=None) -> dict | None:
     available so callers can simply omit the block."""
     nlp = nlp or _load_nlp()
     if nlp is None:
-        print("[WARN] spaCy unavailable — skipping syntax profile", flush=True)
+        print("[WARN] spaCy unavailable — skipping syntax profile",
+              file=sys.stderr, flush=True)
         return None
 
     pos_counter: Counter[str] = Counter()

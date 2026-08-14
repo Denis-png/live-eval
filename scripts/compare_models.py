@@ -61,7 +61,15 @@ def _per_model_config(base: dict, entry: dict) -> dict:
     model = cfg["generation"]["model"]
 
     base_dir = (cfg.get("output") or {}).get("base_dir", "framework/data/runs")
-    session = f"{_slug(provider)}_{_slug(model)}"
+    # The generation cell is part of the session identity: without it a seedless
+    # comparison would overwrite the seeded one for the same provider/model.
+    gen = cfg["generation"]
+    cell = gen.get("mode") or ""
+    if gen.get("seedless"):
+        cell = f"{cell}_seedless" if cell else "seedless"
+    session = "_".join(
+        part for part in (_slug(provider), _slug(model), _slug(cell) if cell else "") if part
+    )
     cfg.setdefault("output", {})["base_dir"] = base_dir
     cfg["output"]["session_id"] = session
     return cfg

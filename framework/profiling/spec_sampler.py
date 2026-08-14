@@ -81,6 +81,21 @@ def load_profile(path: str, topics_key: str = "topics") -> dict:
                 f"the profile was written without successful topic labeling. "
                 f"{_PROFILE_HELP}"
             )
+
+    # Topics alone are not enough: sample_content_spec also draws a length and a
+    # style, and a profile missing those blocks would only blow up deep inside
+    # the run loop — after the real baseline has already been evaluated.
+    if topics_key == "topics_per_label":
+        companions = ("length_distributions_per_label", "style_per_label")
+    else:
+        companions = ("length_distributions", "style")
+    for block in companions:
+        if not profile.get(block):
+            raise RuntimeError(
+                f"Profile {path!r} has no {block!r} block, which seedless "
+                f"generation needs to sample sentence length and style. It was "
+                f"most likely written by an older profiler. {_PROFILE_HELP}"
+            )
     return profile
 
 

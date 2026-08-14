@@ -114,7 +114,8 @@ def profile_topics(
     Consolidation is retried once on a parse failure; if both attempts fail
     the normalized raw-label distribution is returned as the topics (with a
     note). Raw labels no canonical topic claimed become their own topic so
-    fraction mass is preserved."""
+    fraction mass is preserved, and each label is counted under exactly one
+    topic, so the fractions always total 1."""
     rng = rng or random.Random(0)
     sample = list(texts)
     if len(sample) > sample_size:
@@ -151,18 +152,39 @@ def profile_topics(
             label: {"description": "", "members": [label]} for label in raw_counts
         }
 
-    claimed = {m for block in consolidated.values() for m in block["members"]}
+    # Partition the raw labels: every label belongs to exactly ONE canonical
+    # topic (first claimant wins). The model sometimes lists the same raw label
+    # under two topics; counting it in both would inflate their fractions past
+    # a total of 1.
+    owner: dict[str, str] = {}
+    for name, block in consolidated.items():
+        for member in block["members"]:
+            owner.setdefault(member, name)
+
+    # A raw label no canonical topic claimed becomes its own topic so fraction
+    # mass is preserved. When a canonical topic already carries that exact name,
+    # fold the label into it — replacing the block (the previous behaviour) threw
+    # away every other member's mass.
     for label in raw_counts:
-        if label not in claimed:
+        if label in owner:
+            continue
+        if label in consolidated:
+            consolidated[label]["members"].append(label)
+        else:
             consolidated[label] = {"description": "", "members": [label]}
+        owner[label] = label
+
+    counts_by_topic: Counter = Counter()
+    for member, count in raw_counts.items():
+        counts_by_topic[owner[member]] += count
 
     n_labeled = len(labeled)
     topics = {}
     for name, block in consolidated.items():
-        members = set(block["members"])
-        count = sum(raw_counts.get(member, 0) for member in members)
+        count = counts_by_topic.get(name, 0)
         if count == 0:
             continue
+        members = {m for m in block["members"] if owner.get(m) == name}
         examples = [
             text[:_EXAMPLE_TRUNCATE] for text, label in labeled if label in members
         ][:_EXAMPLES_PER_TOPIC]
