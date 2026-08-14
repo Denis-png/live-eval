@@ -537,7 +537,8 @@ class BaseGenerator(ABC):
         - "same_class": the seed is drawn from the subset of `real_seeds` whose
           `label_field` matches the drawn class, and both classes are produced via
           `forward_prompt` (a `Rewritten:` line). Raises RuntimeError if that
-          subset is empty.
+          subset is empty. Nothing is injected, so the recorded technique is
+          "imitation" for both classes.
         - "none": no real seed at all — content comes from a per-label spec pool
           (`specs_by_label`) rendered through `seedless_prompts[label]` (a
           `Message:` line). The record's "seed" field is "".
@@ -552,6 +553,19 @@ class BaseGenerator(ABC):
         judge_fn = judge_call or self.call_api
         if seed_policy in ("cross_class", "same_class") and not real_seeds:
             return synthetic
+        if seed_policy == "none":
+            # Both dicts are indexed by the drawn label inside the loop. Check
+            # them here so a task that supplies only one class fails before the
+            # first API call instead of KeyError-ing partway through a paid run.
+            for name, mapping in (("seedless_prompts", seedless_prompts or {}),
+                                  ("specs_by_label", specs_by_label or {})):
+                missing = [lbl for lbl in (positive_label, negative_label)
+                           if not mapping.get(lbl)]
+                if missing:
+                    raise RuntimeError(
+                        f"seed_policy='none' needs {name} entries for every class; "
+                        f"missing or empty: {', '.join(missing)}."
+                    )
 
         run_start = time.monotonic()
         print(f"Generating {sample_size} samples (class-conditional) ...", flush=True)
@@ -587,12 +601,18 @@ class BaseGenerator(ABC):
             is_positive = rng.random() < class_prob
             label = positive_label if is_positive else negative_label
 
+            # same_class imitates a seed of the target class: it injects nothing,
+            # so it neither samples a signal mix nor reports one as its technique.
+            injects = is_positive and seed_policy in ("cross_class", "none")
             keys: list[str] = []
             error_spec = ""
-            if is_positive:
+            if injects:
                 keys = _sample_categories(type_dist, count_dist, rng)
                 error_spec = "; ".join(error_descriptions.get(k, k) for k in keys)
-            technique = ", ".join(keys) if is_positive else "paraphrase"
+            if seed_policy == "same_class":
+                technique = "imitation"
+            else:
+                technique = ", ".join(keys) if is_positive else "paraphrase"
 
             if seed_policy == "cross_class":
                 if is_positive:

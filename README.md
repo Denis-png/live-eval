@@ -203,10 +203,11 @@ CLI overrides: `--mode forward|inverse`, `--seedless`/`--no-seedless`.
 
 ### Fail-fast
 
-A task that hasn't defined the prompt a requested cell needs (e.g. GEC has no
-`get_seedless_class_prompts` — that accessor is `class_conditional`-only) raises
-`RuntimeError` before any API call, naming the task, the `(mode, seedless)` cell, and
-the missing accessor — never a silent fallback to a different cell.
+A task that hasn't defined the prompt a requested cell needs (e.g. a corruption task
+with no `seedless_forward_prompt`, or a classification task with no `carrier_prompt`)
+raises `RuntimeError` before any API call, naming the task, the `(mode, seedless)` cell,
+and the missing accessor — never a silent fallback to a different cell. Classification
+forward mode also fails fast when the labeled seed pool is missing one of the classes.
 
 ### Seedless prerequisite: profiling
 

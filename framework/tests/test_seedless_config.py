@@ -58,7 +58,10 @@ class LoadGenerationProfileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "p.json")
             with open(path, "w", encoding="utf-8") as f:
-                json.dump({"profile_version": 2, "topics": {"a": {"fraction": 1.0}}}, f)
+                json.dump({"profile_version": 2,
+                           "topics": {"a": {"fraction": 1.0}},
+                           "length_distributions": {"correct": {"words": {"bins": {"6-10": 1.0}}}},
+                           "style": {"correct": {}}}, f)
             profile = _load_generation_profile(
                 _base_config(seedless=True, profile_path=path), FakeTask()
             )

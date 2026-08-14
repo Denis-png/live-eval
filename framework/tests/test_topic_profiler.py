@@ -109,3 +109,45 @@ class ProfileTopicsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TopicPartitionTests(unittest.TestCase):
+    """Fractions must total 1: every raw label counts under exactly one topic,
+    and an unclaimed label must never displace a same-named canonical topic."""
+
+    TEXTS = ["t1", "t2", "t3", "t4"]
+
+    def _profile(self, consolidation, labels="1: alpha\n2: alpha\n3: beta\n4: gamma"):
+        call = FakeCallApi([labels, json.dumps(consolidation)])
+        return profile_topics(self.TEXTS, call, sample_size=10, batch_size=10)
+
+    def test_duplicate_member_is_not_double_counted(self):
+        # "alpha" is listed under BOTH topics; counting it twice would make the
+        # fractions sum to 1.5.
+        result = self._profile({
+            "money": {"description": "", "members": ["alpha", "beta"]},
+            "other": {"description": "", "members": ["alpha", "gamma"]},
+        })
+        self.assertAlmostEqual(sum(t["fraction"] for t in result["topics"].values()), 1.0)
+        self.assertAlmostEqual(result["topics"]["money"]["fraction"], 0.75)  # alpha x2 + beta
+        self.assertAlmostEqual(result["topics"]["other"]["fraction"], 0.25)  # gamma only
+
+    def test_unclaimed_label_does_not_displace_a_same_named_topic(self):
+        # A canonical topic is literally named "gamma" while the raw label
+        # "gamma" is unclaimed; the old code replaced the block and lost the
+        # alpha/beta mass entirely.
+        result = self._profile({
+            "gamma": {"description": "d", "members": ["alpha", "beta"]},
+        })
+        self.assertAlmostEqual(sum(t["fraction"] for t in result["topics"].values()), 1.0)
+        self.assertAlmostEqual(result["topics"]["gamma"]["fraction"], 1.0)
+        self.assertEqual(result["topics"]["gamma"]["description"], "d")
+
+    def test_unclaimed_label_still_becomes_its_own_topic(self):
+        result = self._profile({
+            "money": {"description": "", "members": ["alpha"]},
+        })
+        self.assertAlmostEqual(sum(t["fraction"] for t in result["topics"].values()), 1.0)
+        self.assertAlmostEqual(result["topics"]["money"]["fraction"], 0.5)
+        self.assertAlmostEqual(result["topics"]["beta"]["fraction"], 0.25)
+        self.assertAlmostEqual(result["topics"]["gamma"]["fraction"], 0.25)

@@ -117,3 +117,22 @@ class SpamCellDispatchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ForwardSeededFailFastTests(unittest.TestCase):
+    """The last of the five unsupported-cell guards to gain coverage: spam
+    forward+seeded needs a forward_prompt, and must say so before any API call."""
+
+    def test_missing_forward_prompt_names_task_cell_and_accessor(self):
+        task = SpamTask()
+        generator = mock.Mock()
+        with mock.patch.object(SpamTask, "get_forward_prompt", return_value=None):
+            with self.assertRaises(RuntimeError) as ctx:
+                _run_generation(generator, task, _config("forward", False),
+                                [{"incorrect": "x"}], DIST, None, 0.5, profile=None)
+        message = str(ctx.exception)
+        self.assertIn("spam", message)
+        self.assertIn("mode=forward", message)
+        self.assertIn("seedless=false", message)
+        self.assertIn("forward_prompt", message)
+        self.assertFalse(generator.generate_class_conditional.called)
