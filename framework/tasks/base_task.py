@@ -110,8 +110,30 @@ class BaseTask(ABC):
           "corruption"        — corrupt a source text (forward/inverse); text→text tasks.
           "class_conditional" — sample a target class, then generate an example of it;
                                 classification tasks. Ignores generation.mode.
+          "structured"        — generate a whole structured benchmark artifact from
+                                a profile/spec; mode is not applicable.
         Default "corruption"."""
         return "corruption"
+
+    def build_structured_generation_prompt(self, profile: dict, rng=None) -> str:
+        """Return one profile-driven structured generation prompt.
+
+        Structured tasks override this. Provider classes remain ontology-agnostic:
+        they only receive the prompt string and return text.
+        """
+        raise NotImplementedError(
+            f"{self.get_task_name()} does not support structured generation."
+        )
+
+    def parse_structured_generation(self, text: str) -> dict | None:
+        """Parse and validate one structured generator response.
+
+        Return None when the model output is malformed or invalid and should be
+        skipped rather than entering evaluation.
+        """
+        raise NotImplementedError(
+            f"{self.get_task_name()} does not support structured generation."
+        )
 
     def profile_dataset(self, rows: list[dict]) -> dict | None:
         """Profile a labeled dataset (rows with "text"+"label") for real-vs-generated

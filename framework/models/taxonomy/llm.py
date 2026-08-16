@@ -46,7 +46,7 @@ class TaxonomyLLMModel(BaseModel):
     """
 
     def load_model(self, model_config: dict):
-        from framework.pipeline import load_generator
+        from framework.generators.factory import load_generator
 
         self.model_name = model_config["name"]
         self.prompt_template = model_config.get("prompt_template", DEFAULT_PROMPT_TEMPLATE)

@@ -203,6 +203,27 @@ class ValidateConfigTests(unittest.TestCase):
                           "local": {"path": "data/taxonomy.jsonl"}}
         validate_config(cfg)
 
+    def test_taxonomy_mode_must_be_omitted(self):
+        cfg = _full_config()
+        cfg["task"] = {"name": "taxonomy"}
+        cfg["dataset"] = {"source": "local",
+                          "local": {"path": "data/taxonomy.jsonl"}}
+        cfg["generation"]["mode"] = "forward"
+        with self.assertRaises(ValueError) as ctx:
+            validate_config(cfg)
+        self.assertIn("mode", str(ctx.exception))
+        self.assertIn("taxonomy", str(ctx.exception))
+
+    def test_taxonomy_seedless_false_rejected(self):
+        cfg = _full_config()
+        cfg["task"] = {"name": "taxonomy"}
+        cfg["dataset"] = {"source": "local",
+                          "local": {"path": "data/taxonomy.jsonl"}}
+        cfg["generation"]["seedless"] = False
+        with self.assertRaises(ValueError) as ctx:
+            validate_config(cfg)
+        self.assertIn("profile-driven", str(ctx.exception))
+
     def test_hf_source_missing_name_names_the_key(self):
         cfg = _full_config()
         cfg["dataset"] = {"source": "huggingface", "sample_size": 50,

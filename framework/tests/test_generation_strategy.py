@@ -2,6 +2,7 @@ import unittest
 
 from framework.tasks.spam.task import SpamTask
 from framework.tasks.gec.task import GECTask
+from framework.tasks.taxonomy.task import TaxonomyTask
 
 
 class GenerationStrategyTests(unittest.TestCase):
@@ -10,6 +11,9 @@ class GenerationStrategyTests(unittest.TestCase):
 
     def test_gec_is_corruption(self):
         self.assertEqual(GECTask().get_generation_strategy(), "corruption")
+
+    def test_taxonomy_is_structured(self):
+        self.assertEqual(TaxonomyTask().get_generation_strategy(), "structured")
 
     def test_spam_ham_prompt_has_placeholder_and_tag(self):
         p = SpamTask().get_ham_generation_prompt()

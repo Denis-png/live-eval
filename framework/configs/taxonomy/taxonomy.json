@@ -4,5 +4,6 @@
     "llm": {
       "prompt_template": "You are given a domain and a list of ontology classes.\n\nInfer only direct subclass relationships between the supplied classes.\n\nReturn strict JSON:\n\n{{\n  \"subclass_axioms\": [\n    [\"ChildClass\", \"ParentClass\"]\n  ]\n}}\n\nRules:\n- use only class identifiers from the provided list\n- first item is the child\n- second item is the direct parent\n- do not invent classes\n- do not output transitive relations unless they are believed to be direct\n- return JSON only\n\nDomain:\n{domain}\n\nClasses:\n{classes_json}\n"
     }
-  }
+  },
+  "structured_generation_prompt": "Create a completely new synthetic taxonomy for a GET benchmark.\n\nUse this structural target profile. It describes counts and distributions only; it is a target, not a requirement for exact matching:\n\n{spec_json}\n\nReturn strict JSON:\n\n{{\n  \"domain\": \"...\",\n  \"classes\": [\n    \"...\"\n  ],\n  \"subclass_axioms\": [\n    [\"Child\", \"Parent\"]\n  ]\n}}\n\nRules:\n- invent new class identifiers appropriate to the domain\n- use only generated class identifiers in subclass_axioms\n- first item is the child, second item is the direct parent\n- produce direct subclass relations\n- no duplicate classes\n- no duplicate edges\n- no self loops\n- no cycles\n- multiple inheritance is allowed\n- do not copy class names or hierarchy edges from any real ontology\n- return JSON only\n"
 }

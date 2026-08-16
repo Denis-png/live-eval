@@ -125,7 +125,18 @@ def validate_config(config: dict) -> None:
         if gen["num_runs"] < 1:
             problems.append(f"'generation.num_runs' must be >= 1 (got {gen['num_runs']})")
         mode = gen.get("mode", "forward")
-        if mode not in ("forward", "inverse"):
+        task_name = (config.get("task") or {}).get("name")
+        if task_name == "taxonomy":
+            if "mode" in gen:
+                problems.append(
+                    "'generation.mode' is not applicable for task 'taxonomy'; omit it"
+                )
+            if gen.get("seedless") is False:
+                problems.append(
+                    "'taxonomy' structured generation is profile-driven; "
+                    "'generation.seedless' must be omitted or true"
+                )
+        elif mode not in ("forward", "inverse"):
             problems.append(f"'generation.mode' must be 'forward' or 'inverse' (got '{mode}')")
         seedless = gen.get("seedless", False)
         if not isinstance(seedless, bool):

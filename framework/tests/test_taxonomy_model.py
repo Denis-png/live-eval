@@ -27,7 +27,7 @@ def _model_input(domain="pizza", classes=None):
 class TaxonomyLLMModelTests(unittest.TestCase):
     def _model(self, responses):
         fake = FakeGenerator(responses)
-        with mock.patch("framework.pipeline.load_generator", return_value=fake):
+        with mock.patch("framework.generators.factory.load_generator", return_value=fake):
             model = TaxonomyLLMModel({
                 "type": "llm",
                 "name": "mock-model",
@@ -106,7 +106,7 @@ class TaxonomyLLMModelTests(unittest.TestCase):
 
     def test_taxonomy_task_get_model_uses_llm_wrapper(self):
         fake = FakeGenerator(['{"subclass_axioms": []}'])
-        with mock.patch("framework.pipeline.load_generator", return_value=fake):
+        with mock.patch("framework.generators.factory.load_generator", return_value=fake):
             model = TaxonomyTask().get_model({
                 "type": "llm",
                 "name": "mock-model",

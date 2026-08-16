@@ -6,36 +6,8 @@ from datetime import datetime
 
 import numpy as np
 from framework.data_loading import iter_local_rows, resolve_dataset_config
+from framework.generators.factory import load_generator
 from framework.tasks.base_task import BaseTask
-
-
-# ── Generator registry ───────────────────────────────────────
-# Add new providers here as they are implemented.
-
-# Anthropic-compatible providers — use the Anthropic SDK against a custom base_url.
-_ANTHROPIC_BASE_URLS = {
-    "minimax": "https://api.minimax.io/anthropic",
-    # "anthropic" → None (default endpoint)
-}
-
-
-def load_generator(config: dict):
-    provider = config["provider"]
-    if provider in ("openai", "groq", "openrouter", "mistral"):
-        from framework.generators.openai_generator import OpenAIGenerator
-        return OpenAIGenerator(config)
-    elif provider in ("anthropic", "minimax"):
-        from framework.generators.anthropic_generator import AnthropicGenerator
-        if not config.get("base_url") and provider in _ANTHROPIC_BASE_URLS:
-            config = {**config, "base_url": _ANTHROPIC_BASE_URLS[provider]}
-        return AnthropicGenerator(config)
-    elif provider == "google":
-        from framework.generators.google_generator import GoogleGenerator
-        return GoogleGenerator(config)
-    raise ValueError(
-        f"Unknown provider: '{provider}'. "
-        f"Supported: openai, groq, openrouter, mistral, anthropic, minimax, google."
-    )
 
 
 # ── Judge generator ──────────────────────────────────────────
@@ -83,6 +55,9 @@ def load_task(task_name: str, task_config: dict | None = None) -> BaseTask:
     elif task_name == "spam":
         from framework.tasks.spam.task import SpamTask
         return SpamTask()
+    elif task_name == "taxonomy":
+        from framework.tasks.taxonomy.task import TaxonomyTask
+        return TaxonomyTask()
     raise ValueError(
         f"Unknown task: '{task_name}'. "
         f"Register it in pipeline.load_task() and add configs/{task_name}/{task_name}.json."
@@ -198,6 +173,12 @@ def _load_generation_profile(config: dict, task) -> dict | None:
     Returns None when generation.seedless is falsy. Runs before the generation
     loop so a missing or un-topic-profiled profile fails before any API spend."""
     gen = config.get("generation") or {}
+    if task.get_generation_strategy() == "structured":
+        if gen.get("seedless") is False:
+            return None
+        path = _resolve_profile_path(config, task)
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
     if not gen.get("seedless"):
         return None
     from framework.profiling.spec_sampler import load_profile
@@ -209,6 +190,13 @@ def _load_generation_profile(config: dict, task) -> dict | None:
         else "topics"
     )
     return load_profile(path, topics_key=topics_key)
+
+
+def _should_load_error_distribution(strategy: str, mode: str | None, seedless: bool) -> bool:
+    """Whether this strategy needs an empirical error distribution."""
+    if strategy == "structured":
+        return False
+    return strategy == "class_conditional" or mode == "inverse" or seedless
 
 
 # ── Aggregation ──────────────────────────────────────────────
@@ -314,8 +302,11 @@ def _build_meta(config: dict, task, runs_completed: int,
     judge_active = bool(judge) and judge.get("enabled", True) is not False
     num_runs = gen["num_runs"]
     strategy = task.get_generation_strategy()
-    mode = gen.get("mode", "inverse" if strategy == "class_conditional" else "forward")
-    seedless = bool(gen.get("seedless"))
+    if strategy == "structured":
+        mode = None
+    else:
+        mode = gen.get("mode", "inverse" if strategy == "class_conditional" else "forward")
+    seedless = True if strategy == "structured" else bool(gen.get("seedless"))
     if ds["source"] == "local":
         dataset_meta = {"source": "local", "path": ds["path"],
                         "format": ds["format"] or None,
@@ -386,7 +377,41 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
     sample_size = gen_cfg["sample_size"]
     strategy = task.get_generation_strategy()
 
-    if strategy == "class_conditional":
+    if strategy == "structured":
+        if gen_cfg.get("mode") not in (None, "structured", "none", "n/a"):
+            raise RuntimeError(
+                f"{task.get_task_name()} uses structured generation; generation.mode "
+                "is not applicable and must be omitted."
+            )
+        if gen_cfg.get("seedless") is False:
+            raise RuntimeError(
+                f"{task.get_task_name()} structured generation is profile-driven; "
+                "seeded generation is not supported."
+            )
+        if profile is None:
+            raise RuntimeError(
+                f"{task.get_task_name()} structured generation requires a profile."
+            )
+        rng = random.Random()
+        synthetic = []
+        max_attempts = sample_size * max(1, gen_cfg.get("max_parse_attempts", 3))
+        attempts = 0
+        while len(synthetic) < sample_size and attempts < max_attempts:
+            attempts += 1
+            prompt = task.build_structured_generation_prompt(profile, rng=rng)
+            raw = generator.call_api(prompt)
+            parsed = task.parse_structured_generation(raw)
+            if parsed is not None:
+                synthetic.append(parsed)
+            else:
+                print("[SKIP] structured generation returned invalid JSON/artifact.")
+        if len(synthetic) < sample_size:
+            print(
+                f"[WARN] structured generation produced {len(synthetic)} valid "
+                f"taxonomies after {attempts} attempts for {sample_size} requested.",
+                file=sys.stderr,
+            )
+    elif strategy == "class_conditional":
         # No config sets "mode" explicitly today (spam.json's config comment
         # says so) — the default MUST resolve to "inverse" so that omitting
         # the key keeps reproducing today's production behavior unchanged.
@@ -663,11 +688,14 @@ def run_pipeline(config: dict) -> dict:
     evaluator_fns = task.get_evaluator_fns()
 
     strategy = task.get_generation_strategy()
-    mode = config["generation"].get("mode", "forward")
-    seedless = bool(config["generation"].get("seedless"))
+    mode = None if strategy == "structured" else config["generation"].get("mode", "forward")
+    seedless = (
+        True if strategy == "structured"
+        else bool(config["generation"].get("seedless"))
+    )
     error_dist = (
         load_error_distribution(config, real_data, task)
-        if (strategy == "class_conditional" or mode == "inverse" or seedless) else None
+        if _should_load_error_distribution(strategy, mode, seedless) else None
     )
     profile = _load_generation_profile(config, task)
 
