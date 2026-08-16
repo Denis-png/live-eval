@@ -121,6 +121,13 @@ class TaxonomyMetricsTests(unittest.TestCase):
         self.assertEqual(score["malformed_relation_count"], 2)
         self.assertEqual(score["invalid_relation_count"], 2)
 
+    def test_non_string_relation_elements_are_malformed(self):
+        result = _result({"subclass_axioms": [[1, "A"], ["B", "A"]]})
+        score = score_taxonomy_result(result)
+        self.assertEqual(score["tp"], 1)
+        self.assertEqual(score["fp"], 0)
+        self.assertEqual(score["malformed_relation_count"], 1)
+
     def test_strict_json_prediction_is_supported(self):
         result = _result(json.dumps({"subclass_axioms": [["B", "A"]]}))
         score = score_taxonomy_result(result)

@@ -22,7 +22,7 @@ def normalize_relation_pair(value: Any) -> Relation | None:
     if not isinstance(value, (list, tuple)) or len(value) != 2:
         return None
     child, parent = value
-    if child is None or parent is None:
+    if not isinstance(child, str) or not isinstance(parent, str):
         return None
     return (str(child).strip(), str(parent).strip())
 
@@ -111,11 +111,19 @@ def _prediction_payload(result: dict[str, Any]) -> Any:
     return result.get("prediction_relations", result.get("prediction"))
 
 
+def _prediction_diagnostics(prediction: Any) -> dict[str, Any]:
+    if isinstance(prediction, dict) and isinstance(prediction.get("diagnostics"), dict):
+        return prediction["diagnostics"]
+    return {}
+
+
 def score_taxonomy_result(result: dict[str, Any]) -> dict[str, Any]:
     """Return exact precision/recall/F1 and diagnostics for one result row."""
     classes = result.get("classes") or []
     gold = normalize_relation_set(result.get("subclass_axioms") or [])
-    parsed = parse_prediction_relations(_prediction_payload(result), classes)
+    prediction = _prediction_payload(result)
+    parsed = parse_prediction_relations(prediction, classes)
+    supplied_diagnostics = _prediction_diagnostics(prediction)
     predicted = parsed["relations"]
 
     tp = len(predicted & gold)
@@ -134,11 +142,21 @@ def score_taxonomy_result(result: dict[str, Any]) -> dict[str, Any]:
         "fn": fn,
         "predicted_relation_count": len(predicted),
         "gold_relation_count": len(gold),
-        "invalid_relation_count": parsed["invalid_relation_count"],
-        "invalid_relation_rate": parsed["invalid_relation_rate"],
-        "unknown_class_relation_count": parsed["unknown_class_relation_count"],
-        "malformed_prediction": parsed["malformed"],
-        "malformed_relation_count": parsed["malformed_relation_count"],
+        "invalid_relation_count": supplied_diagnostics.get(
+            "invalid_relation_count", parsed["invalid_relation_count"]
+        ),
+        "invalid_relation_rate": supplied_diagnostics.get(
+            "invalid_relation_rate", parsed["invalid_relation_rate"]
+        ),
+        "unknown_class_relation_count": supplied_diagnostics.get(
+            "unknown_class_relation_count", parsed["unknown_class_relation_count"]
+        ),
+        "malformed_prediction": (
+            parsed["malformed"] or bool(supplied_diagnostics.get("malformed"))
+        ),
+        "malformed_relation_count": supplied_diagnostics.get(
+            "malformed_relation_count", parsed["malformed_relation_count"]
+        ),
     }
 
 
@@ -153,6 +171,7 @@ def compute_taxonomy_scores(results: list[dict[str, Any]]) -> dict[str, Any]:
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
     invalid = sum(row["invalid_relation_count"] for row in scored)
     predicted = sum(row["predicted_relation_count"] for row in scored)
+    malformed_relations = sum(row["malformed_relation_count"] for row in scored)
 
     return {
         "precision": precision,
@@ -163,8 +182,8 @@ def compute_taxonomy_scores(results: list[dict[str, Any]]) -> dict[str, Any]:
         "fn": fn,
         "invalid_relation_count": invalid,
         "invalid_relation_rate": (
-            round(invalid / (invalid + predicted), 4)
-            if (invalid + predicted)
+            round(invalid / (predicted + malformed_relations), 4)
+            if (predicted + malformed_relations)
             else 0.0
         ),
         "unknown_class_relation_count": sum(
@@ -173,6 +192,7 @@ def compute_taxonomy_scores(results: list[dict[str, Any]]) -> dict[str, Any]:
         "malformed_prediction_count": sum(
             1 for row in scored if row["malformed_prediction"]
         ),
+        "malformed_relation_count": malformed_relations,
     }
 
 

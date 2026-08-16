@@ -72,9 +72,16 @@ class TaxonomyTask(BaseTask):
         }
 
     def get_model(self, model_config: dict):
-        raise NotImplementedError(
-            "Taxonomy model wrappers are not implemented in Phase 2. "
-            "Use taxonomy evaluators directly with parsed predictions."
+        model_type = model_config["type"]
+        params = self._config.get("models", {}).get(model_type, {})
+        merged = {**model_config, **params}
+
+        if model_type == "llm":
+            from framework.models.taxonomy import TaxonomyLLMModel
+            return TaxonomyLLMModel(merged)
+        raise ValueError(
+            f"Unsupported taxonomy model type: '{model_type}'. "
+            "Supported MVP type: llm."
         )
 
     def parse_row(self, row: dict) -> dict | None:

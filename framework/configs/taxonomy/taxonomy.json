@@ -1,3 +1,8 @@
 {
-  "evaluators": ["precision", "recall", "f1", "diagnostics"]
+  "evaluators": ["precision", "recall", "f1", "diagnostics"],
+  "models": {
+    "llm": {
+      "prompt_template": "You are given a domain and a list of ontology classes.\n\nInfer only direct subclass relationships between the supplied classes.\n\nReturn strict JSON:\n\n{{\n  \"subclass_axioms\": [\n    [\"ChildClass\", \"ParentClass\"]\n  ]\n}}\n\nRules:\n- use only class identifiers from the provided list\n- first item is the child\n- second item is the direct parent\n- do not invent classes\n- do not output transitive relations unless they are believed to be direct\n- return JSON only\n\nDomain:\n{domain}\n\nClasses:\n{classes_json}\n"
+    }
+  }
 }
