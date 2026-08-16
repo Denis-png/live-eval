@@ -192,10 +192,16 @@ class ValidateConfigTests(unittest.TestCase):
     def test_local_source_undeterminable_format_rejected(self):
         cfg = _full_config()
         cfg["dataset"] = {"source": "local", "sample_size": 50,
-                          "local": {"path": "data/things.jsonl"}}
+                          "local": {"path": "data/things.unknown"}}
         with self.assertRaises(ValueError) as ctx:
             validate_config(cfg)
         self.assertIn("format", str(ctx.exception).lower())
+
+    def test_local_jsonl_source_accepted(self):
+        cfg = _full_config()
+        cfg["dataset"] = {"source": "local", "sample_size": 50,
+                          "local": {"path": "data/taxonomy.jsonl"}}
+        validate_config(cfg)
 
     def test_hf_source_missing_name_names_the_key(self):
         cfg = _full_config()

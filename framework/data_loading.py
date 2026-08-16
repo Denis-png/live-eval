@@ -1,15 +1,16 @@
-"""Dataset-source resolution and local benchmark file loaders (m2 / csv / tsv).
+"""Dataset-source resolution and local benchmark file loaders.
 
 Local rows are plain dicts fed through task.parse_row(), exactly like
 HuggingFace rows — everything downstream (generation, profiling, evaluation)
 is source-agnostic.
 """
 import csv
+import json
 import os
 
-SUPPORTED_LOCAL_FORMATS = ("m2", "csv", "tsv")
+SUPPORTED_LOCAL_FORMATS = ("m2", "csv", "tsv", "jsonl")
 
-_FORMAT_BY_EXTENSION = {".m2": "m2", ".csv": "csv", ".tsv": "tsv"}
+_FORMAT_BY_EXTENSION = {".m2": "m2", ".csv": "csv", ".tsv": "tsv", ".jsonl": "jsonl"}
 
 
 def resolve_dataset_config(ds_config: dict) -> dict:
@@ -54,8 +55,9 @@ def infer_format(path: str) -> str | None:
 def iter_local_rows(path: str, fmt: str | None = None):
     """Yield dict rows from a local benchmark file.
 
-    m2  → {"incorrect", "correct"} pairs (annotator 0, no-edit sentences skipped)
+    m2    → {"incorrect", "correct"} pairs (annotator 0, no-edit sentences skipped)
     csv/tsv → one dict per row keyed by the header
+    jsonl → one dict per non-empty JSON line
 
     Raises ValueError (not FileNotFoundError) so entry points surface a clean
     [ERROR] instead of a traceback."""
@@ -72,6 +74,8 @@ def iter_local_rows(path: str, fmt: str | None = None):
         )
     if fmt == "m2":
         yield from _iter_m2_rows(path)
+    elif fmt == "jsonl":
+        yield from _iter_jsonl_rows(path)
     else:
         yield from _iter_delimited_rows(path, delimiter="," if fmt == "csv" else "\t")
 
@@ -79,6 +83,27 @@ def iter_local_rows(path: str, fmt: str | None = None):
 def _iter_delimited_rows(path: str, delimiter: str):
     with open(path, encoding="utf-8", newline="") as f:
         yield from csv.DictReader(f, delimiter=delimiter)
+
+
+def _iter_jsonl_rows(path: str):
+    """Yield one dictionary per non-empty JSON Lines record."""
+    with open(path, encoding="utf-8") as f:
+        for line_number, line in enumerate(f, start=1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"Malformed JSON in local dataset '{path}' on line "
+                    f"{line_number}: {exc.msg}"
+                ) from exc
+            if not isinstance(row, dict):
+                raise ValueError(
+                    f"JSONL dataset '{path}' line {line_number} must contain "
+                    "a JSON object."
+                )
+            yield row
 
 
 def _iter_m2_rows(path: str, annotator_id: int = 0):
