@@ -130,11 +130,25 @@ def render_session(session_dir: str, out_dir: str | None = None) -> list[str]:
                 print(f"[WARN] could not render {filename}: {e}", file=sys.stderr)
 
     if profile:
+        filename = "fidelity.png"
         try:
-            written.append(_save(plots.plot_fidelity(profile, meta),
-                                 os.path.join(out_dir, "fidelity.png"), plt))
+            fidelity_type = ((profile.get("fidelity") or {}).get("profile_type"))
+            if fidelity_type == "taxonomy_structural_fidelity":
+                filename = "taxonomy_fidelity.png"
+                written.append(_save(
+                    plots.plot_taxonomy_fidelity(profile, meta),
+                    os.path.join(out_dir, filename), plt,
+                ))
+                filename = "taxonomy_fidelity_distributions.png"
+                written.append(_save(
+                    plots.plot_taxonomy_fidelity_distributions(profile, meta),
+                    os.path.join(out_dir, filename), plt,
+                ))
+            else:
+                written.append(_save(plots.plot_fidelity(profile, meta),
+                                     os.path.join(out_dir, filename), plt))
         except Exception as e:
-            print(f"[WARN] could not render fidelity.png: {e}", file=sys.stderr)
+            print(f"[WARN] could not render {filename}: {e}", file=sys.stderr)
 
     error_counts = _load_error_type_counts(session_dir)
     if error_counts:

@@ -228,6 +228,24 @@ class TaxonomyTask(BaseTask):
     def get_real_eval_samples(self, config: dict, real_data: list[dict]) -> list[dict]:
         return [self._eval_sample(row) for row in real_data]
 
+    def profile_dataset(self, rows: list[dict]) -> dict:
+        """Profile taxonomy artifacts with the same structural profiler for all sides.
+
+        The run-level artifact intentionally strips class-name-bearing debug
+        fields (roots, leaves, class_depths) so fidelity reporting cannot expose
+        real ontology class identifiers or URI provenance.
+        """
+        from framework.profiling.taxonomy_fidelity import sanitize_taxonomy_profile
+        from framework.profiling.taxonomy_profiler import profile_taxonomy_rows
+
+        return sanitize_taxonomy_profile(profile_taxonomy_rows(rows))
+
+    def compare_profiles(self, real: dict, generated: dict) -> dict:
+        """Real-vs-synthetic structural fidelity for taxonomy profiles."""
+        from framework.profiling.taxonomy_fidelity import compare_taxonomy_profiles
+
+        return compare_taxonomy_profiles(real, generated)
+
     def _eval_sample(self, row: dict) -> dict:
         domain = row["domain"]
         classes = list(row["classes"])
