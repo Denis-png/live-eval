@@ -91,7 +91,8 @@ def merge_sessions(session_dirs, out_dir, config, *, plots=False):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Merge replicate sessions for the same (task, model) into one.",
+        description="Merge replicate sessions for the same "
+                    "(task, model, mode, seedless) cell into one.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("session_dirs", nargs="+", help="Source session directories (>= 2)")

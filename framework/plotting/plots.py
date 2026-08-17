@@ -77,7 +77,12 @@ def _split_by_scale(values: dict[str, float]) -> list[list[str]]:
 def _subtitle(meta: dict | None) -> str:
     if not meta:
         return ""
-    bits = [meta.get("task"), meta.get("mode"), meta.get("model")]
+    # `seedless` belongs here: without it two sessions from different generation
+    # cells (same task/mode/model, seeded vs profile-driven) render identically.
+    cell = meta.get("mode")
+    if meta.get("seedless"):
+        cell = f"{cell}+seedless" if cell else "seedless"
+    bits = [meta.get("task"), cell, meta.get("model")]
     return "  ·  ".join(str(b) for b in bits if b)
 
 

@@ -71,6 +71,12 @@ def _build_judge_call(config: dict, main_generator):
 # Add new tasks here as they are implemented.
 
 def load_task(task_name: str, task_config: dict | None = None) -> BaseTask:
+    """Instantiate the task by name.
+
+    `task_config` is the config's whole `task:` block. No task consumes it yet —
+    `variant` is read straight from the config by resolve_output_paths/_build_meta —
+    but the parameter is accepted so variant-aware task construction can be wired
+    up without touching every call site."""
     if task_name == "gec":
         from framework.tasks.gec.task import GECTask
         return GECTask()
@@ -565,9 +571,6 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
             f"Check the [SKIP]/failed lines above — typical causes: bad API key, wrong "
             f"model name, model refusals, or unparseable output."
         )
-    if _profile_driven:
-        # Remove the profile text from each item — it is stored once in meta.dataset_profile.
-        synthetic = [{k: v for k, v in item.items() if k != "incorrect"} for item in synthetic]
     return synthetic
 
 

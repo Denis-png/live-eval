@@ -145,7 +145,9 @@ class LoadProfileTests(unittest.TestCase):
             "topics_per_label": {
                 "HAM": {"topics": {"chat": {"fraction": 1.0, "description": "Chat.", "examples": []}}},
                 "SPAM": {"topics": {}},
-            }
+            },
+            "length_distributions_per_label": {"HAM": {"words": {"bins": {"6-10": 1.0}}}},
+            "style_per_label": {"HAM": {}},
         }
         path = _write(profile)
         try:
@@ -241,3 +243,38 @@ class RenderSpecTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CompanionBlockValidationTests(unittest.TestCase):
+    """Topics alone are not enough — sample_content_spec also draws a length and
+    a style, so a profile missing those blocks must fail at load time rather than
+    deep inside the run loop, after the real baseline has already been paid for."""
+
+    def _load(self, profile, **kw):
+        path = _write(profile)
+        try:
+            return load_profile(path, **kw)
+        finally:
+            os.unlink(path)
+
+    def test_missing_length_distributions_rejected(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            self._load({k: v for k, v in GEC_PROFILE.items()
+                        if k != "length_distributions"})
+        self.assertIn("length_distributions", str(ctx.exception))
+
+    def test_missing_style_rejected(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            self._load({k: v for k, v in GEC_PROFILE.items() if k != "style"})
+        self.assertIn("style", str(ctx.exception))
+
+    def test_missing_per_label_companion_rejected(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            self._load({k: v for k, v in SPAM_PROFILE.items()
+                        if k != "style_per_label"}, topics_key="topics_per_label")
+        self.assertIn("style_per_label", str(ctx.exception))
+
+    def test_complete_profiles_still_load(self):
+        self.assertEqual(self._load(GEC_PROFILE)["profile_version"], 2)
+        self.assertEqual(
+            self._load(SPAM_PROFILE, topics_key="topics_per_label")["profile_version"], 2)

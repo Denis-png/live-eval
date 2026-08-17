@@ -31,7 +31,10 @@ class PerModelConfigTests(unittest.TestCase):
             self.assertEqual(cfg["generation"]["provider"], "anthropic")
             self.assertEqual(cfg["generation"]["api_key"], "k1")  # re-resolved
             self.assertEqual(cfg["output"]["base_dir"], d)
-            self.assertEqual(cfg["output"]["session_id"], "anthropic_claude_haiku_4_5")
+            # The session id carries the generation cell (mode + seedless) so a
+            # seedless comparison cannot overwrite the seeded one.
+            self.assertEqual(cfg["output"]["session_id"],
+                             "anthropic_claude_haiku_4_5_inverse")
 
 
 class ParseCompareArgsTests(unittest.TestCase):
@@ -160,3 +163,41 @@ class RunComparisonFailureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SessionIdIncludesCellTests(unittest.TestCase):
+    """The generation cell is part of session identity: without it a seedless
+    comparison writes into the same directory as the seeded one for the same
+    provider/model and silently overwrites it."""
+
+    def _base(self, base_dir, **generation):
+        gen = {"provider": "x", "model": "y"}
+        gen.update(generation)
+        return {
+            "api_keys": {"openrouter": "k"},
+            "dataset": {"name": "d", "split": "train"},
+            "generation": gen,
+            "task": {"name": "gec"},
+            "task_models": [{"name": "m", "type": "t5"}],
+            "output": {"base_dir": base_dir},
+        }
+
+    def _session(self, **generation):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = cm._per_model_config(self._base(d, **generation),
+                                       {"provider": "openrouter", "model": "minimax-m3"})
+            return cfg["output"]["session_id"]
+
+    def test_seeded_and_seedless_get_distinct_sessions(self):
+        seeded = self._session(mode="inverse", seedless=False)
+        seedless = self._session(mode="inverse", seedless=True)
+        self.assertNotEqual(seeded, seedless)
+        self.assertIn("seedless", seedless)
+        self.assertNotIn("seedless", seeded)
+
+    def test_modes_get_distinct_sessions(self):
+        self.assertNotEqual(self._session(mode="forward"), self._session(mode="inverse"))
+
+    def test_provider_and_model_still_present(self):
+        session = self._session(mode="inverse")
+        self.assertTrue(session.startswith("openrouter_minimax_m3"))

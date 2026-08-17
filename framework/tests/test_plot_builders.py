@@ -2,6 +2,7 @@ import unittest
 
 from matplotlib.colors import to_hex
 
+from framework.plotting import plots
 from framework.plotting.plots import (
     _split_by_scale,
     plot_fidelity,
@@ -117,3 +118,21 @@ class HiddenMetricTests(unittest.TestCase):
         labels = self._xtick_labels(plot_run_variance("m", runs))
         self.assertNotIn("fpr", labels)
         self.assertIn("f1", labels)
+
+
+class SubtitleCellTests(unittest.TestCase):
+    """Two sessions differing only in `seedless` must not render identically."""
+
+    def test_seedless_appears_in_the_subtitle(self):
+        seeded = plots._subtitle({"task": "gec", "mode": "inverse", "model": "m"})
+        seedless = plots._subtitle({"task": "gec", "mode": "inverse", "model": "m",
+                                    "seedless": True})
+        self.assertNotEqual(seeded, seedless)
+        self.assertIn("inverse+seedless", seedless)
+        self.assertNotIn("seedless", seeded)
+
+    def test_absent_seedless_is_unchanged(self):
+        self.assertIn("inverse", plots._subtitle({"task": "gec", "mode": "inverse"}))
+
+    def test_empty_meta_still_empty(self):
+        self.assertEqual(plots._subtitle(None), "")

@@ -148,3 +148,58 @@ class SeedPolicyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SeedlessPromptValidationTests(unittest.TestCase):
+    """seed_policy="none" indexes seedless_prompts/specs_by_label by the drawn
+    label inside the loop, so a task supplying only one class must fail before
+    the first API call rather than KeyError-ing partway through a paid run."""
+
+    def _kwargs(self, **over):
+        kw = dict(COMMON, real_seeds=None, sample_size=4, seed_policy="none",
+                  seedless_prompts={"SPAM": "s {spec} {error_spec}", "HAM": "h {spec}"},
+                  specs_by_label={"SPAM": ["a"], "HAM": ["b"]},
+                  rng=random.Random(0))
+        kw.update(over)
+        return kw
+
+    def test_missing_prompt_for_a_class_fails_before_any_call(self):
+        gen = FakeGenerator("Message: x y z")
+        with self.assertRaises(RuntimeError) as ctx:
+            gen.generate_class_conditional(
+                **self._kwargs(seedless_prompts={"SPAM": "s {spec} {error_spec}"}))
+        self.assertIn("seedless_prompts", str(ctx.exception))
+        self.assertIn("HAM", str(ctx.exception))
+        self.assertEqual(gen.prompts, [])          # nothing was generated
+
+    def test_missing_specs_for_a_class_fails_before_any_call(self):
+        gen = FakeGenerator("Message: x y z")
+        with self.assertRaises(RuntimeError) as ctx:
+            gen.generate_class_conditional(**self._kwargs(specs_by_label={"SPAM": ["a"]}))
+        self.assertIn("specs_by_label", str(ctx.exception))
+        self.assertIn("HAM", str(ctx.exception))
+        self.assertEqual(gen.prompts, [])
+
+    def test_complete_mappings_are_accepted(self):
+        gen = FakeGenerator("Message: x y z")
+        out = gen.generate_class_conditional(**self._kwargs(sample_size=1))
+        self.assertEqual(len(out), 1)
+
+
+class SameClassTechniqueTests(unittest.TestCase):
+    """same_class imitates a seed of the target class and injects nothing, so
+    reporting a sampled signal mix as its technique would be fiction."""
+
+    def test_technique_is_imitation_for_both_classes(self):
+        seeds = [{"text": "see you at lunch soon", "label": "HAM"},
+                 {"text": "WIN cash now today", "label": "SPAM"}]
+        for class_prob, expected_label in ((1.0, "SPAM"), (0.0, "HAM")):
+            gen = FakeGenerator("Rewritten: brand new message here")
+            out = gen.generate_class_conditional(
+                **{**COMMON, "class_prob": class_prob},
+                real_seeds=seeds, seed_field="text", sample_size=1,
+                seed_policy="same_class", forward_prompt="{class_name}: {sentence}",
+                rng=random.Random(0),
+            )
+            self.assertEqual(out[0]["label"], expected_label)
+            self.assertEqual(out[0]["technique"], "imitation")
