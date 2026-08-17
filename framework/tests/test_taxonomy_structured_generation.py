@@ -120,7 +120,7 @@ class TaxonomyStructuredGenerationTests(unittest.TestCase):
 
     def test_run_generation_structured_one_sample_is_one_taxonomy(self):
         gen = FakeGenerator([_response()])
-        config = {"generation": {"sample_size": 1}}
+        config = {"generation": {"sample_size": 1, "feedback": {"enabled": False}}}
         out = _run_generation(
             gen, self.task, config, real_data=[], error_dist=None,
             judge_call=None, class_prob=0.5, profile=PROFILE,
@@ -186,6 +186,7 @@ class TaxonomyStructuredGenerationTests(unittest.TestCase):
                     "sample_size": 1,
                     "num_runs": 1,
                     "profile_path": profile_path,
+                    "feedback": {"enabled": False},
                 },
                 "task": {"name": "taxonomy"},
                 "task_models": [

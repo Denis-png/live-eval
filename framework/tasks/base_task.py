@@ -115,7 +115,9 @@ class BaseTask(ABC):
         Default "corruption"."""
         return "corruption"
 
-    def build_structured_generation_prompt(self, profile: dict, rng=None) -> str:
+    def build_structured_generation_prompt(
+        self, profile: dict, rng=None, feedback: dict | None = None
+    ) -> str:
         """Return one profile-driven structured generation prompt.
 
         Structured tasks override this. Provider classes remain ontology-agnostic:

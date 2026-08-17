@@ -394,21 +394,84 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
             )
         rng = random.Random()
         synthetic = []
-        max_attempts = sample_size * max(1, gen_cfg.get("max_parse_attempts", 3))
-        attempts = 0
-        while len(synthetic) < sample_size and attempts < max_attempts:
-            attempts += 1
-            prompt = task.build_structured_generation_prompt(profile, rng=rng)
-            raw = generator.call_api(prompt)
-            parsed = task.parse_structured_generation(raw)
-            if parsed is not None:
-                synthetic.append(parsed)
-            else:
-                print("[SKIP] structured generation returned invalid JSON/artifact.")
+        max_parse_attempts = max(1, gen_cfg.get("max_parse_attempts", 3))
+        feedback_cfg = task.get_feedback_config(gen_cfg) if hasattr(task, "get_feedback_config") else {}
+        feedback_enabled = bool(feedback_cfg.get("enabled", False))
+        max_feedback_rounds = (
+            max(0, int(feedback_cfg.get("max_rounds", 0)))
+            if feedback_enabled else 0
+        )
+
+        for _ in range(sample_size):
+            selected = None
+            metadata = {
+                "feedback_enabled": feedback_enabled,
+                "max_feedback_rounds": max_feedback_rounds,
+                "rounds": [],
+                "early_stopped": False,
+                "final_round_selected": None,
+                "final_taxonomy_feedback_informed": False,
+            }
+            feedback = None
+            for round_idx in range(max_feedback_rounds + 1):
+                parsed = None
+                attempts = 0
+                while parsed is None and attempts < max_parse_attempts:
+                    attempts += 1
+                    prompt = task.build_structured_generation_prompt(
+                        profile, rng=rng, feedback=feedback
+                    )
+                    raw = generator.call_api(prompt)
+                    parsed = task.parse_structured_generation(raw)
+                    if parsed is None:
+                        print("[SKIP] structured generation returned invalid JSON/artifact.")
+
+                if parsed is None:
+                    metadata["rounds"].append({
+                        "round": round_idx,
+                        "feedback_informed": feedback is not None,
+                        "parse_attempts": attempts,
+                        "valid": False,
+                    })
+                    if selected is not None:
+                        metadata["failed_feedback_round_preserved_previous"] = True
+                        break
+                    break
+
+                selected = parsed
+                if not feedback_enabled:
+                    metadata["final_round_selected"] = round_idx
+                    break
+                round_info = task.build_structural_feedback(
+                    profile, selected, generation_config=gen_cfg
+                )
+                feedback_result = round_info["feedback"]
+                metadata["rounds"].append({
+                    "round": round_idx,
+                    "feedback_informed": feedback is not None,
+                    "parse_attempts": attempts,
+                    "valid": True,
+                    "within_tolerance": feedback_result["within_tolerance"],
+                    "feedback": feedback_result,
+                    "comparison": round_info["comparison"],
+                    "synthetic_profile": round_info["synthetic_profile"],
+                })
+                metadata["final_round_selected"] = round_idx
+                metadata["final_taxonomy_feedback_informed"] = feedback is not None
+                if feedback_result["within_tolerance"]:
+                    metadata["early_stopped"] = True
+                    break
+                if round_idx >= max_feedback_rounds:
+                    break
+                feedback = feedback_result
+
+            if selected is not None:
+                selected["generation_feedback"] = metadata
+                synthetic.append(selected)
         if len(synthetic) < sample_size:
             print(
                 f"[WARN] structured generation produced {len(synthetic)} valid "
-                f"taxonomies after {attempts} attempts for {sample_size} requested.",
+                f"taxonomies for {sample_size} requested.",
                 file=sys.stderr,
             )
     elif strategy == "class_conditional":

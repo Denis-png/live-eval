@@ -29,6 +29,18 @@ DISTRIBUTION_KEYS = [
     "child_count_distribution",
 ]
 
+DEFAULT_FEEDBACK_TOLERANCES = {
+    # Count targets are approximate; 15% keeps the loop from chasing small noise.
+    "count_relative": 0.15,
+    # Depth is integer-ish but mean_depth can be fractional. A half-level gap is
+    # enough to be worth nudging without demanding exact equality.
+    "depth_absolute": 0.5,
+    # multiple_parent_fraction is a rate in [0, 1].
+    "rate_absolute": 0.05,
+    # JSD is in [0, 1], where lower means closer.
+    "distribution_jsd": 0.1,
+}
+
 STRUCTURAL_PROFILE_KEYS = [
     "domain",
     *SCALAR_KEYS,
@@ -36,6 +48,15 @@ STRUCTURAL_PROFILE_KEYS = [
     "has_cycle",
     "validation",
 ]
+
+
+def feedback_tolerances(config: dict[str, Any] | None = None) -> dict[str, float]:
+    """Merge caller tolerances with conservative taxonomy defaults."""
+    merged = dict(DEFAULT_FEEDBACK_TOLERANCES)
+    for key, value in (config or {}).items():
+        if key in merged and isinstance(value, (int, float)):
+            merged[key] = float(value)
+    return merged
 
 
 def sanitize_taxonomy_profile(profile: dict[str, Any]) -> dict[str, Any]:
@@ -238,3 +259,190 @@ def aggregate_comparisons(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
         "scalar_characteristics": scalar_summary,
         "distribution_characteristics": distribution_summary,
     }
+
+
+def build_generation_feedback(
+    reference: dict[str, Any],
+    synthetic: dict[str, Any],
+    comparison: dict[str, Any],
+    tolerances: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build deterministic structural feedback for one generated taxonomy.
+
+    Feedback contains only aggregate structural numbers and directions. It does
+    not include class identifiers, edges, URI provenance, roots/leaves by name,
+    examples, or metadata.
+    """
+    tol = feedback_tolerances(tolerances)
+    adjustments: list[dict[str, Any]] = []
+
+    scalar = comparison.get("scalar_characteristics") or {}
+    for key in ("n_classes", "n_subclass_axioms", "n_roots", "n_leaves"):
+        item = scalar.get(key) or {}
+        _maybe_add_count_adjustment(adjustments, key, item, tol["count_relative"])
+
+    for key in ("max_depth", "mean_depth"):
+        item = scalar.get(key) or {}
+        _maybe_add_depth_adjustment(adjustments, key, item, tol["depth_absolute"])
+
+    _maybe_add_rate_adjustment(
+        adjustments,
+        "multiple_parent_fraction",
+        (scalar.get("multiple_parent_fraction") or {}),
+        tol["rate_absolute"],
+    )
+
+    distributions = comparison.get("distribution_characteristics") or {}
+    for key in DISTRIBUTION_KEYS:
+        item = distributions.get(key) or {}
+        divergence = item.get("jensen_shannon_divergence")
+        if isinstance(divergence, (int, float)) and divergence > tol["distribution_jsd"]:
+            adjustments.append({
+                "metric": key,
+                "status": "needs_adjustment",
+                "direction": "match_distribution_more_closely",
+                "current_jsd": round(float(divergence), 6),
+                "tolerance": tol["distribution_jsd"],
+                "message": _distribution_message(key),
+            })
+
+    return {
+        "within_tolerance": not adjustments,
+        "tolerances": tol,
+        "adjustments": adjustments,
+        "messages": [item["message"] for item in adjustments],
+    }
+
+
+def _maybe_add_count_adjustment(
+    adjustments: list[dict[str, Any]],
+    key: str,
+    item: dict[str, Any],
+    tolerance: float,
+) -> None:
+    real = item.get("real")
+    synthetic = item.get("synthetic")
+    if not isinstance(real, (int, float)) or not isinstance(synthetic, (int, float)):
+        return
+    diff = float(synthetic) - float(real)
+    if real == 0:
+        outside = diff != 0
+    else:
+        outside = abs(diff) / abs(float(real)) > tolerance
+    if not outside:
+        return
+    direction = "decrease" if diff > 0 else "increase"
+    messages = {
+        "n_classes": {
+            "increase": "The previous taxonomy had too few classes. Aim for more classes.",
+            "decrease": "The previous taxonomy had too many classes. Aim for fewer classes.",
+        },
+        "n_subclass_axioms": {
+            "increase": (
+                "The previous taxonomy had too few direct subclass relations. "
+                "Increase connectivity while keeping relations direct."
+            ),
+            "decrease": (
+                "The previous taxonomy had too many direct subclass relations. "
+                "Reduce connectivity while keeping relations direct."
+            ),
+        },
+        "n_roots": {
+            "increase": "The previous taxonomy had too few root classes. Aim for more roots.",
+            "decrease": "The previous taxonomy had too many root classes. Aim for fewer roots.",
+        },
+        "n_leaves": {
+            "increase": "The previous taxonomy had too few leaf classes. Aim for more leaves.",
+            "decrease": "The previous taxonomy had too many leaf classes. Aim for fewer leaves.",
+        },
+    }
+    adjustments.append({
+        "metric": key,
+        "status": "needs_adjustment",
+        "direction": direction,
+        "target": real,
+        "current": synthetic,
+        "tolerance": tolerance,
+        "message": messages[key][direction],
+    })
+
+
+def _maybe_add_depth_adjustment(
+    adjustments: list[dict[str, Any]],
+    key: str,
+    item: dict[str, Any],
+    tolerance: float,
+) -> None:
+    real = item.get("real")
+    synthetic = item.get("synthetic")
+    if not isinstance(real, (int, float)) or not isinstance(synthetic, (int, float)):
+        return
+    diff = float(synthetic) - float(real)
+    if abs(diff) <= tolerance:
+        return
+    direction = "decrease" if diff > 0 else "increase"
+    messages = {
+        "increase": "The previous hierarchy was shallower than the target. Increase hierarchical depth.",
+        "decrease": "The previous hierarchy was deeper than the target. Reduce hierarchical depth.",
+    }
+    adjustments.append({
+        "metric": key,
+        "status": "needs_adjustment",
+        "direction": direction,
+        "target": real,
+        "current": synthetic,
+        "tolerance": tolerance,
+        "message": messages[direction],
+    })
+
+
+def _maybe_add_rate_adjustment(
+    adjustments: list[dict[str, Any]],
+    key: str,
+    item: dict[str, Any],
+    tolerance: float,
+) -> None:
+    real = item.get("real")
+    synthetic = item.get("synthetic")
+    if not isinstance(real, (int, float)) or not isinstance(synthetic, (int, float)):
+        return
+    diff = float(synthetic) - float(real)
+    if abs(diff) <= tolerance:
+        return
+    direction = "decrease" if diff > 0 else "increase"
+    messages = {
+        "increase": (
+            "Multiple inheritance was below the target. Use slightly more classes "
+            "with more than one direct parent."
+        ),
+        "decrease": (
+            "Multiple inheritance was above the target. Use fewer classes with "
+            "more than one direct parent."
+        ),
+    }
+    adjustments.append({
+        "metric": key,
+        "status": "needs_adjustment",
+        "direction": direction,
+        "target": real,
+        "current": synthetic,
+        "tolerance": tolerance,
+        "message": messages[direction],
+    })
+
+
+def _distribution_message(key: str) -> str:
+    messages = {
+        "depth_distribution": (
+            "Make the hierarchy depth distribution closer to the structural target."
+        ),
+        "parent_count_distribution": (
+            "Make the parent-count distribution closer to the structural target; "
+            "adjust root frequency and multiple-parent frequency as needed."
+        ),
+        "child_count_distribution": (
+            "Make the child-count/branching distribution closer to the structural target; "
+            "adjust branching without adding cycles."
+        ),
+    }
+    return messages[key]

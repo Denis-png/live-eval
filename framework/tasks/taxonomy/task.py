@@ -143,11 +143,12 @@ class TaxonomyTask(BaseTask):
             "metadata": row.get("metadata") or {},
         }
 
-    def build_structured_generation_prompt(self, profile: dict, rng=None) -> str:
+    def build_structured_generation_prompt(self, profile: dict, rng=None, feedback: dict | None = None) -> str:
         """Build a taxonomy generation prompt from structural profile targets only."""
         spec = self._generation_spec_from_profile(profile, rng=rng)
         return self._config["structured_generation_prompt"].format(
-            spec_json=json.dumps(spec, indent=2, sort_keys=True, ensure_ascii=False)
+            spec_json=json.dumps(spec, indent=2, sort_keys=True, ensure_ascii=False),
+            feedback_section=self._format_feedback_section(feedback),
         )
 
     def parse_structured_generation(self, text: str) -> dict | None:
@@ -245,6 +246,65 @@ class TaxonomyTask(BaseTask):
         from framework.profiling.taxonomy_fidelity import compare_taxonomy_profiles
 
         return compare_taxonomy_profiles(real, generated)
+
+    def get_feedback_config(self, generation_config: dict | None = None) -> dict:
+        """Return taxonomy feedback settings, letting run config override defaults."""
+        default = self._config.get("feedback") or {}
+        override = (generation_config or {}).get("feedback") or {}
+        tolerances = {
+            **(default.get("tolerances") or {}),
+            **(override.get("tolerances") or {}),
+        }
+        return {
+            **default,
+            **override,
+            "tolerances": tolerances,
+        }
+
+    def build_structural_feedback(
+        self,
+        real_profile: dict,
+        synthetic_taxonomy: dict,
+        generation_config: dict | None = None,
+    ) -> dict[str, Any]:
+        """Profile one generated taxonomy and derive structural feedback."""
+        from framework.profiling.taxonomy_fidelity import (
+            build_generation_feedback,
+            compare_taxonomy_profiles,
+        )
+
+        synthetic_profile = self.profile_dataset([synthetic_taxonomy])
+        comparison = compare_taxonomy_profiles(real_profile, synthetic_profile)
+        per_taxonomy = comparison["comparisons"][0] if comparison["comparisons"] else {}
+        reference = comparison["real_profile"]
+        synthetic = comparison["synthetic_profiles"][0] if comparison["synthetic_profiles"] else {}
+        feedback_cfg = self.get_feedback_config(generation_config)
+        feedback = build_generation_feedback(
+            reference,
+            synthetic,
+            per_taxonomy,
+            feedback_cfg.get("tolerances") or {},
+        )
+        return {
+            "synthetic_profile": synthetic,
+            "comparison": per_taxonomy,
+            "feedback": feedback,
+        }
+
+    def _format_feedback_section(self, feedback: dict | None) -> str:
+        if not feedback or not feedback.get("messages"):
+            return ""
+        payload = {
+            "within_tolerance": feedback.get("within_tolerance", False),
+            "adjustments": feedback.get("adjustments", []),
+            "messages": feedback.get("messages", []),
+        }
+        return (
+            "\nFeedback from previous generation:\n"
+            "Use this structural feedback as guidance while keeping the original "
+            "target profile authoritative. Do not copy any real ontology content.\n\n"
+            f"{json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False)}\n\n"
+        )
 
     def _eval_sample(self, row: dict) -> dict:
         domain = row["domain"]
