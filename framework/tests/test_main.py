@@ -1,7 +1,12 @@
 import argparse
 import unittest
 
-from framework.main import _resolve_api_keys, apply_overrides, validate_config
+from framework.main import (
+    _display_generation_mode,
+    _resolve_api_keys,
+    apply_overrides,
+    validate_config,
+)
 
 
 def _args(**kw):
@@ -94,6 +99,21 @@ class MainErrorHandlingTests(unittest.TestCase):
             fm.run_pipeline = orig_run
             argparse._sys.argv = orig_argv
         self.assertIn("0 usable samples", str(ctx.exception))
+
+
+class DisplayGenerationModeTests(unittest.TestCase):
+    def test_taxonomy_mode_display_is_structured(self):
+        cfg = _full_config()
+        cfg["task"] = {"name": "taxonomy"}
+        self.assertEqual(_display_generation_mode(cfg), "n/a (structured generation)")
+
+    def test_spam_default_mode_display_stays_class_conditional(self):
+        cfg = _full_config()
+        cfg["task"] = {"name": "spam"}
+        self.assertEqual(
+            _display_generation_mode(cfg),
+            "n/a (class-conditional generation)",
+        )
 
 
 class ResolveApiKeysTests(unittest.TestCase):

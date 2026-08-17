@@ -258,6 +258,14 @@ def format_results_lines(results: dict) -> list[str]:
     return lines
 
 
+def _display_generation_mode(config: dict) -> str:
+    """Human-readable mode label for startup output only."""
+    task_name = (config.get("task") or {}).get("name")
+    if task_name == "taxonomy":
+        return "n/a (structured generation)"
+    return config["generation"].get("mode", "n/a (class-conditional generation)")
+
+
 def main():
     args = parse_args()
     _load_dotenv()
@@ -282,7 +290,7 @@ def main():
         print(notice, file=sys.stderr)
 
     print(f"Task     : {config['task']['name']}")
-    print(f"Mode     : {config['generation'].get('mode', 'n/a (class-conditional generation)')}")
+    print(f"Mode     : {_display_generation_mode(config)}")
     print(f"Provider : {config['generation']['provider']}")
     print(f"Model    : {config['generation']['model']}")
     print(f"Runs     : {config['generation']['num_runs']}")
