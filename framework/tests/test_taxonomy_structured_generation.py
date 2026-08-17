@@ -77,6 +77,9 @@ class TaxonomyStructuredGenerationTests(unittest.TestCase):
     def test_malformed_json_rejected(self):
         self.assertIsNone(self.task.parse_structured_generation("not json"))
 
+    def test_none_response_rejected(self):
+        self.assertIsNone(self.task.parse_structured_generation(None))
+
     def test_unknown_edge_endpoint_rejected(self):
         self.assertIsNone(self.task.parse_structured_generation(
             _response(axioms=[["GeneratedChild", "MissingRoot"]])

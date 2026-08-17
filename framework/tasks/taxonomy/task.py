@@ -45,6 +45,8 @@ def serialize_taxonomy_model_input(domain: str, classes: list[str]) -> str:
 
 def _extract_json_object(text: str) -> dict[str, Any] | None:
     """Parse a JSON object, tolerating fenced responses if present."""
+    if not isinstance(text, str):
+        return None
     stripped = text.strip()
     if stripped.startswith("```"):
         stripped = re.sub(r"^```(?:json)?\s*", "", stripped, flags=re.IGNORECASE)
