@@ -16,10 +16,23 @@ class FakeGenerator:
     def __init__(self, responses):
         self.responses = list(responses)
         self.prompts = []
+        self.last_response_diagnostic = None
 
     def call_api(self, prompt):
         self.prompts.append(prompt)
+        self.last_response_diagnostic = None
         return self.responses.pop(0)
+
+
+class DiagnosticGenerator(FakeGenerator):
+    def __init__(self, responses, diagnostics):
+        super().__init__(responses)
+        self.diagnostics = list(diagnostics)
+
+    def call_api(self, prompt):
+        response = super().call_api(prompt)
+        self.last_response_diagnostic = self.diagnostics.pop(0)
+        return response
 
 
 PROFILE = {
@@ -292,6 +305,51 @@ class TaxonomyFeedbackLoopTests(unittest.TestCase):
         self.assertNotIn("DiagnosticSecret", gen.prompts[1])
         self.assertNotIn("malformed_json", gen.prompts[1])
 
+    def test_provider_response_diagnostic_reaches_invalid_attempt_metadata(self):
+        gen = DiagnosticGenerator(
+            [
+                None,
+                _response(["R", "A", "B", "C"], [["A", "R"], ["B", "R"], ["C", "A"]]),
+            ],
+            [
+                {"finish_reason": "stop", "reasoning_present": True},
+                None,
+            ],
+        )
+        out = _run_generation(
+            gen, self.task,
+            {"generation": {"sample_size": 1, "max_parse_attempts": 2,
+                            "feedback": {"enabled": False}}},
+            real_data=[], error_dist=None, judge_call=None, class_prob=0.5, profile=PROFILE,
+        )
+        attempts = out[0]["generation_feedback"]["attempts"]
+        self.assertEqual(attempts[0]["rejection_reason"], "non_string_response")
+        self.assertEqual(
+            attempts[0]["provider_response"],
+            {"finish_reason": "stop", "reasoning_present": True},
+        )
+        self.assertNotIn("provider_response", attempts[1])
+
+    def test_provider_response_diagnostic_never_enters_next_generation_prompt(self):
+        gen = DiagnosticGenerator(
+            [
+                None,
+                _response(["R", "A", "B", "C"], [["A", "R"], ["B", "R"], ["C", "A"]]),
+            ],
+            [
+                {"finish_reason": "SecretFinishReason"},
+                None,
+            ],
+        )
+        _run_generation(
+            gen, self.task,
+            {"generation": {"sample_size": 1, "max_parse_attempts": 2,
+                            "feedback": {"enabled": False}}},
+            real_data=[], error_dist=None, judge_call=None, class_prob=0.5, profile=PROFILE,
+        )
+        self.assertEqual(len(gen.prompts), 2)
+        self.assertNotIn("SecretFinishReason", gen.prompts[1])
+
     def test_failed_feedback_round_preserves_previous_valid_taxonomy(self):
         gen = FakeGenerator([
             _response(["A", "B", "C", "D"], []),
@@ -312,7 +370,11 @@ class TaxonomyFeedbackLoopTests(unittest.TestCase):
         )
         generated["generation_feedback"] = {
             "feedback": {"messages": ["secret structural feedback"]},
-            "attempts": [{"rejection_reason": "malformed_json", "raw_preview": "DiagnosticSecret"}],
+            "attempts": [{
+                "rejection_reason": "malformed_json",
+                "raw_preview": "DiagnosticSecret",
+                "provider_response": {"finish_reason": "SecretFinishReason"},
+            }],
         }
         sample = self.task.get_eval_samples([generated])[0]
         payload = json.loads(sample["text"])
@@ -320,6 +382,7 @@ class TaxonomyFeedbackLoopTests(unittest.TestCase):
         self.assertNotIn("subclass_axioms", sample["text"])
         self.assertNotIn("secret structural feedback", sample["text"])
         self.assertNotIn("DiagnosticSecret", sample["text"])
+        self.assertNotIn("SecretFinishReason", sample["text"])
 
 
 if __name__ == "__main__":

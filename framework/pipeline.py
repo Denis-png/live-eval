@@ -427,6 +427,9 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                         parse_result = task.parse_structured_generation_with_diagnostics(raw)
                         parsed = parse_result["artifact"]
                         diagnostic = {"attempt": attempts, **parse_result["diagnostic"]}
+                        provider_diagnostic = getattr(generator, "last_response_diagnostic", None)
+                        if parsed is None and provider_diagnostic:
+                            diagnostic["provider_response"] = provider_diagnostic
                     else:
                         parsed = task.parse_structured_generation(raw)
                         diagnostic = {"attempt": attempts, "valid": parsed is not None}
