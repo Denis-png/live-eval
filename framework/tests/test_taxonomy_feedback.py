@@ -272,6 +272,25 @@ class TaxonomyFeedbackLoopTests(unittest.TestCase):
         )
         self.assertEqual(len(out), 1)
         self.assertEqual(len(gen.prompts), 2)
+        attempts = out[0]["generation_feedback"]["attempts"]
+        self.assertEqual(attempts[0]["rejection_reason"], "malformed_json")
+        self.assertFalse(attempts[0]["valid"])
+        self.assertTrue(attempts[1]["valid"])
+
+    def test_diagnostic_data_never_enters_next_generation_prompt(self):
+        gen = FakeGenerator([
+            "not json with DiagnosticSecret",
+            _response(["R", "A", "B", "C"], [["A", "R"], ["B", "R"], ["C", "A"]]),
+        ])
+        _run_generation(
+            gen, self.task,
+            {"generation": {"sample_size": 1, "max_parse_attempts": 2,
+                            "feedback": {"enabled": False}}},
+            real_data=[], error_dist=None, judge_call=None, class_prob=0.5, profile=PROFILE,
+        )
+        self.assertEqual(len(gen.prompts), 2)
+        self.assertNotIn("DiagnosticSecret", gen.prompts[1])
+        self.assertNotIn("malformed_json", gen.prompts[1])
 
     def test_failed_feedback_round_preserves_previous_valid_taxonomy(self):
         gen = FakeGenerator([
@@ -291,12 +310,16 @@ class TaxonomyFeedbackLoopTests(unittest.TestCase):
         generated = self.task.parse_structured_generation(
             _response(["R", "A"], [["A", "R"]])
         )
-        generated["generation_feedback"] = {"feedback": {"messages": ["secret structural feedback"]}}
+        generated["generation_feedback"] = {
+            "feedback": {"messages": ["secret structural feedback"]},
+            "attempts": [{"rejection_reason": "malformed_json", "raw_preview": "DiagnosticSecret"}],
+        }
         sample = self.task.get_eval_samples([generated])[0]
         payload = json.loads(sample["text"])
         self.assertEqual(sorted(payload), ["classes", "domain"])
         self.assertNotIn("subclass_axioms", sample["text"])
         self.assertNotIn("secret structural feedback", sample["text"])
+        self.assertNotIn("DiagnosticSecret", sample["text"])
 
 
 if __name__ == "__main__":

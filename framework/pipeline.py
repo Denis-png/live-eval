@@ -416,21 +416,36 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
             for round_idx in range(max_feedback_rounds + 1):
                 parsed = None
                 attempts = 0
+                attempt_diagnostics = []
                 while parsed is None and attempts < max_parse_attempts:
                     attempts += 1
                     prompt = task.build_structured_generation_prompt(
                         profile, rng=rng, feedback=feedback
                     )
                     raw = generator.call_api(prompt)
-                    parsed = task.parse_structured_generation(raw)
+                    if hasattr(task, "parse_structured_generation_with_diagnostics"):
+                        parse_result = task.parse_structured_generation_with_diagnostics(raw)
+                        parsed = parse_result["artifact"]
+                        diagnostic = {"attempt": attempts, **parse_result["diagnostic"]}
+                    else:
+                        parsed = task.parse_structured_generation(raw)
+                        diagnostic = {"attempt": attempts, "valid": parsed is not None}
+                        if parsed is None:
+                            diagnostic["rejection_reason"] = "invalid_structured_artifact"
+                    attempt_diagnostics.append(diagnostic)
                     if parsed is None:
-                        print("[SKIP] structured generation returned invalid JSON/artifact.")
+                        reason = diagnostic.get("rejection_reason", "unknown")
+                        print(
+                            "[SKIP] structured generation returned invalid "
+                            f"JSON/artifact ({reason})."
+                        )
 
                 if parsed is None:
                     metadata["rounds"].append({
                         "round": round_idx,
                         "feedback_informed": feedback is not None,
                         "parse_attempts": attempts,
+                        "attempts": attempt_diagnostics,
                         "valid": False,
                     })
                     if selected is not None:
@@ -439,6 +454,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                     break
 
                 selected = parsed
+                metadata.setdefault("attempts", []).extend(attempt_diagnostics)
                 if not feedback_enabled:
                     metadata["final_round_selected"] = round_idx
                     break
@@ -450,6 +466,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                     "round": round_idx,
                     "feedback_informed": feedback is not None,
                     "parse_attempts": attempts,
+                    "attempts": attempt_diagnostics,
                     "valid": True,
                     "within_tolerance": feedback_result["within_tolerance"],
                     "feedback": feedback_result,

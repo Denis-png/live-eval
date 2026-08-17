@@ -43,19 +43,34 @@ def serialize_taxonomy_model_input(domain: str, classes: list[str]) -> str:
     return json.dumps(taxonomy_model_input(domain, classes), ensure_ascii=False, sort_keys=True)
 
 
-def _extract_json_object(text: str) -> dict[str, Any] | None:
+_RAW_PREVIEW_LIMIT = 800
+
+
+def _raw_preview(text: Any) -> str | None:
+    """Bounded provider-output preview for diagnostics only."""
+    if text is None:
+        return None
+    preview = text if isinstance(text, str) else repr(text)
+    return preview[:_RAW_PREVIEW_LIMIT]
+
+
+def _extract_json_object(text: str) -> tuple[dict[str, Any] | None, str | None]:
     """Parse a JSON object, tolerating fenced responses if present."""
     if not isinstance(text, str):
-        return None
+        return None, "non_string_response"
     stripped = text.strip()
+    if not stripped:
+        return None, "empty_response"
     if stripped.startswith("```"):
         stripped = re.sub(r"^```(?:json)?\s*", "", stripped, flags=re.IGNORECASE)
         stripped = re.sub(r"\s*```$", "", stripped)
     try:
         payload = json.loads(stripped)
     except json.JSONDecodeError:
-        return None
-    return payload if isinstance(payload, dict) else None
+        return None, "malformed_json"
+    if not isinstance(payload, dict):
+        return None, "malformed_json"
+    return payload, None
 
 
 def _has_cycle(classes: set[str], edges: set[tuple[str, str]]) -> bool:
@@ -155,27 +170,36 @@ class TaxonomyTask(BaseTask):
 
     def parse_structured_generation(self, text: str) -> dict | None:
         """Parse and validate one generated taxonomy JSON object."""
-        payload = _extract_json_object(text)
+        return self.parse_structured_generation_with_diagnostics(text)["artifact"]
+
+    def parse_structured_generation_with_diagnostics(self, text: str) -> dict[str, Any]:
+        """Parse a generated taxonomy and return a structured rejection reason.
+
+        The public parse_structured_generation() method keeps the legacy
+        artifact-or-None contract; this companion method uses the same parsing
+        path while preserving bounded diagnostics for real smoke runs.
+        """
+        payload, reason = _extract_json_object(text)
         if payload is None:
-            return None
+            return self._structured_parse_result(None, reason, text)
         domain = payload.get("domain")
         raw_classes = payload.get("classes")
         raw_axioms = payload.get("subclass_axioms")
         if not isinstance(domain, str) or not domain.strip():
-            return None
+            return self._structured_parse_result(None, "missing_or_invalid_domain", text)
         if not isinstance(raw_classes, list) or not raw_classes:
-            return None
+            return self._structured_parse_result(None, "missing_or_invalid_classes", text)
         if not isinstance(raw_axioms, list):
-            return None
+            return self._structured_parse_result(None, "malformed_subclass_axiom", text)
 
         classes = []
         seen_classes = set()
         for value in raw_classes:
             if not isinstance(value, str) or not value.strip():
-                return None
+                return self._structured_parse_result(None, "missing_or_invalid_classes", text)
             normalized = value.strip()
             if normalized in seen_classes:
-                return None
+                return self._structured_parse_result(None, "duplicate_classes", text)
             seen_classes.add(normalized)
             classes.append(normalized)
 
@@ -184,17 +208,17 @@ class TaxonomyTask(BaseTask):
         for value in raw_axioms:
             relation = normalize_relation_pair(value)
             if relation is None or not relation[0] or not relation[1]:
-                return None
+                return self._structured_parse_result(None, "malformed_subclass_axiom", text)
             child, parent = relation
             if child not in class_set or parent not in class_set:
-                return None
+                return self._structured_parse_result(None, "unknown_class_endpoint", text)
             if child == parent:
-                return None
+                return self._structured_parse_result(None, "self_loop", text)
             edges.add(relation)
         if _has_cycle(class_set, edges):
-            return None
+            return self._structured_parse_result(None, "cycle", text)
 
-        return {
+        artifact = {
             "domain": domain.strip(),
             "classes": classes,
             "subclass_axioms": [[child, parent] for child, parent in sorted(edges)],
@@ -203,6 +227,19 @@ class TaxonomyTask(BaseTask):
                 "n_subclass_axioms": len(edges),
             },
         }
+        return self._structured_parse_result(artifact, None, text)
+
+    def _structured_parse_result(
+        self,
+        artifact: dict | None,
+        rejection_reason: str | None,
+        raw_text: Any,
+    ) -> dict[str, Any]:
+        diagnostic = {"valid": artifact is not None}
+        if rejection_reason is not None:
+            diagnostic["rejection_reason"] = rejection_reason
+            diagnostic["raw_preview"] = _raw_preview(raw_text)
+        return {"artifact": artifact, "diagnostic": diagnostic}
 
     def _generation_spec_from_profile(self, profile: dict, rng=None) -> dict[str, Any]:
         taxonomies = profile.get("taxonomies") or []

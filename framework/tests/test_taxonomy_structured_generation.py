@@ -80,6 +80,41 @@ class TaxonomyStructuredGenerationTests(unittest.TestCase):
     def test_none_response_rejected(self):
         self.assertIsNone(self.task.parse_structured_generation(None))
 
+    def test_structured_generation_rejection_reasons(self):
+        cases = [
+            (None, "non_string_response"),
+            ("  \n\t", "empty_response"),
+            ("{bad", "malformed_json"),
+            (json.dumps({"classes": ["A"], "subclass_axioms": []}), "missing_or_invalid_domain"),
+            (json.dumps({"domain": "d", "classes": [], "subclass_axioms": []}), "missing_or_invalid_classes"),
+            (json.dumps({"domain": "d", "classes": ["A", "A"], "subclass_axioms": []}), "duplicate_classes"),
+            (json.dumps({"domain": "d", "classes": ["A"], "subclass_axioms": ["A"]}), "malformed_subclass_axiom"),
+            (json.dumps({"domain": "d", "classes": ["A"], "subclass_axioms": [["B", "A"]]}), "unknown_class_endpoint"),
+            (json.dumps({"domain": "d", "classes": ["A"], "subclass_axioms": [["A", "A"]]}), "self_loop"),
+            (json.dumps({"domain": "d", "classes": ["A", "B"], "subclass_axioms": [["A", "B"], ["B", "A"]]}), "cycle"),
+        ]
+        for text, reason in cases:
+            with self.subTest(reason=reason):
+                result = self.task.parse_structured_generation_with_diagnostics(text)
+                self.assertIsNone(result["artifact"])
+                self.assertFalse(result["diagnostic"]["valid"])
+                self.assertEqual(result["diagnostic"]["rejection_reason"], reason)
+
+    def test_valid_taxonomy_has_no_rejection_reason(self):
+        result = self.task.parse_structured_generation_with_diagnostics(_response())
+        self.assertIsNotNone(result["artifact"])
+        self.assertEqual(result["diagnostic"], {"valid": True})
+
+    def test_raw_output_preview_is_bounded(self):
+        text = "x" * 1200
+        result = self.task.parse_structured_generation_with_diagnostics(text)
+        self.assertEqual(result["diagnostic"]["rejection_reason"], "malformed_json")
+        self.assertEqual(len(result["diagnostic"]["raw_preview"]), 800)
+
+    def test_non_string_preview_is_safe(self):
+        result = self.task.parse_structured_generation_with_diagnostics(None)
+        self.assertIsNone(result["diagnostic"]["raw_preview"])
+
     def test_unknown_edge_endpoint_rejected(self):
         self.assertIsNone(self.task.parse_structured_generation(
             _response(axioms=[["GeneratedChild", "MissingRoot"]])
@@ -152,9 +187,13 @@ class TaxonomyStructuredGenerationTests(unittest.TestCase):
 
     def test_generated_gold_never_enters_evaluator_prompt(self):
         generated = self.task.parse_structured_generation(_response())
+        generated["generation_feedback"] = {
+            "attempts": [{"rejection_reason": "malformed_json", "raw_preview": "DiagnosticSecret"}],
+        }
         sample = self.task.get_eval_samples([generated])[0]
         self.assertNotIn("subclass_axioms", json.loads(sample["text"]))
         self.assertNotIn("GeneratedChild\", \"GeneratedRoot", sample["text"])
+        self.assertNotIn("DiagnosticSecret", sample["text"])
 
     def test_mocked_pipeline_generates_and_evaluates_one_taxonomy(self):
         with tempfile.TemporaryDirectory() as tmp:
