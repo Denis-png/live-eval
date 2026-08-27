@@ -27,16 +27,20 @@ so it can be inspected later.
         pipeline.py              - GET loop (Generate, Evaluate, Trash)
         data_loading.py          - dataset source resolution + local file loaders (m2/csv/tsv/jsonl)
         requirements.txt         - Python dependencies
-        configs/
-            config.yaml          - dataset, generator, task models, output
-            tasks/
-                gec.json         - GEC task config (error types, prompts, evaluators, model params)
-            tasks/
-                spam.json        - Spam task config (class-conditional generation)
+        configs/                 - one directory per task: config.yaml (dataset,
+                                   generator, task models, output) beside
+                                   <task>.json (error types, prompts, evaluators,
+                                   model params)
+            gec/       config.yaml + gec.json
+            spam/      config.yaml + spam.json
+            sentiment/ config.yaml + sentiment.json
+            taxonomy/  config.yaml + taxonomy.json
         tasks/
             base_task.py         - abstract task template (declares generation strategy)
             gec/task.py          - Grammatical Error Correction task (corruption: forward + inverse)
             spam/task.py         - Spam Detection task (class-conditional)
+            sentiment/task.py    - Sentiment Analysis task (corruption)
+            taxonomy/task.py     - Taxonomy Induction task (structured)
         generators/              - LLM that creates synthetic evaluation data
             base_generator.py    - shared generate() / generate_inverse() / generate_class_conditional() loops
             openai_generator.py  - OpenAI / Groq / OpenRouter / Mistral (OpenAI-compatible)
