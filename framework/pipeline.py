@@ -42,13 +42,8 @@ def _build_judge_call(config: dict, main_generator):
 # ── Task registry ────────────────────────────────────────────
 # Add new tasks here as they are implemented.
 
-def load_task(task_name: str, task_config: dict | None = None) -> BaseTask:
-    """Instantiate the task by name.
-
-    `task_config` is the config's whole `task:` block. No task consumes it yet —
-    `variant` is read straight from the config by resolve_output_paths/_build_meta —
-    but the parameter is accepted so variant-aware task construction can be wired
-    up without touching every call site."""
+def load_task(task_name: str) -> BaseTask:
+    """Instantiate the task by name."""
     if task_name == "gec":
         from framework.tasks.gec.task import GECTask
         return GECTask()
@@ -272,11 +267,11 @@ def generation_cell_slug(config: dict, strategy: str) -> str:
 
 def resolve_output_paths(config: dict, task_name: str, session: str) -> dict:
     """All artifact paths for one run session, under output.base_dir/<task>/<session>/.
-    If task.variant is set, the folder is named <task>_<variant> instead of <task>."""
+
+    The session name already carries the setup that produced it (see
+    generation_cell_slug), so every run of a task lands in one flat directory."""
     base = (config.get("output") or {}).get("base_dir", "framework/data/runs")
-    variant = (config.get("task") or {}).get("variant")
-    folder = f"{task_name}_{variant}" if variant else task_name
-    session_dir = os.path.join(base, folder, session)
+    session_dir = os.path.join(base, task_name, session)
     return {
         "session_dir": session_dir,
         "generated_dir": os.path.join(session_dir, "generated"),
@@ -340,11 +335,9 @@ def _build_meta(config: dict, task, runs_completed: int,
     else:
         dataset_meta = {"source": "huggingface", "name": ds["name"],
                         "split": ds["split"], "sample_size": config["generation"].get("sample_size")}
-    task_cfg = config.get("task") or {}
     return {
         "created": datetime.now().isoformat(timespec="seconds"),
-        "task": task_cfg.get("name", config["task"]["name"]),
-        "variant": task_cfg.get("variant") or None,
+        "task": config["task"]["name"],
         "strategy": strategy,
         "mode": mode,
         "seedless": seedless,
@@ -791,7 +784,7 @@ def run_pipeline(config: dict) -> dict:
     """Run the GET pipeline N times, evaluate the generated benchmark (mean±std)
     and — by default — the same models on the real benchmark, profile real-vs-
     generated fidelity, and write all artifacts under one per-session directory."""
-    task          = load_task(config["task"]["name"], config.get("task"))
+    task          = load_task(config["task"]["name"])
     real_data     = load_real_data(config, task)
     generator     = load_generator(config["generation"])
     judge_call    = _build_judge_call(config, generator)

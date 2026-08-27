@@ -1,3 +1,8 @@
+# Multi-model comparison config for the sentiment task.
+# Run with: python -m scripts.compare_models --config framework/configs/sentiment/compare.yaml
+# Per-model provider/model come from generation_models below; the
+# generation.provider/model here are only a fallback and are superseded.
+
 api_keys:
   groq: "${GROQ_API_KEY}"
   openai: "${OPENAI_API_KEY}"
@@ -61,3 +66,17 @@ compute:
 output:
   base_dir: "framework/data/runs"
   plots: true
+
+# ── Generation models to compare ─────────────────────────────
+# compare_models runs the pipeline once per entry over the SAME benchmark
+# sample, then writes a combined comparison.json plus a printed table.
+generation_models:
+  - provider: openrouter
+    model: z-ai/glm-5.2
+    temperature: 1.0
+  - provider: openrouter
+    model: xiaomi/mimo-v2.5
+    temperature: 1.0
+  - provider: openrouter
+    model: tencent/hy3:free
+    temperature: 1.0

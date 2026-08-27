@@ -1,3 +1,21 @@
+# Taxonomy Induction — benchmark + task selection.
+#
+# This is the config `python -m framework.profile_dataset` and the taxonomy
+# tooling read. It deliberately carries NO `generation:` block and no
+# `mode` / `seedless` knobs, unlike the other tasks:
+#
+#   Taxonomy uses the `structured` strategy, which builds from the benchmark's
+#   schema alone and has no seed/mode axis. The dispatch does not merely ignore
+#   those knobs — it REJECTS a real `mode` value and rejects `seedless: false`
+#   (see pipeline._run_generation), so copying the other tasks' knobs here would
+#   make every taxonomy run fail.
+#
+# There is also no compare.yaml for this task yet: a multi-model comparison
+# needs a complete pipeline config (generation + task_models), and no working
+# end-to-end taxonomy run config exists in the repo — docs/taxonomy_induction.md
+# points at a `taxonomy_run.yaml` that was never committed, and records that the
+# last end-to-end smoke run did not produce a valid taxonomy.
+
 dataset:
   source: local
   local:
