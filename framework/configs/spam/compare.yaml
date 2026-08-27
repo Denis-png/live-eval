@@ -21,6 +21,8 @@ dataset:
     format: csv
 
 generation:
+  mode: "inverse"              # forward | inverse — the generation cell,
+                               #   together with `seedless` below
   seedless: false              # true = generate from the profile only, no real seeds
   # profile_path: "framework/data/profiles/spam_profile.json"   # default shown; read only when seedless
   provider: "openrouter"           # superseded per generation_models entry
