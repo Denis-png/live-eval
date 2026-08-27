@@ -67,16 +67,47 @@ class LoadGenerationProfileTests(unittest.TestCase):
             )
             self.assertEqual(profile["profile_version"], 2)
 
-    def test_default_path_is_derived_from_task_name(self):
+    def test_missing_profile_names_the_expected_per_task_pattern(self):
         # Pin DEFAULT_PROFILE_DIR to a directory that cannot exist rather than
-        # relying on the real default (framework/data/profiles/) being empty —
-        # the seedless prerequisite (profile_dataset --topics) legitimately
-        # writes gec_profile.json there for local dev, and this test must not
-        # depend on that ambient file being absent.
+        # relying on the real default being empty — the seedless prerequisite
+        # (profile_dataset --topics) legitimately writes a profile there for
+        # local dev, and this test must not depend on that being absent.
         with mock.patch.object(pipeline, "DEFAULT_PROFILE_DIR", "/nonexistent/profiles/dir"):
             with self.assertRaises(RuntimeError) as ctx:
                 _load_generation_profile(_base_config(seedless=True), FakeTask())
-        self.assertIn("/nonexistent/profiles/dir/gec_profile.json", str(ctx.exception))
+        message = str(ctx.exception)
+        # Profiles live per task and are named for the benchmark and sample size,
+        # so the error shows the pattern searched, not one invented filename.
+        self.assertIn("/nonexistent/profiles/dir/gec/*_gec_profile.json", message)
+        self.assertIn("profile_dataset", message)
+
+    def test_several_profiles_for_a_task_is_ambiguous_and_raises(self):
+        with tempfile.TemporaryDirectory() as d:
+            task_dir = os.path.join(d, "gec")
+            os.makedirs(task_dir)
+            for name in ("fce_150_gec_profile.json", "conll_500_gec_profile.json"):
+                with open(os.path.join(task_dir, name), "w", encoding="utf-8") as f:
+                    json.dump({"profile_version": 2}, f)
+            with mock.patch.object(pipeline, "DEFAULT_PROFILE_DIR", d):
+                with self.assertRaises(RuntimeError) as ctx:
+                    _load_generation_profile(_base_config(seedless=True), FakeTask())
+            message = str(ctx.exception)
+            self.assertIn("fce_150_gec_profile.json", message)
+            self.assertIn("conll_500_gec_profile.json", message)
+            self.assertIn("generation.profile_path", message)
+
+    def test_single_profile_in_the_task_dir_resolves_silently(self):
+        with tempfile.TemporaryDirectory() as d:
+            task_dir = os.path.join(d, "gec")
+            os.makedirs(task_dir)
+            path = os.path.join(task_dir, "fce_150_gec_profile.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"profile_version": 2, "topics": {"a": {"fraction": 1.0}},
+                           "length_distributions": {"correct": {"words": {"bins": {"6-10": 1.0}}}},
+                           "style": {"correct": {}}}, f)
+            with mock.patch.object(pipeline, "DEFAULT_PROFILE_DIR", d):
+                profile = _load_generation_profile(_base_config(seedless=True), FakeTask())
+            self.assertEqual(profile["profile_version"], 2)
 
     def test_classification_profile_validated_against_per_label_topics(self):
         with tempfile.TemporaryDirectory() as d:
@@ -217,3 +248,42 @@ class GenerationCellSlugTests(unittest.TestCase):
                 self._slug(strategy).startswith(pipeline.resolve_mode(config, strategy)),
                 strategy,
             )
+
+
+class ProfileNamingTests(unittest.TestCase):
+    """Profiles are grouped per task and named for the benchmark they describe
+    plus the number of rows profiled, so a directory listing distinguishes two
+    profiles of the same task built from different benchmarks or sample sizes."""
+
+    def _cfg(self, dataset):
+        return {"dataset": dataset, "generation": {}}
+
+    def test_local_benchmark_uses_the_file_stem(self):
+        cfg = self._cfg({"source": "local",
+                         "local": {"path": "framework/data/benchmarks/gec/fce.m2",
+                                   "format": "m2"}})
+        self.assertEqual(pipeline.benchmark_slug(cfg), "fce")
+        self.assertEqual(pipeline.profile_filename(cfg, "gec", 150),
+                         "fce_150_gec_profile.json")
+
+    def test_huggingface_benchmark_uses_the_last_name_component(self):
+        cfg = self._cfg({"source": "huggingface",
+                         "huggingface": {"name": "cardiffnlp/tweet_eval",
+                                         "split": "test"}})
+        self.assertEqual(pipeline.benchmark_slug(cfg), "tweet_eval")
+        self.assertEqual(pipeline.profile_filename(cfg, "sentiment", 3000),
+                         "tweet_eval_3000_sentiment_profile.json")
+
+    def test_slug_is_filesystem_safe(self):
+        cfg = self._cfg({"source": "huggingface",
+                         "huggingface": {"name": "deysi/spam-detection.v2"}})
+        self.assertEqual(pipeline.benchmark_slug(cfg), "spam_detection_v2")
+
+    def test_profiles_are_grouped_per_task(self):
+        self.assertEqual(pipeline.profile_dir("spam"),
+                         os.path.join(pipeline.DEFAULT_PROFILE_DIR, "spam"))
+
+    def test_two_sample_sizes_do_not_collide(self):
+        cfg = self._cfg({"source": "local", "local": {"path": "b/fce.m2"}})
+        self.assertNotEqual(pipeline.profile_filename(cfg, "gec", 150),
+                            pipeline.profile_filename(cfg, "gec", 500))

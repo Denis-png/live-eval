@@ -201,7 +201,7 @@ generation:
   model: xiaomi/mimo-v2.5
   num_runs: 3
   sample_size: 1
-  profile_path: framework/data/profiles/taxonomy_profile.json
+  profile_path: framework/data/profiles/taxonomy/<benchmark>_<n>_taxonomy_profile.json
   max_parse_attempts: 2
   max_tokens: 4096
   feedback:

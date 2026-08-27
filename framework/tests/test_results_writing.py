@@ -168,23 +168,21 @@ class SeedlessMetaTests(unittest.TestCase):
         self.assertTrue(meta["seedless"])
         self.assertEqual(meta["profile_path"], "prof.json")
 
-    def test_profile_path_resolves_to_default_when_seedless_and_unset(self):
-        # IMPORTANT 2: both shipped configs leave generation.profile_path
-        # commented out, relying on the default _load_generation_profile
-        # resolves internally (framework/data/profiles/<task>_profile.json).
-        # _build_meta must record that SAME resolved default, not None —
-        # profiles are gitignored, so this is the only surviving record of
-        # what generated a seedless benchmark.
+    def test_profile_path_resolves_to_the_task_dir_when_seedless_and_unset(self):
+        # The shipped configs leave generation.profile_path commented out, so
+        # _build_meta must record the path _load_generation_profile actually
+        # resolved — profiles are gitignored, making this the only surviving
+        # record of what generated a seedless benchmark. With no profile on disk
+        # the resolver hands back the pattern it searched, which still names the
+        # per-task directory rather than collapsing to None.
         meta = self._meta(_CorruptionTask(), "forward", True)  # no profile_path key
-        self.assertEqual(
-            meta["profile_path"], os.path.join(DEFAULT_PROFILE_DIR, "gec_profile.json")
-        )
+        self.assertIn(os.path.join(DEFAULT_PROFILE_DIR, "gec"), meta["profile_path"])
+        self.assertIn("_gec_profile.json", meta["profile_path"])
 
-    def test_profile_path_resolves_to_default_for_class_conditional_task(self):
+    def test_profile_path_resolves_per_task_for_class_conditional(self):
         meta = self._meta(_ClassConditionalTask(), "inverse", True)  # no profile_path key
-        self.assertEqual(
-            meta["profile_path"], os.path.join(DEFAULT_PROFILE_DIR, "spam_profile.json")
-        )
+        self.assertIn(os.path.join(DEFAULT_PROFILE_DIR, "spam"), meta["profile_path"])
+        self.assertIn("_spam_profile.json", meta["profile_path"])
 
 
 class WriteResultsTests(unittest.TestCase):

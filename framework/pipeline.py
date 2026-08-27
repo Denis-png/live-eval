@@ -1,6 +1,8 @@
+import glob
 import json
 import os
 import random
+import re
 import sys
 from datetime import datetime
 
@@ -150,19 +152,57 @@ def load_error_distribution(config: dict, real_data: list[dict], task) -> dict:
 DEFAULT_PROFILE_DIR = "framework/data/profiles"
 
 
-def _resolve_profile_path(config: dict, task) -> str:
-    """The profile path seedless generation actually uses: generation.profile_path
-    if the config sets one, else the default framework/data/profiles/<task>_profile.json.
+def benchmark_slug(config: dict) -> str:
+    """Short identifier for the benchmark a profile describes: a local file's
+    stem, or the last path component of a HuggingFace dataset name."""
+    ds = resolve_dataset_config(config.get("dataset") or {})
+    if ds.get("source") == "local" and ds.get("path"):
+        raw = os.path.splitext(os.path.basename(ds["path"]))[0]
+    else:
+        raw = (ds.get("name") or "dataset").split("/")[-1]
+    return re.sub(r"[^0-9a-zA-Z]+", "_", str(raw)).strip("_").lower()
 
-    Single source of truth for that default, shared by `_load_generation_profile`
-    (which loads the file) and `_build_meta` (which records the path as
-    provenance). Profiles are gitignored, so `_build_meta`'s copy is the only
-    surviving record of what generated a seedless benchmark — it must resolve
-    the SAME default `_load_generation_profile` used, not just echo a possibly-
-    unset config key."""
+
+def profile_filename(config: dict, task_name: str, num_samples: int) -> str:
+    """<benchmark>_<sample_size>_<task>_profile.json — the sample size is the
+    number of rows actually profiled, so the name states what the file covers."""
+    return f"{benchmark_slug(config)}_{num_samples}_{task_name}_profile.json"
+
+
+def profile_dir(task_name: str) -> str:
+    """Profiles are grouped per task: framework/data/profiles/<task>/."""
+    return os.path.join(DEFAULT_PROFILE_DIR, task_name)
+
+
+def _resolve_profile_path(config: dict, task) -> str:
+    """The profile path seedless generation actually uses.
+
+    `generation.profile_path` wins when set. Otherwise the task's profile
+    directory is searched: the filename encodes the benchmark and the number of
+    rows profiled, which the pipeline cannot predict (a spam profile covers the
+    whole split, not generation.sample_size), so it matches rather than computes.
+    Exactly one profile resolves silently; several is ambiguous and raises,
+    naming them, rather than guessing which benchmark the run meant.
+
+    Single source of truth, shared by `_load_generation_profile` (which loads the
+    file) and `_build_meta` (which records the path as provenance). Profiles are
+    gitignored, so `_build_meta`'s copy is the only surviving record of what
+    generated a seedless benchmark."""
     gen = config.get("generation") or {}
-    return gen.get("profile_path") or os.path.join(
-        DEFAULT_PROFILE_DIR, f"{task.get_task_name()}_profile.json"
+    if gen.get("profile_path"):
+        return gen["profile_path"]
+    task_name = task.get_task_name()
+    pattern = os.path.join(profile_dir(task_name), f"*_{task_name}_profile.json")
+    matches = sorted(glob.glob(pattern))
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        # Hand the pattern back so the not-found error shows the expected shape.
+        return pattern
+    raise RuntimeError(
+        f"{len(matches)} profiles exist for task '{task_name}' in "
+        f"{profile_dir(task_name)}: " + ", ".join(os.path.basename(m) for m in matches)
+        + ". Set generation.profile_path to choose which benchmark to generate from."
     )
 
 
