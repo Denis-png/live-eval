@@ -73,7 +73,7 @@ class SeedPolicyTests(unittest.TestCase):
                  {"text": "WIN cash now", "label": "SPAM"}]
         out = gen.generate_class_conditional(
             real_seeds=seeds, seed_field="text", sample_size=1,
-            seed_policy="same_class", forward_prompt="new {class_name} like: {sentence}",
+            seed_policy="same_class", forward_prompts={"SPAM": "spam {sentence} :: {error_spec}", "HAM": "ham {sentence}"},
             rng=random.Random(0), **COMMON,
         )
         self.assertEqual(out[0]["label"], "SPAM")
@@ -86,7 +86,7 @@ class SeedPolicyTests(unittest.TestCase):
             gen.generate_class_conditional(
                 real_seeds=[{"text": "hi", "label": "HAM"}], seed_field="text",
                 sample_size=1, seed_policy="same_class",
-                forward_prompt="{class_name} {sentence}", rng=random.Random(0), **COMMON,
+                forward_prompts={"SPAM": "spam {sentence} :: {error_spec}", "HAM": "ham {sentence}"}, rng=random.Random(0), **COMMON,
             )
         self.assertIn("SPAM", str(ctx.exception))
 
@@ -184,10 +184,11 @@ class SeedlessPromptValidationTests(unittest.TestCase):
 
 
 class SameClassTechniqueTests(unittest.TestCase):
-    """same_class imitates a seed of the target class and injects nothing, so
-    reporting a sampled signal mix as its technique would be fiction."""
+    """same_class rewrites a seed of the target class. The positive class now
+    emphasises the sampled signal mix, so reporting it is honest; the negative
+    class injects nothing and stays "imitation"."""
 
-    def test_technique_is_imitation_for_both_classes(self):
+    def test_technique_reflects_what_actually_happened(self):
         seeds = [{"text": "see you at lunch soon", "label": "HAM"},
                  {"text": "WIN cash now today", "label": "SPAM"}]
         for class_prob, expected_label in ((1.0, "SPAM"), (0.0, "HAM")):
@@ -195,11 +196,60 @@ class SameClassTechniqueTests(unittest.TestCase):
             out = gen.generate_class_conditional(
                 **{**COMMON, "class_prob": class_prob},
                 real_seeds=seeds, seed_field="text", sample_size=1,
-                seed_policy="same_class", forward_prompt="{class_name}: {sentence}",
+                seed_policy="same_class", forward_prompts={"SPAM": "spam {sentence} :: {error_spec}", "HAM": "ham {sentence}"},
                 rng=random.Random(0),
             )
             self.assertEqual(out[0]["label"], expected_label)
-            self.assertEqual(out[0]["technique"], "imitation")
+            # The positive class now emphasises a sampled signal mix, so naming
+            # it is honest; the negative class still injects nothing.
+            expected_technique = ("phishing_link" if expected_label == "SPAM"
+                                  else "imitation")
+            self.assertEqual(out[0]["technique"], expected_technique)
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ForwardSignalEmphasisTests(unittest.TestCase):
+    """Forward mode used to inherit whatever signals its seed happened to carry,
+    so it could not target the empirical distribution the way inverse does. The
+    positive class now rewrites its seed emphasising a sampled signal mix."""
+
+    SEEDS = [{"text": "see you at lunch soon", "label": "HAM"},
+             {"text": "WIN cash now today", "label": "SPAM"}]
+    PROMPTS = {"SPAM": "rewrite {sentence} emphasising {error_spec}",
+               "HAM": "rewrite {sentence}"}
+
+    def _run(self, class_prob):
+        gen = FakeGenerator("Rewritten: a brand new message here")
+        out = gen.generate_class_conditional(
+            **{**COMMON, "class_prob": class_prob},
+            real_seeds=self.SEEDS, seed_field="text", sample_size=1,
+            seed_policy="same_class", forward_prompts=self.PROMPTS,
+            rng=random.Random(0),
+        )
+        return gen.prompts[0], out[0]
+
+    def test_positive_class_receives_the_sampled_signal_mix(self):
+        prompt, record = self._run(class_prob=1.0)
+        self.assertIn("insert a link", prompt)          # rendered error_spec
+        self.assertIn("WIN cash now today", prompt)     # its own-class seed
+        self.assertEqual(record["technique"], "phishing_link")
+
+    def test_negative_class_gets_no_signal_mix(self):
+        prompt, record = self._run(class_prob=0.0)
+        self.assertNotIn("insert a link", prompt)
+        self.assertIn("see you at lunch soon", prompt)
+        self.assertEqual(record["technique"], "imitation")
+
+    def test_missing_prompt_for_a_class_fails_before_any_call(self):
+        gen = FakeGenerator("Rewritten: x y z")
+        with self.assertRaises(RuntimeError) as ctx:
+            gen.generate_class_conditional(
+                **COMMON, real_seeds=self.SEEDS, seed_field="text", sample_size=2,
+                seed_policy="same_class", forward_prompts={"SPAM": "only {sentence} {error_spec}"},
+                rng=random.Random(0),
+            )
+        self.assertIn("forward_prompts", str(ctx.exception))
+        self.assertIn("HAM", str(ctx.exception))
+        self.assertEqual(gen.prompts, [])

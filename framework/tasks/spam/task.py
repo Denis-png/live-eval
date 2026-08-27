@@ -26,8 +26,8 @@ class SpamTask(BaseTask):
     def get_carrier_prompt(self) -> str | None:
         return self._config.get("carrier_prompt")
 
-    def get_forward_prompt(self) -> str | None:
-        return self._config.get("forward_prompt")
+    def get_forward_prompts(self) -> dict[str, str]:
+        return self._config.get("forward_prompts", {})
 
     def get_seedless_class_prompts(self) -> dict[str, str]:
         return self._config.get("seedless_class_prompts", {})
