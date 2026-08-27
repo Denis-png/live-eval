@@ -31,10 +31,11 @@ class PerModelConfigTests(unittest.TestCase):
             self.assertEqual(cfg["generation"]["provider"], "anthropic")
             self.assertEqual(cfg["generation"]["api_key"], "k1")  # re-resolved
             self.assertEqual(cfg["output"]["base_dir"], d)
-            # The session id carries the generation cell (mode + seedless) so a
-            # seedless comparison cannot overwrite the seeded one.
+            # The session id carries the generation cell (mode + seeded/seedless)
+            # so a seedless comparison cannot overwrite the seeded one, plus the
+            # "_compare" suffix marking it as one arm of a comparison.
             self.assertEqual(cfg["output"]["session_id"],
-                             "anthropic_claude_haiku_4_5_inverse")
+                             "anthropic_claude_haiku_4_5_inverse_seeded_compare")
 
 
 class ParseCompareArgsTests(unittest.TestCase):
@@ -161,9 +162,6 @@ class RunComparisonFailureTests(unittest.TestCase):
         })  # must not raise
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class SessionIdIncludesCellTests(unittest.TestCase):
     """The generation cell is part of session identity: without it a seedless
@@ -201,3 +199,6 @@ class SessionIdIncludesCellTests(unittest.TestCase):
     def test_provider_and_model_still_present(self):
         session = self._session(mode="inverse")
         self.assertTrue(session.startswith("openrouter_minimax_m3"))
+
+if __name__ == "__main__":
+    unittest.main()

@@ -64,8 +64,12 @@ so it can be inspected later.
             gleu.py              - GLEU score
             gec/                 - errant, errant_dist, cola, correction_extent, n_edits
             classification/      - accuracy, precision, recall, f1, fpr (spam)
-        data/
-            runs/                - per-session run artifacts, one dir per run (gitignored)
+        data/                    - all gitignored (only .gitkeep is committed)
+            benchmarks/<task>/   - source benchmark files (fce.m2, *.csv, *.jsonl)
+            profiles/            - profile JSON from `python -m framework.profile_dataset`
+            runs/<task>/<session>/ - per-session run artifacts; the session name
+                                   carries the setup that produced it, e.g.
+                                   20260827_120000_inverse_seedless
     docs/
         taxonomy_induction.md    - Taxonomy Induction task guide
 
@@ -93,7 +97,7 @@ so it can be inspected later.
          dataset:
            source: local            # huggingface | local
            huggingface: {name: "deysi/spam-detection-dataset", split: "train"}
-           local: {path: "framework/data/spam/sms_spam_ham_300.csv", format: csv}
+           local: {path: "framework/data/benchmarks/spam/sms_spam_ham_300.csv", format: csv}
 
      Local formats: `m2` (GEC benchmarks like FCE/CoNLL-14, annotator 0's edits),
      `csv`, `tsv` (header row, fields matched by the task's `parse_row`, e.g.

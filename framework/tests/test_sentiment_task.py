@@ -126,9 +126,6 @@ class SentimentRealEvalSamplesTests(unittest.TestCase):
         self.assertEqual(samples, [{"text": "good movie", "label": "POSITIVE"}])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class SentimentMissingLabelTests(unittest.TestCase):
     """A row whose label cannot be resolved must be skipped, not stringified.
@@ -173,3 +170,6 @@ class SentimentMissingLabelTests(unittest.TestCase):
         samples = self.task.get_real_eval_samples({}, rows)
         self.assertEqual(samples, [{"text": "labelled", "label": "POSITIVE"}])
         self.assertNotIn("None", [s["label"] for s in samples])
+
+if __name__ == "__main__":
+    unittest.main()

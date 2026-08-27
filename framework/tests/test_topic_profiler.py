@@ -107,9 +107,6 @@ class ProfileTopicsTests(unittest.TestCase):
         self.assertEqual(prompts[0], prompts[1])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class TopicPartitionTests(unittest.TestCase):
     """Fractions must total 1: every raw label counts under exactly one topic,
@@ -151,3 +148,6 @@ class TopicPartitionTests(unittest.TestCase):
         self.assertAlmostEqual(result["topics"]["money"]["fraction"], 0.5)
         self.assertAlmostEqual(result["topics"]["beta"]["fraction"], 0.25)
         self.assertAlmostEqual(result["topics"]["gamma"]["fraction"], 0.25)
+
+if __name__ == "__main__":
+    unittest.main()

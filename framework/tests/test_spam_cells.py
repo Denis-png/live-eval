@@ -115,9 +115,6 @@ class SpamCellDispatchTests(unittest.TestCase):
         self.assertFalse(self.generator.generate_class_conditional.called)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class ForwardSeededFailFastTests(unittest.TestCase):
     """The last of the five unsupported-cell guards to gain coverage: spam
@@ -136,3 +133,6 @@ class ForwardSeededFailFastTests(unittest.TestCase):
         self.assertIn("seedless=false", message)
         self.assertIn("forward_prompt", message)
         self.assertFalse(generator.generate_class_conditional.called)
+
+if __name__ == "__main__":
+    unittest.main()

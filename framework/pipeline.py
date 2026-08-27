@@ -248,6 +248,28 @@ def aggregate(all_run_scores: list[dict]) -> dict:
 
 # ── Output paths ──────────────────────────────────────────────
 
+def resolve_mode(config: dict, strategy: str) -> str:
+    """The mode that actually runs. `corruption` defaults to "forward",
+    `class_conditional` to "inverse" — shared by the session name, _build_meta
+    and the generation dispatch so all three always agree."""
+    return (config.get("generation") or {}).get(
+        "mode", "inverse" if strategy == "class_conditional" else "forward")
+
+
+def generation_cell_slug(config: dict, strategy: str) -> str:
+    """Filesystem-safe label for the generation cell, e.g. "inverse_seeded".
+
+    Naming a session after its setup means a directory listing shows what was
+    run without opening results.json, and two cells of the same task can never
+    collide in one output directory."""
+    if strategy == "structured":
+        # Structured generation builds from the benchmark's schema alone: it has
+        # no seed/mode axis, so naming it "forward_seedless" would be fiction.
+        return "structured"
+    seeding = "seedless" if (config.get("generation") or {}).get("seedless") else "seeded"
+    return f"{resolve_mode(config, strategy)}_{seeding}"
+
+
 def resolve_output_paths(config: dict, task_name: str, session: str) -> dict:
     """All artifact paths for one run session, under output.base_dir/<task>/<session>/.
     If task.variant is set, the folder is named <task>_<variant> instead of <task>."""
@@ -309,7 +331,7 @@ def _build_meta(config: dict, task, runs_completed: int,
     if strategy == "structured":
         mode = None
     else:
-        mode = gen.get("mode", "inverse" if strategy == "class_conditional" else "forward")
+        mode = resolve_mode(config, strategy)
     seedless = True if strategy == "structured" else bool(gen.get("seedless"))
     if ds["source"] == "local":
         dataset_meta = {"source": "local", "path": ds["path"],
@@ -791,7 +813,10 @@ def run_pipeline(config: dict) -> dict:
     real_reference = task.get_real_eval_samples(config, real_data)
     class_prob = _resolve_class_prob(config, real_reference)
 
-    session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # <timestamp>_<mode>_<seeded|seedless>: timestamp first so a directory
+    # listing still sorts chronologically, setup second so it is readable.
+    session_id = (f"{datetime.now():%Y%m%d_%H%M%S}"
+                  f"_{generation_cell_slug(config, strategy)}")
     if config.get("output", {}).get("session_id"):
         session_id = config["output"]["session_id"]
     paths = resolve_output_paths(config, task.get_task_name(), session_id)

@@ -166,7 +166,7 @@ class BaseTask(ABC):
     def get_task_name(self) -> str:
         """
         Short lowercase task identifier, matching configs/<name>/<name>.json and
-        the data/generated/<name>/ archive dir (e.g. "gec"). Must be overridden
+        data/benchmarks/<name>/ (e.g. "gec"). Must be overridden
         — do NOT derive from the class name, which would drift from the config.
         """
         pass

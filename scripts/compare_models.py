@@ -21,7 +21,7 @@ from framework.main import (
     apply_overrides,
     validate_config,
 )
-from framework.pipeline import run_pipeline
+from framework.pipeline import generation_cell_slug, load_task, run_pipeline
 
 
 def parse_compare_args(argv=None):
@@ -49,7 +49,7 @@ def _slug(text: str) -> str:
     return re.sub(r"[^0-9a-zA-Z]+", "_", str(text)).strip("_").lower()
 
 
-def _per_model_config(base: dict, entry: dict) -> dict:
+def _per_model_config(base: dict, entry: dict, strategy: str = "corruption") -> dict:
     """Deep-copy base, overlay one generation_models entry, re-resolve the API key,
     and route output to its own session under output.base_dir."""
     cfg = copy.deepcopy(base)
@@ -62,14 +62,11 @@ def _per_model_config(base: dict, entry: dict) -> dict:
 
     base_dir = (cfg.get("output") or {}).get("base_dir", "framework/data/runs")
     # The generation cell is part of the session identity: without it a seedless
-    # comparison would overwrite the seeded one for the same provider/model.
-    gen = cfg["generation"]
-    cell = gen.get("mode") or ""
-    if gen.get("seedless"):
-        cell = f"{cell}_seedless" if cell else "seedless"
-    session = "_".join(
-        part for part in (_slug(provider), _slug(model), _slug(cell) if cell else "") if part
-    )
+    # comparison would overwrite the seeded one for the same provider/model. The
+    # "_compare" suffix marks the session as one arm of a multi-model comparison
+    # rather than a standalone run.
+    cell = generation_cell_slug(cfg, strategy)
+    session = f"{_slug(provider)}_{_slug(model)}_{_slug(cell)}_compare"
     cfg.setdefault("output", {})["base_dir"] = base_dir
     cfg["output"]["session_id"] = session
     return cfg
@@ -115,9 +112,12 @@ def run_comparison(base_config: dict) -> dict:
 
     # Build every per-model config up front: a missing API key for entry 3
     # should fail here, not after entries 1 and 2 have already burned API spend.
+    # One task instance for the whole comparison: the strategy is a property of
+    # the task, identical for every generation model in the list.
+    strategy = load_task(base_config["task"]["name"]).get_generation_strategy()
     configs = []
     for entry in entries:
-        cfg = _per_model_config(base_config, entry)
+        cfg = _per_model_config(base_config, entry, strategy)
         configs.append((f"{cfg['generation']['provider']}/{cfg['generation']['model']}", cfg))
 
     all_results = {}

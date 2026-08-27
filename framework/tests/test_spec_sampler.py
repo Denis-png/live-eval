@@ -241,9 +241,6 @@ class RenderSpecTests(unittest.TestCase):
         self.assertIn("8", text)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class CompanionBlockValidationTests(unittest.TestCase):
     """Topics alone are not enough — sample_content_spec also draws a length and
@@ -278,3 +275,6 @@ class CompanionBlockValidationTests(unittest.TestCase):
         self.assertEqual(self._load(GEC_PROFILE)["profile_version"], 2)
         self.assertEqual(
             self._load(SPAM_PROFILE, topics_key="topics_per_label")["profile_version"], 2)
+
+if __name__ == "__main__":
+    unittest.main()
