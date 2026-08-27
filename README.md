@@ -227,7 +227,7 @@ clone, before the first seedless run:
 
     python -m framework.profile_dataset --task gec \
       --config framework/configs/gec/config.yaml --topics --topic-sample-size 20 \
-      --output framework/data/profiles/gec_profile.json
+      # writes framework/data/profiles/gec/<benchmark>_<n>_gec_profile.json
 
 `--topics` is required for seedless generation — it adds the LLM-driven `topics`
 (GEC) / `topics_per_label` (Spam) block the content-spec sampler needs; without it,

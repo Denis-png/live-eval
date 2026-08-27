@@ -16,9 +16,9 @@ from typing import Any
 from framework.profiling.dataset_profiler import save_profile_json
 from framework.profiling.gec_profiler import profile_gec_rows
 
-DEFAULT_GEC_OUTPUT = "framework/data/profiles/gec_profile.json"
-DEFAULT_SPAM_OUTPUT = "framework/data/profiles/spam_profile.json"
-DEFAULT_TAXONOMY_OUTPUT = "framework/data/profiles/taxonomy_profile.json"
+# Output paths are derived per profile: framework/data/profiles/<task>/
+# <benchmark>_<sample_size>_<task>_profile.json, where sample_size is the number
+# of rows actually profiled (see pipeline.profile_filename). --output overrides.
 DEFAULT_GEC_DATASET = "agentlans/grammar-correction"
 DEFAULT_GEC_SPLIT = "train"
 _ENV_VAR_RE = re.compile(r"\$\{([A-Z0-9_]+)\}")
@@ -33,7 +33,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--task", choices=("gec", "spam", "taxonomy"), default="gec", help="Task to profile")
     parser.add_argument("--config", required=True,
                         help="Path to config YAML (e.g. framework/configs/gec/config.yaml)")
-    parser.add_argument("--output", help="Path to output JSON profile")
+    parser.add_argument("--output",
+                        help="Path to output JSON profile (default: "
+                             "framework/data/profiles/<task>/"
+                             "<benchmark>_<sample_size>_<task>_profile.json)")
     parser.add_argument(
         "--topics", action="store_true",
         help="Also run LLM topic profiling (uses the 'profiling' config block, "
@@ -101,6 +104,15 @@ def _build_topic_call(config: dict):
         )
     print(f"Topics   : {cfg['provider']} / {cfg['model']}")
     return pipeline.load_generator(cfg).call_api
+
+
+def _default_output(config: dict[str, Any], task_name: str, num_samples: int) -> str:
+    """Where this profile lands when --output is not given. Built from the same
+    helpers the pipeline uses to find it again, so writer and reader agree."""
+    from framework.pipeline import profile_dir, profile_filename
+
+    return os.path.join(profile_dir(task_name),
+                        profile_filename(config, task_name, num_samples))
 
 
 def _fmt_length(words: dict[str, Any]) -> str:
@@ -180,7 +192,8 @@ def _profile_gec(config: dict[str, Any], output: str, topic_call=None, topic_sam
             correct_texts, topic_call, sample_size=topic_sample_size
         )
 
-    output_path = save_profile_json(profile, output)
+    output_path = save_profile_json(
+        profile, output or _default_output(config, "gec", profile["num_samples"]))
 
     print("\nGEC dataset profile summary")
     print("=" * 27)
@@ -233,7 +246,8 @@ def _profile_spam(config: dict[str, Any], output: str, topic_call=None, topic_sa
         topic_call_api=topic_call,
         topic_sample_size=topic_sample_size,
     )
-    output_path = save_profile_json(profile, output)
+    output_path = save_profile_json(
+        profile, output or _default_output(config, "spam", profile["num_samples"]))
     labels = profile["label_distribution"]
 
     signals = profile.get("spam_signals", {})
@@ -282,7 +296,8 @@ def _profile_taxonomy(config: dict[str, Any], output: str) -> str:
 
     rows = list(iter_local_rows(dataset["path"], dataset.get("format")))
     profile = profile_taxonomy_rows(rows)
-    output_path = save_profile_json(profile, output)
+    output_path = save_profile_json(
+        profile, output or _default_output(config, "taxonomy", profile["num_taxonomies"]))
     summary = profile["summary"]
 
     print("\nTaxonomy dataset profile summary")
@@ -306,12 +321,12 @@ def main() -> None:
     topic_call = _build_topic_call(config) if args.topics else None
 
     if args.task == "taxonomy":
-        _profile_taxonomy(config, args.output or DEFAULT_TAXONOMY_OUTPUT)
+        _profile_taxonomy(config, args.output)
     elif args.task == "spam":
-        _profile_spam(config, args.output or DEFAULT_SPAM_OUTPUT,
+        _profile_spam(config, args.output,
                       topic_call, args.topic_sample_size)
     else:
-        _profile_gec(config, args.output or DEFAULT_GEC_OUTPUT,
+        _profile_gec(config, args.output,
                      topic_call, args.topic_sample_size)
 
 
