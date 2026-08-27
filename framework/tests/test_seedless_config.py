@@ -182,3 +182,38 @@ class ErrorDistLoadedForSeedlessForwardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GenerationCellSlugTests(unittest.TestCase):
+    """Session directories are named after the setup that produced them, so a
+    listing shows what was run without opening results.json."""
+
+    def _slug(self, strategy, **generation):
+        return pipeline.generation_cell_slug({"generation": generation}, strategy)
+
+    def test_corruption_cells(self):
+        self.assertEqual(self._slug("corruption", mode="inverse"), "inverse_seeded")
+        self.assertEqual(self._slug("corruption", mode="forward", seedless=True),
+                         "forward_seedless")
+
+    def test_corruption_defaults_to_forward(self):
+        self.assertEqual(self._slug("corruption"), "forward_seeded")
+
+    def test_class_conditional_defaults_to_inverse(self):
+        # Matches _build_meta's per-strategy default, so the directory name and
+        # the recorded meta.mode can never disagree.
+        self.assertEqual(self._slug("class_conditional"), "inverse_seeded")
+        self.assertEqual(self._slug("class_conditional", seedless=True),
+                         "inverse_seedless")
+
+    def test_structured_has_no_mode_or_seed_axis(self):
+        self.assertEqual(self._slug("structured"), "structured")
+        self.assertEqual(self._slug("structured", mode="forward"), "structured")
+
+    def test_slug_matches_the_mode_meta_records(self):
+        for strategy in ("corruption", "class_conditional"):
+            config = {"generation": {}}
+            self.assertTrue(
+                self._slug(strategy).startswith(pipeline.resolve_mode(config, strategy)),
+                strategy,
+            )

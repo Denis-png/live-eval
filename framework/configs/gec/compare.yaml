@@ -15,7 +15,7 @@ api_keys:
 dataset:
   source: local
   local:
-    path: "framework/data/gec/fce.m2"
+    path: "framework/data/benchmarks/gec/fce.m2"
     format: m2
 
 generation:

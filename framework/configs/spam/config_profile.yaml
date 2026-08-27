@@ -14,7 +14,7 @@ api_keys:
 dataset:
   source: local
   local:
-    path: "framework/data/spam/sms_spam_sample_300.csv"
+    path: "framework/data/benchmarks/spam/sms_spam_ham_300.csv"
     format: csv
 
 # ── IMPORTANT: run profile_dataset before this config ───────

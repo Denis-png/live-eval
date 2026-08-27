@@ -179,9 +179,6 @@ class TaxonomyFidelityPlotTests(unittest.TestCase):
         self.assertIn("taxonomy structural distributions", fig._suptitle.get_text())
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class HiddenMetricTests(unittest.TestCase):
     """fpr carries no signal in the figures (it reads 0.00/0.00 on a good model).
@@ -220,3 +217,6 @@ class SubtitleCellTests(unittest.TestCase):
 
     def test_empty_meta_still_empty(self):
         self.assertEqual(plots._subtitle(None), "")
+
+if __name__ == "__main__":
+    unittest.main()

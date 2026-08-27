@@ -17,7 +17,7 @@ api_keys:
 dataset:
   source: local # huggingface | local
   local:
-    path: "framework/data/gec/fce.m2"
+    path: "framework/data/benchmarks/gec/fce.m2"
     format: m2 # m2 | csv | tsv (optional — inferred from the extension)
 
 # ── Generation (LLM that creates synthetic corrupted sentences) ──

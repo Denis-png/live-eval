@@ -36,7 +36,7 @@ Example preparation command:
 ```bash
 python scripts/prepare_taxonomy_benchmark.py \
   --input /path/to/pizza.owl \
-  --output framework/data/taxonomy/pizza.jsonl \
+  --output framework/data/benchmarks/taxonomy/pizza.jsonl \
   --ontology-id pizza \
   --domain pizza
 ```

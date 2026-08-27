@@ -146,9 +146,6 @@ class SeedPolicyTests(unittest.TestCase):
         self.assertIn("topic: chat", gen.prompts[0])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class SeedlessPromptValidationTests(unittest.TestCase):
     """seed_policy="none" indexes seedless_prompts/specs_by_label by the drawn
@@ -203,3 +200,6 @@ class SameClassTechniqueTests(unittest.TestCase):
             )
             self.assertEqual(out[0]["label"], expected_label)
             self.assertEqual(out[0]["technique"], "imitation")
+
+if __name__ == "__main__":
+    unittest.main()

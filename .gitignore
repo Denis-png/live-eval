@@ -9,10 +9,11 @@ venv/
 .venv/
 
 # ── Data ────────────────────────────────────────────────────
-# Never commit datasets or generated runs — only the folder
-# structure (.gitkeep). Benchmark files go in framework/data/<task>/,
-# archived synthetic runs in framework/data/generated/<task>/.
-# (experiments/Denis/data/ has its own .gitignore with whitelisted plots.)
+# framework/data/ has exactly three top-level folders and none of their
+# contents are committed — only the folder structure (.gitkeep):
+#   benchmarks/<task>/  source benchmark files (fce.m2, *.csv, *.jsonl)
+#   profiles/           profile JSON from `python -m framework.profile_dataset`
+#   runs/               per-session run artifacts
 framework/data/**
 !framework/data/**/
 !framework/data/**/.gitkeep
@@ -27,6 +28,11 @@ framework/data/**/*.csv
 results.json
 results/
 
+# ── Experiments ─────────────────────────────────────────────
+# Personal scratch space: notebooks, local datasets, venvs. Kept on disk,
+# never in the repo — it reached 59GB locally.
+experiments/
+
 # ── Secrets ─────────────────────────────────────────────────
 # Keep example.env as the template; real keys go in .env (never committed).
 .env
@@ -40,6 +46,8 @@ results/
 .vscode/
 .DS_Store
 
-# ── Documentation & other noise ─────────────────────────────
-docs
+# ── Tooling scratch ─────────────────────────────────────────
+# Only the agent scratch dirs are ignored — docs/ itself holds real
+# project documentation (e.g. docs/taxonomy_induction.md).
+docs/superpowers/
 .superpowers
