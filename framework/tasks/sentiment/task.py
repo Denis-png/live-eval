@@ -3,7 +3,7 @@ import json
 import os
 from ..base_task import BaseTask
 
-_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "configs", "tasks", "sentiment.json")
+_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "configs", "sentiment", "sentiment.json")
 
 
 def _load_config() -> dict:
@@ -52,7 +52,7 @@ class SentimentTask(BaseTask):
             return TransformerSentimentModel(merged)
         raise ValueError(
             f"Unsupported sentiment model type: '{model_type}'. "
-            f"Add it to configs/tasks/sentiment.json and tasks/sentiment/task.py."
+            f"Add it to configs/sentiment/sentiment.json and tasks/sentiment/task.py."
         )
 
     def get_label(self, result: dict) -> str | None:

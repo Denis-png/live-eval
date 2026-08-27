@@ -21,7 +21,7 @@ dataset:
 
 # ── Generation ───────────────────────────────────────────────────────────────
 # Strategy: "corruption" (default) — the LLM rewrites a real tweet, injecting
-# one of the sentiment error types defined in configs/tasks/sentiment.json.
+# one of the sentiment error types defined in configs/sentiment/sentiment.json.
 # Only "forward" mode is meaningful for corruption tasks (text→text, no class
 # conditioning). Judge is disabled — the prompt format is deterministic enough.
 generation:
