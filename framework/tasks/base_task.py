@@ -83,10 +83,12 @@ class BaseTask(ABC):
         Placeholders: {spec}, {error_spec}. Return None if unsupported."""
         return None
 
-    def get_forward_prompt(self) -> str | None:
-        """Same-class imitation prompt for classification forward mode.
-        Placeholders: {sentence}, {class_name}. Return None if unsupported."""
-        return None
+    def get_forward_prompts(self) -> dict[str, str]:
+        """{label: prompt} for same-class imitation in classification forward
+        mode. Placeholder {sentence}; the positive class also gets {error_spec}
+        so forward generation can target the empirical signal mix instead of
+        inheriting whatever signals its seed happened to carry."""
+        return {}
 
     def get_seedless_class_prompts(self) -> dict[str, str]:
         """{label: prompt} for direct per-class seedless generation.

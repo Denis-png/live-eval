@@ -517,7 +517,7 @@ class BaseGenerator(ABC):
         seed_policy: str = "cross_class",
         real_seeds: list[dict] | None = None,
         seed_field: str | None = None,
-        forward_prompt: str | None = None,
+        forward_prompts: dict[str, str] | None = None,
         seedless_prompts: dict[str, str] | None = None,
         specs_by_label: dict[str, list[str]] | None = None,
         label_field: str = "label",
@@ -535,10 +535,12 @@ class BaseGenerator(ABC):
           `Corrupted:` line). Negative → paraphrase the seed via `negative_prompt`
           (a `Rewritten:` line).
         - "same_class": the seed is drawn from the subset of `real_seeds` whose
-          `label_field` matches the drawn class, and both classes are produced via
-          `forward_prompt` (a `Rewritten:` line). Raises RuntimeError if that
-          subset is empty. Nothing is injected, so the recorded technique is
-          "imitation" for both classes.
+          `label_field` matches the drawn class, and each class is produced via
+          `forward_prompts[label]` (a `Rewritten:` line). Raises RuntimeError if
+          that subset is empty. The positive class rewrites its seed emphasising
+          the sampled signal mix, so forward generation targets the empirical
+          distribution instead of inheriting its seed's signals; the negative
+          class is a plain same-class rewrite, recorded as "imitation".
         - "none": no real seed at all — content comes from a per-label spec pool
           (`specs_by_label`) rendered through `seedless_prompts[label]` (a
           `Message:` line). The record's "seed" field is "".
@@ -553,6 +555,14 @@ class BaseGenerator(ABC):
         judge_fn = judge_call or self.call_api
         if seed_policy in ("cross_class", "same_class") and not real_seeds:
             return synthetic
+        if seed_policy == "same_class":
+            missing = [lbl for lbl in (positive_label, negative_label)
+                       if not (forward_prompts or {}).get(lbl)]
+            if missing:
+                raise RuntimeError(
+                    f"seed_policy='same_class' needs forward_prompts entries for every "
+                    f"class; missing or empty: {', '.join(missing)}."
+                )
         if seed_policy == "none":
             # Both dicts are indexed by the drawn label inside the loop. Check
             # them here so a task that supplies only one class fails before the
@@ -601,18 +611,20 @@ class BaseGenerator(ABC):
             is_positive = rng.random() < class_prob
             label = positive_label if is_positive else negative_label
 
-            # same_class imitates a seed of the target class: it injects nothing,
-            # so it neither samples a signal mix nor reports one as its technique.
-            injects = is_positive and seed_policy in ("cross_class", "none")
+            # Every policy targets the empirical signal mix for the positive
+            # class — same_class emphasises the sampled signals in its rewrite
+            # rather than inheriting whatever its seed happened to carry, so
+            # forward generation is steerable the way inverse already is. The
+            # negative class never carries signals under any policy.
             keys: list[str] = []
             error_spec = ""
-            if injects:
+            if is_positive:
                 keys = _sample_categories(type_dist, count_dist, rng)
                 error_spec = "; ".join(error_descriptions.get(k, k) for k in keys)
-            if seed_policy == "same_class":
-                technique = "imitation"
+            if is_positive:
+                technique = ", ".join(keys)
             else:
-                technique = ", ".join(keys) if is_positive else "paraphrase"
+                technique = "imitation" if seed_policy == "same_class" else "paraphrase"
 
             if seed_policy == "cross_class":
                 if is_positive:
@@ -631,7 +643,9 @@ class BaseGenerator(ABC):
                 source = seed.get(seed_field)
                 if _missing_seed(i, source):
                     continue
-                prompt = forward_prompt.format(sentence=source, class_name=label)
+                template = forward_prompts[label]
+                prompt = (template.format(sentence=source, error_spec=error_spec)
+                          if is_positive else template.format(sentence=source))
                 tag = "Rewritten"
             elif seed_policy == "none":
                 source = None

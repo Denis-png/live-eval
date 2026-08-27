@@ -562,7 +562,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
         seedless = bool(gen_cfg.get("seedless"))
         # Required regardless of seed_policy — generate_class_conditional's
         # signature has no defaults for these, even though same_class/none
-        # policies use forward_prompt/seedless_prompts instead of inject_prompt.
+        # policies use forward_prompts/seedless_prompts instead of inject_prompt.
         common_kwargs = dict(
             class_prob=class_prob,
             type_dist=error_dist["type_dist"],
@@ -631,11 +631,11 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                 **common_kwargs,
             )
         else:
-            forward_prompt = task.get_forward_prompt()
-            if not forward_prompt:
+            forward_prompts = task.get_forward_prompts()
+            if not forward_prompts:
                 raise RuntimeError(
                     f"{task.get_task_name()} does not support mode=forward with "
-                    f"seedless=false (no forward_prompt)."
+                    f"seedless=false (no forward_prompts)."
                 )
             real_seeds = task.get_seed_pool(config, real_data, "forward")
             # seed_policy="same_class" needs seeds of BOTH classes (it draws
@@ -660,7 +660,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                 seed_field="text",
                 label_field=label_field,
                 seed_policy="same_class",
-                forward_prompt=forward_prompt,
+                forward_prompts=forward_prompts,
                 **common_kwargs,
             )
     else:

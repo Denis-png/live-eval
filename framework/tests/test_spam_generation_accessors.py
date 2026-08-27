@@ -13,11 +13,26 @@ class SpamPromptTests(unittest.TestCase):
         self.assertIn("{spec}", prompt)
         self.assertIn("Message:", prompt)
 
-    def test_forward_prompt_has_sentence_and_class_name(self):
-        prompt = self.task.get_forward_prompt()
-        self.assertIn("{sentence}", prompt)
-        self.assertIn("{class_name}", prompt)
-        self.assertIn("Rewritten:", prompt)
+    def test_forward_prompts_cover_both_labels(self):
+        prompts = self.task.get_forward_prompts()
+        self.assertEqual(set(prompts), {"SPAM", "HAM"})
+        for prompt in prompts.values():
+            self.assertIn("{sentence}", prompt)
+            self.assertIn("Rewritten:", prompt)
+
+    def test_only_the_positive_forward_prompt_takes_a_signal_mix(self):
+        # Forward SPAM targets the empirical signal distribution rather than
+        # inheriting whatever its seed carried; HAM has no signals to emphasise.
+        prompts = self.task.get_forward_prompts()
+        self.assertIn("{error_spec}", prompts["SPAM"])
+        self.assertNotIn("{error_spec}", prompts["HAM"])
+
+    def test_superseded_prose_profile_prompts_are_gone(self):
+        # dataset_profiling/profile_inject/profile_ham/spam_to_spam described an
+        # earlier prose-profile strategy that the two-knob model replaced.
+        for key in ("dataset_profiling_prompt", "profile_inject_prompt",
+                    "profile_ham_prompt", "spam_to_spam_prompt"):
+            self.assertNotIn(key, self.task._config)
 
     def test_seedless_class_prompts_cover_both_labels(self):
         prompts = self.task.get_seedless_class_prompts()
