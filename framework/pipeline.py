@@ -55,6 +55,9 @@ def load_task(task_name: str, task_config: dict | None = None) -> BaseTask:
     elif task_name == "spam":
         from framework.tasks.spam.task import SpamTask
         return SpamTask()
+    elif task_name == "sentiment":
+        from framework.tasks.sentiment.task import SentimentTask
+        return SentimentTask()
     elif task_name == "taxonomy":
         from framework.tasks.taxonomy.task import TaxonomyTask
         return TaxonomyTask()
@@ -102,6 +105,7 @@ def load_real_data(config: dict, task: BaseTask) -> list[dict]:
         )
         rows = load_dataset(
             ds_config["name"],
+            ds_config.get("subset"),
             split=ds_config["split"],
             streaming=ds_config["streaming"],
             token=hf_token or None,
@@ -376,6 +380,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
     gen_cfg = config["generation"]
     sample_size = gen_cfg["sample_size"]
     strategy = task.get_generation_strategy()
+    _profile_driven = False
 
     if strategy == "structured":
         if gen_cfg.get("mode") not in (None, "structured", "none", "n/a"):

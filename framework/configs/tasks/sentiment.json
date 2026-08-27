@@ -1,0 +1,30 @@
+{
+    "error_types": [
+        "sentiment_flip_negative",
+        "sentiment_flip_positive",
+        "sarcasm_injection",
+        "negation_insertion",
+        "intensity_reduction",
+        "paraphrase"
+    ],
+    "evaluators": ["accuracy", "macro_precision", "macro_recall", "macro_f1"],
+    "models": {
+        "bertweet": {
+            "max_length": 128,
+            "label_map": {
+                "POS": "POSITIVE",
+                "NEU": "NEUTRAL",
+                "NEG": "NEGATIVE"
+            }
+        },
+        "multilingual": {
+            "max_length": 256,
+            "label_map": {
+                "positive": "POSITIVE",
+                "neutral":  "NEUTRAL",
+                "negative": "NEGATIVE"
+            }
+        }
+    },
+    "prompt": "You are a linguistic expert. Your task is to rewrite a sentence to change its sentiment according to the given type.\n\nError types:\n- sentiment_flip_negative: Rewrite the sentence to express a clearly negative sentiment.\n- sentiment_flip_positive: Rewrite the sentence to express a clearly positive sentiment.\n- sarcasm_injection: Rewrite the sentence to be sarcastic while appearing superficially positive.\n- negation_insertion: Insert a negation that flips the overall sentiment of the sentence.\n- intensity_reduction: Weaken the sentiment so the sentence becomes closer to neutral.\n- paraphrase: Rephrase the sentence while preserving its original sentiment exactly.\n\nAlways respond in this exact format (no extra text):\nError type: <type>\nGenerated: <rewritten sentence>\nGround truth: <original sentence>\n\nInput sentence: {sentence}"
+}
