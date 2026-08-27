@@ -6,36 +6,8 @@ from datetime import datetime
 
 import numpy as np
 from framework.data_loading import iter_local_rows, resolve_dataset_config
+from framework.generators.factory import load_generator
 from framework.tasks.base_task import BaseTask
-
-
-# ── Generator registry ───────────────────────────────────────
-# Add new providers here as they are implemented.
-
-# Anthropic-compatible providers — use the Anthropic SDK against a custom base_url.
-_ANTHROPIC_BASE_URLS = {
-    "minimax": "https://api.minimax.io/anthropic",
-    # "anthropic" → None (default endpoint)
-}
-
-
-def load_generator(config: dict):
-    provider = config["provider"]
-    if provider in ("openai", "groq", "openrouter", "mistral"):
-        from framework.generators.openai_generator import OpenAIGenerator
-        return OpenAIGenerator(config)
-    elif provider in ("anthropic", "minimax"):
-        from framework.generators.anthropic_generator import AnthropicGenerator
-        if not config.get("base_url") and provider in _ANTHROPIC_BASE_URLS:
-            config = {**config, "base_url": _ANTHROPIC_BASE_URLS[provider]}
-        return AnthropicGenerator(config)
-    elif provider == "google":
-        from framework.generators.google_generator import GoogleGenerator
-        return GoogleGenerator(config)
-    raise ValueError(
-        f"Unknown provider: '{provider}'. "
-        f"Supported: openai, groq, openrouter, mistral, anthropic, minimax, google."
-    )
 
 
 # ── Judge generator ──────────────────────────────────────────
@@ -86,6 +58,9 @@ def load_task(task_name: str, task_config: dict | None = None) -> BaseTask:
     elif task_name == "sentiment":
         from framework.tasks.sentiment.task import SentimentTask
         return SentimentTask()
+    elif task_name == "taxonomy":
+        from framework.tasks.taxonomy.task import TaxonomyTask
+        return TaxonomyTask()
     raise ValueError(
         f"Unknown task: '{task_name}'. "
         f"Register it in pipeline.load_task() and add configs/{task_name}/{task_name}.json."
@@ -202,6 +177,12 @@ def _load_generation_profile(config: dict, task) -> dict | None:
     Returns None when generation.seedless is falsy. Runs before the generation
     loop so a missing or un-topic-profiled profile fails before any API spend."""
     gen = config.get("generation") or {}
+    if task.get_generation_strategy() == "structured":
+        if gen.get("seedless") is False:
+            return None
+        path = _resolve_profile_path(config, task)
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
     if not gen.get("seedless"):
         return None
     from framework.profiling.spec_sampler import load_profile
@@ -213,6 +194,13 @@ def _load_generation_profile(config: dict, task) -> dict | None:
         else "topics"
     )
     return load_profile(path, topics_key=topics_key)
+
+
+def _should_load_error_distribution(strategy: str, mode: str | None, seedless: bool) -> bool:
+    """Whether this strategy needs an empirical error distribution."""
+    if strategy == "structured":
+        return False
+    return strategy == "class_conditional" or mode == "inverse" or seedless
 
 
 # ── Aggregation ──────────────────────────────────────────────
@@ -318,8 +306,11 @@ def _build_meta(config: dict, task, runs_completed: int,
     judge_active = bool(judge) and judge.get("enabled", True) is not False
     num_runs = gen["num_runs"]
     strategy = task.get_generation_strategy()
-    mode = gen.get("mode", "inverse" if strategy == "class_conditional" else "forward")
-    seedless = bool(gen.get("seedless"))
+    if strategy == "structured":
+        mode = None
+    else:
+        mode = gen.get("mode", "inverse" if strategy == "class_conditional" else "forward")
+    seedless = True if strategy == "structured" else bool(gen.get("seedless"))
     if ds["source"] == "local":
         dataset_meta = {"source": "local", "path": ds["path"],
                         "format": ds["format"] or None,
@@ -391,7 +382,124 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
     strategy = task.get_generation_strategy()
     _profile_driven = False
 
-    if strategy == "class_conditional":
+    if strategy == "structured":
+        if gen_cfg.get("mode") not in (None, "structured", "none", "n/a"):
+            raise RuntimeError(
+                f"{task.get_task_name()} uses structured generation; generation.mode "
+                "is not applicable and must be omitted."
+            )
+        if gen_cfg.get("seedless") is False:
+            raise RuntimeError(
+                f"{task.get_task_name()} structured generation is profile-driven; "
+                "seeded generation is not supported."
+            )
+        if profile is None:
+            raise RuntimeError(
+                f"{task.get_task_name()} structured generation requires a profile."
+            )
+        rng = random.Random()
+        synthetic = []
+        max_parse_attempts = max(1, gen_cfg.get("max_parse_attempts", 3))
+        feedback_cfg = task.get_feedback_config(gen_cfg) if hasattr(task, "get_feedback_config") else {}
+        feedback_enabled = bool(feedback_cfg.get("enabled", False))
+        max_feedback_rounds = (
+            max(0, int(feedback_cfg.get("max_rounds", 0)))
+            if feedback_enabled else 0
+        )
+
+        for _ in range(sample_size):
+            selected = None
+            metadata = {
+                "feedback_enabled": feedback_enabled,
+                "max_feedback_rounds": max_feedback_rounds,
+                "rounds": [],
+                "early_stopped": False,
+                "final_round_selected": None,
+                "final_taxonomy_feedback_informed": False,
+            }
+            feedback = None
+            for round_idx in range(max_feedback_rounds + 1):
+                parsed = None
+                attempts = 0
+                attempt_diagnostics = []
+                while parsed is None and attempts < max_parse_attempts:
+                    attempts += 1
+                    prompt = task.build_structured_generation_prompt(
+                        profile, rng=rng, feedback=feedback
+                    )
+                    raw = generator.call_api(prompt)
+                    if hasattr(task, "parse_structured_generation_with_diagnostics"):
+                        parse_result = task.parse_structured_generation_with_diagnostics(raw)
+                        parsed = parse_result["artifact"]
+                        diagnostic = {"attempt": attempts, **parse_result["diagnostic"]}
+                        provider_diagnostic = getattr(generator, "last_response_diagnostic", None)
+                        if parsed is None and provider_diagnostic:
+                            diagnostic["provider_response"] = provider_diagnostic
+                    else:
+                        parsed = task.parse_structured_generation(raw)
+                        diagnostic = {"attempt": attempts, "valid": parsed is not None}
+                        if parsed is None:
+                            diagnostic["rejection_reason"] = "invalid_structured_artifact"
+                    attempt_diagnostics.append(diagnostic)
+                    if parsed is None:
+                        reason = diagnostic.get("rejection_reason", "unknown")
+                        print(
+                            "[SKIP] structured generation returned invalid "
+                            f"JSON/artifact ({reason})."
+                        )
+
+                if parsed is None:
+                    metadata["rounds"].append({
+                        "round": round_idx,
+                        "feedback_informed": feedback is not None,
+                        "parse_attempts": attempts,
+                        "attempts": attempt_diagnostics,
+                        "valid": False,
+                    })
+                    if selected is not None:
+                        metadata["failed_feedback_round_preserved_previous"] = True
+                        break
+                    break
+
+                selected = parsed
+                metadata.setdefault("attempts", []).extend(attempt_diagnostics)
+                if not feedback_enabled:
+                    metadata["final_round_selected"] = round_idx
+                    break
+                round_info = task.build_structural_feedback(
+                    profile, selected, generation_config=gen_cfg
+                )
+                feedback_result = round_info["feedback"]
+                metadata["rounds"].append({
+                    "round": round_idx,
+                    "feedback_informed": feedback is not None,
+                    "parse_attempts": attempts,
+                    "attempts": attempt_diagnostics,
+                    "valid": True,
+                    "within_tolerance": feedback_result["within_tolerance"],
+                    "feedback": feedback_result,
+                    "comparison": round_info["comparison"],
+                    "synthetic_profile": round_info["synthetic_profile"],
+                })
+                metadata["final_round_selected"] = round_idx
+                metadata["final_taxonomy_feedback_informed"] = feedback is not None
+                if feedback_result["within_tolerance"]:
+                    metadata["early_stopped"] = True
+                    break
+                if round_idx >= max_feedback_rounds:
+                    break
+                feedback = feedback_result
+
+            if selected is not None:
+                selected["generation_feedback"] = metadata
+                synthetic.append(selected)
+        if len(synthetic) < sample_size:
+            print(
+                f"[WARN] structured generation produced {len(synthetic)} valid "
+                f"taxonomies for {sample_size} requested.",
+                file=sys.stderr,
+            )
+    elif strategy == "class_conditional":
         # No config sets "mode" explicitly today (spam.json's config comment
         # says so) — the default MUST resolve to "inverse" so that omitting
         # the key keeps reproducing today's production behavior unchanged.
@@ -668,11 +776,14 @@ def run_pipeline(config: dict) -> dict:
     evaluator_fns = task.get_evaluator_fns()
 
     strategy = task.get_generation_strategy()
-    mode = config["generation"].get("mode", "forward")
-    seedless = bool(config["generation"].get("seedless"))
+    mode = None if strategy == "structured" else config["generation"].get("mode", "forward")
+    seedless = (
+        True if strategy == "structured"
+        else bool(config["generation"].get("seedless"))
+    )
     error_dist = (
         load_error_distribution(config, real_data, task)
-        if (strategy == "class_conditional" or mode == "inverse" or seedless) else None
+        if _should_load_error_distribution(strategy, mode, seedless) else None
     )
     profile = _load_generation_profile(config, task)
 

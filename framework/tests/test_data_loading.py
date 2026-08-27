@@ -38,9 +38,10 @@ class InferFormatTests(unittest.TestCase):
         self.assertEqual(infer_format("data/fce.m2"), "m2")
         self.assertEqual(infer_format("data/spam.csv"), "csv")
         self.assertEqual(infer_format("data/spam.tsv"), "tsv")
+        self.assertEqual(infer_format("data/taxonomy.jsonl"), "jsonl")
 
     def test_unknown_extension_returns_none(self):
-        self.assertIsNone(infer_format("data/spam.jsonl"))
+        self.assertIsNone(infer_format("data/spam.json"))
 
 
 class M2LoadingTests(unittest.TestCase):
@@ -105,6 +106,37 @@ class DelimitedLoadingTests(unittest.TestCase):
         self.assertEqual(rows[0]["text"], "hi")
 
 
+class JsonlLoadingTests(unittest.TestCase):
+    def test_jsonl_rows_as_dicts(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = _write(
+                d,
+                "taxonomy.jsonl",
+                '{"ontology_id":"o1","classes":["A"],"subclass_axioms":[]}\n\n'
+                '{"ontology_id":"o2","classes":["B"],"subclass_axioms":[]}\n',
+            )
+            rows = list(iter_local_rows(path, None))
+        self.assertEqual(rows[0]["ontology_id"], "o1")
+        self.assertEqual(rows[1]["classes"], ["B"])
+        self.assertEqual(len(rows), 2)
+
+    def test_malformed_jsonl_names_file_and_line(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = _write(d, "taxonomy.jsonl", '{"ok": true}\n{bad}\n')
+            with self.assertRaises(ValueError) as ctx:
+                list(iter_local_rows(path, "jsonl"))
+        self.assertIn(path, str(ctx.exception))
+        self.assertIn("line 2", str(ctx.exception))
+
+    def test_jsonl_line_must_be_object(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = _write(d, "taxonomy.jsonl", '["not", "an", "object"]\n')
+            with self.assertRaises(ValueError) as ctx:
+                list(iter_local_rows(path, "jsonl"))
+        self.assertIn("line 1", str(ctx.exception))
+        self.assertIn("object", str(ctx.exception))
+
+
 class LocalRowErrorTests(unittest.TestCase):
     def test_missing_file_raises_value_error_with_path(self):
         with self.assertRaises(ValueError) as ctx:
@@ -113,7 +145,7 @@ class LocalRowErrorTests(unittest.TestCase):
 
     def test_unknown_format_raises_value_error(self):
         with tempfile.TemporaryDirectory() as d:
-            path = _write(d, "data.jsonl", "{}\n")
+            path = _write(d, "data.unknown", "{}\n")
             with self.assertRaises(ValueError) as ctx:
                 list(iter_local_rows(path, None))
             self.assertIn("format", str(ctx.exception).lower())

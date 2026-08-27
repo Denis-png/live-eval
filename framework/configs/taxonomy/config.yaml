@@ -1,0 +1,8 @@
+dataset:
+  source: local
+  local:
+    path: "framework/data/taxonomy/pizza.jsonl"
+    format: jsonl
+
+task:
+  name: taxonomy

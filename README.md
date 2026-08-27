@@ -25,7 +25,7 @@ so it can be inspected later.
     framework/
         main.py                  - entry point
         pipeline.py              - GET loop (Generate, Evaluate, Trash)
-        data_loading.py          - dataset source resolution + local file loaders (m2/csv/tsv)
+        data_loading.py          - dataset source resolution + local file loaders (m2/csv/tsv/jsonl)
         requirements.txt         - Python dependencies
         configs/
             config.yaml          - dataset, generator, task models, output
@@ -62,6 +62,8 @@ so it can be inspected later.
             classification/      - accuracy, precision, recall, f1, fpr (spam)
         data/
             runs/                - per-session run artifacts, one dir per run (gitignored)
+    docs/
+        taxonomy_induction.md    - Taxonomy Induction task guide
 
 ---
 
@@ -229,6 +231,7 @@ profile path is `framework/data/profiles/<task>_profile.json`; override per-run 
 |------|----------|------------|
 | GEC  | `corruption` | forward / inverse × seeded / seedless (see table above) |
 | Spam | `class_conditional` | inverse / forward × seeded / seedless; class balance from `class_balance` |
+| Taxonomy | `structured` | profile-driven, seedless structured taxonomy generation; see [docs/taxonomy_induction.md](docs/taxonomy_induction.md) |
 
 ## Real baseline & fidelity
 
@@ -391,6 +394,7 @@ means judging is skipped.
 
 GEC (Grammatical Error Correction) — implemented (corruption: forward + inverse)
 Spam Detection — implemented (class-conditional generation + real baseline + fidelity)
+Taxonomy Induction — implemented (structured generation + subclass evaluation + structural fidelity); see [docs/taxonomy_induction.md](docs/taxonomy_induction.md)
 Hate Speech Detection — planned
 Sentiment Analysis — planned
 

@@ -5,9 +5,12 @@ from matplotlib.colors import to_hex
 from framework.plotting import plots
 from framework.plotting.plots import (
     _split_by_scale,
+    _taxonomy_distribution_series,
     plot_fidelity,
     plot_generated_vs_real,
     plot_run_variance,
+    plot_taxonomy_fidelity,
+    plot_taxonomy_fidelity_distributions,
 )
 from framework.plotting.style import SERIES_GENERATED, SERIES_REAL
 
@@ -24,6 +27,48 @@ _PROFILE = {
         "signal_rate": {"phishing_link": 0.5, "urgency": 0.3},
     },
     "fidelity": {"type_dist_jsd": 0.12, "count_dist_jsd": 0.08},
+}
+_TAXONOMY_PROFILE = {
+    "fidelity": {
+        "profile_type": "taxonomy_structural_fidelity",
+        "real_profile": {
+            "n_classes": 4,
+            "n_subclass_axioms": 3,
+            "n_roots": 1,
+            "n_leaves": 2,
+            "max_depth": 2,
+            "depth_distribution": {"0": 1, "1": 2, "2": 1},
+            "parent_count_distribution": {"0": 1, "1": 3},
+            "child_count_distribution": {"0": 2, "1": 2},
+        },
+        "synthetic_profiles": [
+            {
+                "depth_distribution": {"0": 1, "1": 1},
+                "parent_count_distribution": {"0": 1, "1": 1},
+                "child_count_distribution": {"0": 1, "2": 1},
+            },
+            {
+                "depth_distribution": {"0": 1, "2": 3},
+                "parent_count_distribution": {"0": 2, "2": 2},
+                "child_count_distribution": {"0": 3, "1": 1},
+            },
+        ],
+        "aggregate": {
+            "n_synthetic_taxonomies": 2,
+            "scalar_characteristics": {
+                "n_classes": {"synthetic": {"mean": 4, "min": 3, "max": 5}},
+                "n_subclass_axioms": {"synthetic": {"mean": 3, "min": 2, "max": 4}},
+                "n_roots": {"synthetic": {"mean": 1, "min": 1, "max": 1}},
+                "n_leaves": {"synthetic": {"mean": 2, "min": 1, "max": 3}},
+                "max_depth": {"synthetic": {"mean": 2, "min": 1, "max": 3}},
+            },
+            "distribution_characteristics": {
+                "depth_distribution": {"jensen_shannon_divergence": {"mean": 0.0}},
+                "parent_count_distribution": {"jensen_shannon_divergence": {"mean": 0.1}},
+                "child_count_distribution": {"jensen_shannon_divergence": {"mean": 0.2}},
+            },
+        },
+    }
 }
 
 
@@ -93,6 +138,45 @@ class FidelityTests(unittest.TestCase):
         self.assertEqual(to_hex(bal_patches[0].get_facecolor()), SERIES_REAL)
         self.assertEqual(to_hex(bal_patches[1].get_facecolor()), SERIES_GENERATED)
         self.assertIn("JSD", fig._suptitle.get_text())
+
+
+class TaxonomyFidelityPlotTests(unittest.TestCase):
+    def test_draws_scalar_and_distribution_panels(self):
+        fig = plot_taxonomy_fidelity(_TAXONOMY_PROFILE)
+        self.assertEqual(len(fig.axes), 2)
+        self.assertIn("taxonomy structural fidelity", fig._suptitle.get_text())
+
+    def test_colour_follows_the_entity(self):
+        fig = plot_taxonomy_fidelity(_TAXONOMY_PROFILE)
+        ax_scalar = fig.axes[0]
+        self.assertEqual(to_hex(ax_scalar.containers[0].patches[0].get_facecolor()), SERIES_REAL)
+        self.assertEqual(to_hex(ax_scalar.containers[1].patches[0].get_facecolor()), SERIES_GENERATED)
+
+    def test_distribution_series_aligns_bins_and_normalizes_counts(self):
+        series = _taxonomy_distribution_series(_TAXONOMY_PROFILE["fidelity"], "depth_distribution")
+        self.assertEqual(series["labels"], ["0", "1", "2"])
+        self.assertEqual(series["real"], [0.25, 0.5, 0.25])
+        # synthetic run 1: {0: .5, 1: .5, 2: 0}; run 2: {0: .25, 1: 0, 2: .75}
+        self.assertEqual(series["synthetic_mean"], [0.375, 0.25, 0.375])
+        self.assertEqual(series["synthetic_min"], [0.25, 0.0, 0.0])
+        self.assertEqual(series["synthetic_max"], [0.5, 0.5, 0.75])
+
+    def test_distribution_series_one_synthetic_run(self):
+        profile = {
+            "real_profile": {"depth_distribution": {"0": 1, "1": 1}},
+            "synthetic_profiles": [{"depth_distribution": {"1": 2}}],
+        }
+        series = _taxonomy_distribution_series(profile, "depth_distribution")
+        self.assertEqual(series["labels"], ["0", "1"])
+        self.assertEqual(series["real"], [0.5, 0.5])
+        self.assertEqual(series["synthetic_mean"], [0.0, 1.0])
+        self.assertEqual(series["synthetic_min"], [0.0, 1.0])
+        self.assertEqual(series["synthetic_max"], [0.0, 1.0])
+
+    def test_distribution_figure_draws_three_panels(self):
+        fig = plot_taxonomy_fidelity_distributions(_TAXONOMY_PROFILE)
+        self.assertEqual(len(fig.axes), 3)
+        self.assertIn("taxonomy structural distributions", fig._suptitle.get_text())
 
 
 if __name__ == "__main__":

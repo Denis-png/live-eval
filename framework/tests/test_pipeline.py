@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 
-from framework.pipeline import _get_field, aggregate, load_real_data, _mean_std
+from framework.pipeline import _get_field, aggregate, load_real_data, _mean_std, load_task
 
 
 class _SpamLikeTask:
@@ -125,6 +125,13 @@ class AggregateTests(unittest.TestCase):
         out = aggregate(runs)
         self.assertAlmostEqual(out["a"]["gleu"]["mean"], 0.3)
         self.assertAlmostEqual(out["b"]["gleu"]["mean"], 0.8)
+
+
+class LoadTaskTests(unittest.TestCase):
+    def test_loads_taxonomy_task(self):
+        task = load_task("taxonomy")
+        self.assertEqual(task.get_task_name(), "taxonomy")
+        self.assertEqual(task.get_generation_strategy(), "structured")
 
 
 if __name__ == "__main__":

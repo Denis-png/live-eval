@@ -125,7 +125,18 @@ def validate_config(config: dict) -> None:
         if gen["num_runs"] < 1:
             problems.append(f"'generation.num_runs' must be >= 1 (got {gen['num_runs']})")
         mode = gen.get("mode", "forward")
-        if mode not in ("forward", "inverse"):
+        task_name = (config.get("task") or {}).get("name")
+        if task_name == "taxonomy":
+            if "mode" in gen:
+                problems.append(
+                    "'generation.mode' is not applicable for task 'taxonomy'; omit it"
+                )
+            if gen.get("seedless") is False:
+                problems.append(
+                    "'taxonomy' structured generation is profile-driven; "
+                    "'generation.seedless' must be omitted or true"
+                )
+        elif mode not in ("forward", "inverse"):
             problems.append(f"'generation.mode' must be 'forward' or 'inverse' (got '{mode}')")
         seedless = gen.get("seedless", False)
         if not isinstance(seedless, bool):
@@ -247,6 +258,14 @@ def format_results_lines(results: dict) -> list[str]:
     return lines
 
 
+def _display_generation_mode(config: dict) -> str:
+    """Human-readable mode label for startup output only."""
+    task_name = (config.get("task") or {}).get("name")
+    if task_name == "taxonomy":
+        return "n/a (structured generation)"
+    return config["generation"].get("mode", "n/a (class-conditional generation)")
+
+
 def main():
     args = parse_args()
     _load_dotenv()
@@ -271,7 +290,7 @@ def main():
         print(notice, file=sys.stderr)
 
     print(f"Task     : {config['task']['name']}")
-    print(f"Mode     : {config['generation'].get('mode', 'n/a (class-conditional generation)')}")
+    print(f"Mode     : {_display_generation_mode(config)}")
     print(f"Provider : {config['generation']['provider']}")
     print(f"Model    : {config['generation']['model']}")
     print(f"Runs     : {config['generation']['num_runs']}")

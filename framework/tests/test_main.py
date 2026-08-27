@@ -1,7 +1,12 @@
 import argparse
 import unittest
 
-from framework.main import _resolve_api_keys, apply_overrides, validate_config
+from framework.main import (
+    _display_generation_mode,
+    _resolve_api_keys,
+    apply_overrides,
+    validate_config,
+)
 
 
 def _args(**kw):
@@ -94,6 +99,21 @@ class MainErrorHandlingTests(unittest.TestCase):
             fm.run_pipeline = orig_run
             argparse._sys.argv = orig_argv
         self.assertIn("0 usable samples", str(ctx.exception))
+
+
+class DisplayGenerationModeTests(unittest.TestCase):
+    def test_taxonomy_mode_display_is_structured(self):
+        cfg = _full_config()
+        cfg["task"] = {"name": "taxonomy"}
+        self.assertEqual(_display_generation_mode(cfg), "n/a (structured generation)")
+
+    def test_spam_default_mode_display_stays_class_conditional(self):
+        cfg = _full_config()
+        cfg["task"] = {"name": "spam"}
+        self.assertEqual(
+            _display_generation_mode(cfg),
+            "n/a (class-conditional generation)",
+        )
 
 
 class ResolveApiKeysTests(unittest.TestCase):
@@ -192,10 +212,37 @@ class ValidateConfigTests(unittest.TestCase):
     def test_local_source_undeterminable_format_rejected(self):
         cfg = _full_config()
         cfg["dataset"] = {"source": "local", "sample_size": 50,
-                          "local": {"path": "data/things.jsonl"}}
+                          "local": {"path": "data/things.unknown"}}
         with self.assertRaises(ValueError) as ctx:
             validate_config(cfg)
         self.assertIn("format", str(ctx.exception).lower())
+
+    def test_local_jsonl_source_accepted(self):
+        cfg = _full_config()
+        cfg["dataset"] = {"source": "local", "sample_size": 50,
+                          "local": {"path": "data/taxonomy.jsonl"}}
+        validate_config(cfg)
+
+    def test_taxonomy_mode_must_be_omitted(self):
+        cfg = _full_config()
+        cfg["task"] = {"name": "taxonomy"}
+        cfg["dataset"] = {"source": "local",
+                          "local": {"path": "data/taxonomy.jsonl"}}
+        cfg["generation"]["mode"] = "forward"
+        with self.assertRaises(ValueError) as ctx:
+            validate_config(cfg)
+        self.assertIn("mode", str(ctx.exception))
+        self.assertIn("taxonomy", str(ctx.exception))
+
+    def test_taxonomy_seedless_false_rejected(self):
+        cfg = _full_config()
+        cfg["task"] = {"name": "taxonomy"}
+        cfg["dataset"] = {"source": "local",
+                          "local": {"path": "data/taxonomy.jsonl"}}
+        cfg["generation"]["seedless"] = False
+        with self.assertRaises(ValueError) as ctx:
+            validate_config(cfg)
+        self.assertIn("profile-driven", str(ctx.exception))
 
     def test_hf_source_missing_name_names_the_key(self):
         cfg = _full_config()

@@ -18,6 +18,7 @@ from framework.profiling.gec_profiler import profile_gec_rows
 
 DEFAULT_GEC_OUTPUT = "framework/data/profiles/gec_profile.json"
 DEFAULT_SPAM_OUTPUT = "framework/data/profiles/spam_profile.json"
+DEFAULT_TAXONOMY_OUTPUT = "framework/data/profiles/taxonomy_profile.json"
 DEFAULT_GEC_DATASET = "agentlans/grammar-correction"
 DEFAULT_GEC_SPLIT = "train"
 _ENV_VAR_RE = re.compile(r"\$\{([A-Z0-9_]+)\}")
@@ -29,7 +30,7 @@ def parse_args() -> argparse.Namespace:
         description="Profile the original benchmark dataset without running GET.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--task", choices=("gec", "spam"), default="gec", help="Task to profile")
+    parser.add_argument("--task", choices=("gec", "spam", "taxonomy"), default="gec", help="Task to profile")
     parser.add_argument("--config", required=True,
                         help="Path to config YAML (e.g. framework/configs/gec/config.yaml)")
     parser.add_argument("--output", help="Path to output JSON profile")
@@ -268,13 +269,45 @@ def _profile_spam(config: dict[str, Any], output: str, topic_call=None, topic_sa
     return output_path
 
 
+def _profile_taxonomy(config: dict[str, Any], output: str) -> str:
+    """Profile normalized taxonomy JSONL without running the GET pipeline."""
+    from framework.data_loading import iter_local_rows, resolve_dataset_config
+    from framework.profiling.taxonomy_profiler import profile_taxonomy_rows
+
+    dataset = resolve_dataset_config(config.get("dataset") or {})
+    if dataset.get("source") != "local":
+        raise SystemExit("Taxonomy profiling expects dataset.source: local.")
+    if not dataset.get("path"):
+        raise SystemExit("Taxonomy profiling requires dataset.local.path.")
+
+    rows = list(iter_local_rows(dataset["path"], dataset.get("format")))
+    profile = profile_taxonomy_rows(rows)
+    output_path = save_profile_json(profile, output)
+    summary = profile["summary"]
+
+    print("\nTaxonomy dataset profile summary")
+    print("=" * 32)
+    print(f"Taxonomies          : {profile['num_taxonomies']}")
+    print(f"Classes mean/min/max: {summary['n_classes']['mean']} / "
+          f"{summary['n_classes']['min']} / {summary['n_classes']['max']}")
+    print(f"Axioms mean/min/max : {summary['n_subclass_axioms']['mean']} / "
+          f"{summary['n_subclass_axioms']['min']} / {summary['n_subclass_axioms']['max']}")
+    print(f"Cycles              : {summary['cycles']}")
+    print(f"Output              : {output_path}")
+    return output_path
+
+
 def main() -> None:
     """Load the selected benchmark dataset, profile it, and save JSON output."""
     args = parse_args()
     config = load_config(args.config)
+    if args.task == "taxonomy" and args.topics:
+        raise SystemExit("Taxonomy profiling does not support --topics in Phase 1.")
     topic_call = _build_topic_call(config) if args.topics else None
 
-    if args.task == "spam":
+    if args.task == "taxonomy":
+        _profile_taxonomy(config, args.output or DEFAULT_TAXONOMY_OUTPUT)
+    elif args.task == "spam":
         _profile_spam(config, args.output or DEFAULT_SPAM_OUTPUT,
                       topic_call, args.topic_sample_size)
     else:

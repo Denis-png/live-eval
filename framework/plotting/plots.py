@@ -287,3 +287,235 @@ def plot_fidelity(profile: dict, meta: dict | None = None):
                  color=INK, fontsize=11)
     fig.tight_layout()
     return fig
+
+
+def plot_taxonomy_fidelity(profile: dict, meta: dict | None = None):
+    """Structural real-vs-synthetic taxonomy fidelity.
+
+    Scalars are plotted as real value vs synthetic mean with min/max variation.
+    Distribution panels show Jensen-Shannon divergence; lower means closer to
+    the real benchmark distribution.
+    """
+    fidelity = (profile or {}).get("fidelity") or {}
+    real = fidelity.get("real_profile") or {}
+    aggregate = fidelity.get("aggregate") or {}
+    scalar_agg = aggregate.get("scalar_characteristics") or {}
+    dist_agg = aggregate.get("distribution_characteristics") or {}
+
+    scalar_keys = [
+        "n_classes",
+        "n_subclass_axioms",
+        "n_roots",
+        "n_leaves",
+        "max_depth",
+    ]
+    dist_keys = [
+        "depth_distribution",
+        "parent_count_distribution",
+        "child_count_distribution",
+    ]
+
+    fig, (ax_scalar, ax_dist) = plt.subplots(
+        1, 2, figsize=(12.0, 4.6), gridspec_kw={"width_ratios": [5, 3]},
+    )
+    fig.patch.set_facecolor(SURFACE)
+    width = 0.38
+
+    apply_axes_style(ax_scalar)
+    x = range(len(scalar_keys))
+    real_values = [real.get(key, 0) or 0 for key in scalar_keys]
+    synthetic_mean = [
+        (scalar_agg.get(key, {}).get("synthetic") or {}).get("mean") or 0
+        for key in scalar_keys
+    ]
+    synthetic_min = [
+        (scalar_agg.get(key, {}).get("synthetic") or {}).get("min")
+        for key in scalar_keys
+    ]
+    synthetic_max = [
+        (scalar_agg.get(key, {}).get("synthetic") or {}).get("max")
+        for key in scalar_keys
+    ]
+    rb = ax_scalar.bar(
+        [i - width / 2 - 0.01 for i in x], real_values, width,
+        label="real", color=SERIES_REAL,
+    )
+    sx = [i + width / 2 + 0.01 for i in x]
+    gb = ax_scalar.bar(sx, synthetic_mean, width, label="synthetic mean",
+                       color=SERIES_GENERATED)
+    yerr_low, yerr_high = [], []
+    for mean_value, min_value, max_value in zip(synthetic_mean, synthetic_min, synthetic_max):
+        if min_value is None or max_value is None:
+            yerr_low.append(0)
+            yerr_high.append(0)
+        else:
+            yerr_low.append(max(0, mean_value - min_value))
+            yerr_high.append(max(0, max_value - mean_value))
+    ax_scalar.errorbar(
+        sx, synthetic_mean, yerr=[yerr_low, yerr_high], fmt="none",
+        capsize=3, ecolor=INK_MUTED, elinewidth=1.2,
+    )
+    ax_scalar.bar_label(rb, fmt="%.1f", padding=2, color=INK_MUTED, fontsize=8)
+    ax_scalar.bar_label(gb, fmt="%.1f", padding=2, color=INK_MUTED, fontsize=8)
+    ax_scalar.set_xticks(list(x))
+    ax_scalar.set_xticklabels(scalar_keys, rotation=20, ha="right")
+    ax_scalar.set_ylabel("count / value", color=INK_MUTED)
+    ax_scalar.set_title("structural scalars", color=INK, fontsize=10)
+    ax_scalar.legend(frameon=False, labelcolor=INK_MUTED, fontsize=9)
+    ax_scalar.margins(y=0.2)
+
+    apply_axes_style(ax_dist)
+    dx = range(len(dist_keys))
+    divergences = [
+        ((dist_agg.get(key, {}).get("jensen_shannon_divergence") or {}).get("mean") or 0)
+        for key in dist_keys
+    ]
+    db = ax_dist.bar(list(dx), divergences, 0.55, color=SERIES_GENERATED)
+    ax_dist.bar_label(db, fmt="%.3f", padding=2, color=INK_MUTED, fontsize=8)
+    ax_dist.set_xticks(list(dx))
+    ax_dist.set_xticklabels(dist_keys, rotation=20, ha="right")
+    ax_dist.set_ylabel("JSD (0 = identical)", color=INK_MUTED)
+    ax_dist.set_title("distribution divergence", color=INK, fontsize=10)
+    ax_dist.set_ylim(0, max(1.0, max(divergences or [0]) * 1.15))
+
+    n = aggregate.get("n_synthetic_taxonomies", 0)
+    fig.suptitle(
+        f"taxonomy structural fidelity — real vs synthetic (n={n})\n{_subtitle(meta)}".strip(),
+        color=INK, fontsize=11,
+    )
+    fig.tight_layout()
+    return fig
+
+
+def _sort_distribution_bins(bins) -> list[str]:
+    """Sort stringified histogram bins numerically when possible."""
+    def key(value):
+        text = str(value)
+        try:
+            return (0, int(text))
+        except ValueError:
+            try:
+                return (0, float(text))
+            except ValueError:
+                return (1, text)
+    return [str(value) for value in sorted({str(v) for v in bins}, key=key)]
+
+
+def _normalize_distribution(dist: dict) -> dict[str, float]:
+    """Normalize count-like distribution values into probabilities."""
+    if not isinstance(dist, dict):
+        return {}
+    total = sum(float(v) for v in dist.values() if isinstance(v, (int, float)))
+    if total <= 0:
+        return {str(k): 0.0 for k in dist}
+    return {
+        str(k): (float(v) / total if isinstance(v, (int, float)) else 0.0)
+        for k, v in dist.items()
+    }
+
+
+def _taxonomy_distribution_series(fidelity: dict, key: str) -> dict:
+    """Aligned real/synthetic probability series for one taxonomy distribution.
+
+    Missing bins are zero. Synthetic mean/min/max are computed over independently
+    normalized synthetic taxonomies, not over raw counts pooled together.
+    """
+    real = fidelity.get("real_profile") or {}
+    synthetics = fidelity.get("synthetic_profiles") or []
+    real_norm = _normalize_distribution(real.get(key, {}))
+    synth_norms = [
+        _normalize_distribution((synthetic or {}).get(key, {}))
+        for synthetic in synthetics
+        if isinstance(synthetic, dict)
+    ]
+    labels = _sort_distribution_bins(
+        set(real_norm) | {bin_key for dist in synth_norms for bin_key in dist}
+    )
+
+    real_values = [real_norm.get(label, 0.0) for label in labels]
+    per_synth = [
+        [dist.get(label, 0.0) for label in labels]
+        for dist in synth_norms
+    ]
+    if per_synth:
+        mean_values = [
+            sum(row[i] for row in per_synth) / len(per_synth)
+            for i in range(len(labels))
+        ]
+        min_values = [min(row[i] for row in per_synth) for i in range(len(labels))]
+        max_values = [max(row[i] for row in per_synth) for i in range(len(labels))]
+    else:
+        mean_values = [0.0 for _ in labels]
+        min_values = [0.0 for _ in labels]
+        max_values = [0.0 for _ in labels]
+
+    return {
+        "labels": labels,
+        "real": real_values,
+        "synthetic_mean": mean_values,
+        "synthetic_min": min_values,
+        "synthetic_max": max_values,
+    }
+
+
+def plot_taxonomy_fidelity_distributions(profile: dict, meta: dict | None = None):
+    """Real vs synthetic taxonomy structure distributions.
+
+    Each taxonomy's counts are normalized to proportions before aggregation so
+    differently sized taxonomies can be compared honestly. The synthetic band is
+    min/max run-to-run variation, not a confidence interval.
+    """
+    fidelity = (profile or {}).get("fidelity") or {}
+    panels = [
+        ("depth_distribution", "hierarchy depth", "depth"),
+        ("parent_count_distribution", "parent count", "number of parents"),
+        ("child_count_distribution", "child / branching count", "number of children"),
+    ]
+    fig, axes = plt.subplots(1, 3, figsize=(13.2, 4.4), squeeze=False)
+    fig.patch.set_facecolor(SURFACE)
+
+    for ax, (key, title, xlabel) in zip(axes[0], panels):
+        apply_axes_style(ax)
+        series = _taxonomy_distribution_series(fidelity, key)
+        labels = series["labels"]
+        x = list(range(len(labels)))
+        if not labels:
+            ax.text(
+                0.5, 0.5, "no distribution data",
+                ha="center", va="center", color=INK_MUTED, transform=ax.transAxes,
+            )
+            ax.set_xticks([])
+            ax.set_ylim(0, 1)
+        else:
+            ax.fill_between(
+                x, series["synthetic_min"], series["synthetic_max"],
+                color=SERIES_GENERATED, alpha=0.18,
+                label="synthetic min/max" if key == panels[0][0] else None,
+            )
+            ax.plot(
+                x, series["synthetic_mean"], marker="o", linewidth=2,
+                color=SERIES_GENERATED,
+                label="synthetic mean" if key == panels[0][0] else None,
+            )
+            ax.plot(
+                x, series["real"], marker="o", linewidth=2,
+                color=SERIES_REAL,
+                label="real" if key == panels[0][0] else None,
+            )
+            ax.set_xticks(x)
+            ax.set_xticklabels(labels)
+            peak = max(
+                series["real"] + series["synthetic_max"] + series["synthetic_mean"] + [0.0]
+            )
+            ax.set_ylim(0, min(1.0, max(0.05, peak) * 1.18))
+        ax.set_title(title, color=INK, fontsize=10)
+        ax.set_xlabel(xlabel, color=INK_MUTED)
+        ax.set_ylabel("proportion of classes", color=INK_MUTED)
+
+    axes[0][0].legend(frameon=False, labelcolor=INK_MUTED, fontsize=9)
+    fig.suptitle(
+        f"taxonomy structural distributions — real vs synthetic\n{_subtitle(meta)}".strip(),
+        color=INK, fontsize=11,
+    )
+    fig.tight_layout()
+    return fig
