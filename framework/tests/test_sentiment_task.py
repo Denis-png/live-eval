@@ -128,3 +128,48 @@ class SentimentRealEvalSamplesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SentimentMissingLabelTests(unittest.TestCase):
+    """A row whose label cannot be resolved must be skipped, not stringified.
+    Previously `str(None)` produced the class "None", which is truthy, so it
+    survived get_real_eval_samples' filter and entered the real baseline as a
+    class no model can predict — every model scored wrong on it and the
+    baseline was silently depressed."""
+
+    def setUp(self):
+        self.task = SentimentTask()
+
+    def test_absent_label_skips_the_row(self):
+        self.assertIsNone(self.task.parse_row({"text": "a review"}))
+
+    def test_explicit_none_label_skips_the_row(self):
+        self.assertIsNone(self.task.parse_row({"text": "a review", "label": None}))
+
+    def test_blank_label_skips_the_row(self):
+        self.assertIsNone(self.task.parse_row({"text": "a review", "label": ""}))
+        self.assertIsNone(self.task.parse_row({"text": "a review", "label": "   "}))
+
+    def test_zero_is_a_valid_label_not_a_missing_one(self):
+        # 0 is falsy but means NEGATIVE — a truthiness check here would silently
+        # discard every negative row in the dataset.
+        row = self.task.parse_row({"text": "a review", "label": 0})
+        self.assertEqual(row["sentiment_label"], "NEGATIVE")
+
+    def test_digit_strings_map_like_their_integers(self):
+        # A local CSV delivers every field as text, so "0" must not become a
+        # phantom "0" class.
+        for raw, expected in (("0", "NEGATIVE"), ("1", "NEUTRAL"), ("2", "POSITIVE")):
+            row = self.task.parse_row({"text": "a review", "label": raw})
+            self.assertEqual(row["sentiment_label"], expected, raw)
+
+    def test_class_name_labels_still_pass_through(self):
+        row = self.task.parse_row({"text": "a review", "label": "POSITIVE"})
+        self.assertEqual(row["sentiment_label"], "POSITIVE")
+
+    def test_no_phantom_class_reaches_the_real_baseline(self):
+        rows = [r for r in (self.task.parse_row({"text": "labelled", "label": 2}),
+                            self.task.parse_row({"text": "unlabelled"})) if r]
+        samples = self.task.get_real_eval_samples({}, rows)
+        self.assertEqual(samples, [{"text": "labelled", "label": "POSITIVE"}])
+        self.assertNotIn("None", [s["label"] for s in samples])

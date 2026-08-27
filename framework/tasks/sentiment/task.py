@@ -76,12 +76,35 @@ class SentimentTask(BaseTask):
 
     _LABEL_MAP = {0: "NEGATIVE", 1: "NEUTRAL", 2: "POSITIVE"}
 
+    @classmethod
+    def _normalize_label(cls, raw) -> str | None:
+        """Map a dataset label onto a class name, or None when the row carries
+        no usable one.
+
+        An unusable label must skip the row, never be stringified: "None" would
+        reach the real baseline as a class no model can predict, so every model
+        scores wrong on it and the baseline is silently depressed. Digit strings
+        are normalized because a local CSV delivers every field as text, and "0"
+        would become the same kind of phantom class. Anything else still passes
+        through, so datasets that already use class names keep working. Note 0
+        is a VALID label (NEGATIVE) — this tests for None, not falsiness."""
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            raw = raw.strip()
+            if not raw:
+                return None
+            if raw.lstrip("-").isdigit():
+                raw = int(raw)
+        return cls._LABEL_MAP.get(raw, str(raw))
+
     def parse_row(self, row: dict) -> dict | None:
         text = row.get("text") or row.get("sentence") or row.get("review")
         if not text:
             return None
-        raw_label = row.get("label")
-        label = self._LABEL_MAP.get(raw_label, str(raw_label))
+        label = self._normalize_label(row.get("label"))
+        if label is None:
+            return None
         return {"incorrect": text, "sentiment_label": label}
 
     def get_real_eval_samples(self, config: dict, real_data: list[dict]) -> list[dict]:
