@@ -148,6 +148,19 @@ class BaseTask(ABC):
         """Fidelity comparison between two profile_dataset() outputs. Default None."""
         return None
 
+    def get_calibration_keys(self) -> dict[str, str] | None:
+        """Map control-input name -> the profile_dataset() key that measures it.
+
+        Lets the calibrator stay as task-agnostic as _sample_categories is: it
+        never learns what a "signal" or an "edit type" means, only which key of
+        this task's profile measures the distribution it is steering. The two
+        tasks name the same concept differently (error_type_dist vs
+        signal_type_dist), and this is what reconciles them.
+
+        Return None (default) to opt out of calibration entirely.
+        """
+        return None
+
     def get_real_eval_samples(self, config: dict, real_data: list[dict]) -> list[dict] | None:
         """Eval-ready rows for the REAL benchmark, carrying the same schema the
         evaluators expect (classification: text+label; text→text: text+corrupted+

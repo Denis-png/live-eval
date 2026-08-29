@@ -186,5 +186,11 @@ class GECTask(BaseTask):
                     "generator's intended error semantics.",
         }
 
+    def get_calibration_keys(self) -> dict[str, str]:
+        # profile_dataset re-annotates with ERRANT and reports EVERY observed
+        # type; the controller projects that onto the supported vocabulary the
+        # target covers before taking any ratio.
+        return {"type_dist": "error_type_dist", "count_dist": "error_count_dist"}
+
     def get_task_name(self) -> str:
         return "gec"

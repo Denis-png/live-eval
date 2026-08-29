@@ -211,6 +211,11 @@ class SpamTask(BaseTask):
                     "detector-visible distribution match, not semantic spamminess.",
         }
 
+    def get_calibration_keys(self) -> dict[str, str]:
+        # profile_dataset already restricts signals to get_error_descriptions()
+        # keys, so the measured key space matches the target's by construction.
+        return {"type_dist": "signal_type_dist", "count_dist": "signal_count_dist"}
+
     def get_evaluators(self) -> list[str]:
         return self._config["evaluators"]
 
