@@ -146,7 +146,63 @@ def load_error_distribution(config: dict, real_data: list[dict], task) -> dict:
             "dataset.reference_size is not set too low (spam), or check "
             "that the dataset yields valid pairs."
         )
-    return empirical
+    return _apply_calibration(config, task, empirical)
+
+
+# Provenance for _build_meta: results.json is the only surviving record of which
+# calibration produced a benchmark, because artifacts are gitignored.
+_LAST_CALIBRATION: dict | None = None
+
+
+def _apply_calibration(config: dict, task, empirical: dict) -> dict:
+    """Prefer a matching calibration artifact over the raw empirical target.
+
+    Falls back to `empirical` when none exists, when the user opted out, or when
+    the stored setpoint no longer matches the benchmark — a stale artifact must
+    never be used silently.
+    """
+    global _LAST_CALIBRATION
+    _LAST_CALIBRATION = None
+
+    from framework.calibration.artifact import (
+        load_calibration,
+        resolve_calibration_path,
+        targets_match,
+    )
+
+    strategy = task.get_generation_strategy()
+    path = resolve_calibration_path(config, task, strategy)
+    if not path:
+        print(f"[NOTE] no calibration artifact for "
+              f"{generation_cell_slug(config, strategy)}; generating from the raw "
+              f"empirical distribution. Build one with: python -m "
+              f"framework.calibrate --config <config.yaml>")
+        return empirical
+
+    try:
+        payload = load_calibration(path)
+    except (OSError, ValueError) as e:
+        print(f"[WARN] calibration {path!r} could not be read ({e}); "
+              "using the empirical distribution.", file=sys.stderr)
+        return empirical
+
+    if not targets_match(payload.get("target") or {}, empirical):
+        print(f"[WARN] calibration {path!r} was built against a different "
+              "benchmark setpoint (dataset or sample size changed); using the "
+              "empirical distribution instead.", file=sys.stderr)
+        return empirical
+
+    calibrated = payload.get("calibrated") or {}
+    if not calibrated.get("type_dist") or not calibrated.get("count_dist"):
+        print(f"[WARN] calibration {path!r} has no usable distributions; "
+              "using the empirical distribution.", file=sys.stderr)
+        return empirical
+
+    _LAST_CALIBRATION = {"path": path,
+                         "selected_round": payload.get("selected_round")}
+    print(f"Calibration: {path} (round {payload.get('selected_round')})")
+    return {"type_dist": dict(calibrated["type_dist"]),
+            "count_dist": dict(calibrated["count_dist"])}
 
 
 DEFAULT_PROFILE_DIR = "framework/data/profiles"
@@ -395,6 +451,7 @@ def _build_meta(config: dict, task, runs_completed: int,
         ),
         "real_baseline": real_baseline,
         "class_balance": gen.get("class_balance", "empirical"),
+        "calibration": _LAST_CALIBRATION,
     }
 
 
