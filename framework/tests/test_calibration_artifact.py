@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from framework.calibration.artifact import (
     calibration_filename,
@@ -96,6 +97,59 @@ class ResolveTests(unittest.TestCase):
             self.assertIsNone(
                 resolve_calibration_path(cfg, _Task(), "class_conditional")
             )
+
+    def test_single_artifact_discovered_by_glob(self):
+        # Glob-discovery path: no calibration_path key, artifact exists on disk
+        cfg = _config()
+        # Ensure no calibration_path key (it should not be present)
+        cfg["generation"].pop("calibration_path", None)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a temporary profile directory
+            filename = calibration_filename(cfg, "spam", "class_conditional", 120)
+            expected_path = os.path.join(tmpdir, filename)
+
+            # Write a real artifact file
+            payload = {
+                "meta": {"task": "spam"},
+                "target": {"type_dist": {"a": 1.0}, "count_dist": {1: 1.0}},
+                "calibrated": {"type_dist": {"a": 1.0}, "count_dist": {1: 1.0}},
+                "rounds": [],
+            }
+            write_calibration(expected_path, payload)
+
+            # Patch profile_dir to return tmpdir
+            with mock.patch("framework.pipeline.profile_dir", return_value=tmpdir):
+                result = resolve_calibration_path(cfg, _Task(), "class_conditional")
+                self.assertEqual(result, expected_path)
+
+    def test_newest_artifact_wins_among_several(self):
+        # Glob-discovery with tie-breaking: multiple artifacts, newest by mtime wins
+        cfg = _config()
+        cfg["generation"].pop("calibration_path", None)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create two artifacts for the same benchmark and cell, different sample sizes
+            path_1 = os.path.join(tmpdir, calibration_filename(cfg, "spam", "class_conditional", 100))
+            path_2 = os.path.join(tmpdir, calibration_filename(cfg, "spam", "class_conditional", 120))
+
+            payload = {
+                "meta": {"task": "spam"},
+                "target": {"type_dist": {"a": 1.0}, "count_dist": {1: 1.0}},
+                "calibrated": {"type_dist": {"a": 1.0}, "count_dist": {1: 1.0}},
+                "rounds": [],
+            }
+            write_calibration(path_1, payload)
+            write_calibration(path_2, payload)
+
+            # Set explicit mtimes: path_1 older, path_2 newer
+            os.utime(path_1, (1000000, 1000000))
+            os.utime(path_2, (2000000, 2000000))
+
+            # Patch profile_dir to return tmpdir
+            with mock.patch("framework.pipeline.profile_dir", return_value=tmpdir):
+                result = resolve_calibration_path(cfg, _Task(), "class_conditional")
+                self.assertEqual(result, path_2)
 
 
 class TargetMatchTests(unittest.TestCase):
