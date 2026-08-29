@@ -91,6 +91,23 @@ class UpdateRequestTests(unittest.TestCase):
                              epsilon=0.0)
         self.assertEqual(sorted(out), [1, 2])
         self.assertGreater(out[2], out[1])
+        self.assertTrue(all(type(k) is int for k in out))
+
+    def test_epsilon_zero_with_zero_measured_does_not_divide_by_zero(self):
+        # epsilon=0.0 with zero-measured category must not raise ZeroDivisionError
+        # and the zero-measured category's request must increase.
+        target = {"a": 0.5, "b": 0.5}
+        out = update_request({"a": 0.5, "b": 0.5}, target, {"a": 1.0, "b": 0.0},
+                             alpha=0.5, epsilon=0.0)
+        self.assertGreater(out["b"], 0.5)
+        self.assertLess(out["a"], 0.5)
+
+    def test_epsilon_zero_with_zero_request_entry_recovers(self):
+        # epsilon=0.0 with zero request entry must not strand it when target is positive.
+        target = {"a": 0.5, "b": 0.5}
+        out = update_request({"a": 1.0, "b": 0.0}, target, {"a": 1.0, "b": 0.0},
+                             alpha=0.5, epsilon=0.0)
+        self.assertGreater(out["b"], 0.0)
 
 
 class ReportTests(unittest.TestCase):

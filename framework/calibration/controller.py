@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from framework.profiling.fidelity import jensen_shannon_divergence
 
+_MIN_DENOM = 1e-12
+
 
 def project_measured(target: dict, measured: dict) -> dict:
     """Restrict `measured` to `target`'s key space and renormalize.
@@ -58,8 +60,8 @@ def update_request(
         if t <= 0:
             updated[key] = 0.0
             continue
-        r = max(float(request.get(key, 0.0)), epsilon)
-        m = projected.get(key, 0.0) + epsilon
+        r = max(float(request.get(key, 0.0)), epsilon, _MIN_DENOM)
+        m = max(projected.get(key, 0.0) + epsilon, _MIN_DENOM)
         updated[key] = r * ((t / m) ** alpha)
 
     total = sum(updated.values())
