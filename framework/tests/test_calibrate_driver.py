@@ -163,8 +163,9 @@ class ClosedLoopTests(_Bench):
         compliance["money_promise"] = 0.3
         payload = self._run(compliance)
         first = payload["rounds"][0]["jsd"]["type_dist"]
-        # Round 0 must genuinely miss tolerance, or the loop stops immediately
-        # and everything below passes vacuously.
+        # Round 0 must genuinely miss tolerance. If it converged immediately the
+        # loop would stop with a single round and the round-1 assertion below
+        # would raise IndexError — this makes the premise fail loudly instead.
         self.assertGreater(first, self.TOLERANCE)
 
         # The correction moved the right way: the under-delivered category is
