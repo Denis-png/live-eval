@@ -818,12 +818,15 @@ def _render_plots(config: dict, paths: dict) -> None:
         print(f"[WARN] plotting failed (results are unaffected): {e}", file=sys.stderr)
 
 
-# ── Main pipeline ─────────────────────────────────────────────
+# ── Generation context ────────────────────────────────────────
 
-def run_pipeline(config: dict) -> dict:
-    """Run the GET pipeline N times, evaluate the generated benchmark (mean±std)
-    and — by default — the same models on the real benchmark, profile real-vs-
-    generated fidelity, and write all artifacts under one per-session directory."""
+def build_generation_context(config: dict) -> dict:
+    """Everything needed to generate for `config`, resolved once.
+
+    Shared by `run_pipeline` and `framework.calibrate` so both provably build
+    the same task, seeds, generator, distributions and class balance. Makes no
+    API call: `load_generator` only constructs a client.
+    """
     task          = load_task(config["task"]["name"])
     real_data     = load_real_data(config, task)
     generator     = load_generator(config["generation"])
@@ -844,7 +847,40 @@ def run_pipeline(config: dict) -> dict:
 
     # Real reference feeds class balance, the real baseline, and profiling.
     real_reference = task.get_real_eval_samples(config, real_data)
-    class_prob = _resolve_class_prob(config, real_reference)
+
+    return {
+        "task": task,
+        "real_data": real_data,
+        "generator": generator,
+        "judge_call": judge_call,
+        "evaluator_fns": evaluator_fns,
+        "strategy": strategy,
+        "mode": mode,
+        "seedless": seedless,
+        "error_dist": error_dist,
+        "profile": profile,
+        "real_reference": real_reference,
+        "class_prob": _resolve_class_prob(config, real_reference),
+    }
+
+
+# ── Main pipeline ─────────────────────────────────────────────
+
+def run_pipeline(config: dict) -> dict:
+    """Run the GET pipeline N times, evaluate the generated benchmark (mean±std)
+    and — by default — the same models on the real benchmark, profile real-vs-
+    generated fidelity, and write all artifacts under one per-session directory."""
+    ctx            = build_generation_context(config)
+    task           = ctx["task"]
+    real_data      = ctx["real_data"]
+    generator      = ctx["generator"]
+    judge_call     = ctx["judge_call"]
+    evaluator_fns  = ctx["evaluator_fns"]
+    strategy       = ctx["strategy"]
+    error_dist     = ctx["error_dist"]
+    profile        = ctx["profile"]
+    real_reference = ctx["real_reference"]
+    class_prob     = ctx["class_prob"]
 
     # <timestamp>_<mode>_<seeded|seedless>: timestamp first so a directory
     # listing still sorts chronologically, setup second so it is readable.
