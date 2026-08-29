@@ -120,16 +120,29 @@ class InformativeCountTests(unittest.TestCase):
 
 
 class ClosedLoopTests(_Bench):
-    # 120, not 40: the driver itself warns below 50 informative samples ("the
-    # update may chase noise"), and count_dist over three values is unstable at
-    # n=40. The closed-loop test must run in the regime the code is designed for.
+    # Tighter than the 0.1 production default: round 0's type_dist JSD lands
+    # around 0.026 for the bias under test, so a 0.05 tolerance would let the
+    # loop stop before correcting anything and the closed-loop assertions would
+    # pass vacuously.
+    TOLERANCE = 0.015
+
+    # alpha 0.5 is the production default and matters here: at 1.0 the undamped
+    # step overshoots, round 1 comes out worse than round 0, and select_best
+    # correctly keeps round 0 — leaving `calibrated` equal to `target`.
+    #
+    # 120 samples, not 40: the driver itself warns below 50 informative samples
+    # ("the update may chase noise"), and count_dist over three values is
+    # unstable at n=40. The closed-loop test must run in the regime the code is
+    # designed for. The generation rng is unseeded (_run_generation builds its
+    # own random.Random()), so these settings are what keep the test stable
+    # rather than luck.
     def _run(self, compliance, rounds=3, sample_size=120):
         gen = CompliantFake(compliance)
         cfg = _config(self.path, sample_size=sample_size)
         cfg["calibration"] = {"sample_size": sample_size}
         with mock.patch.object(pipeline, "load_generator", return_value=gen):
             return calibrate.run_calibration(
-                cfg, rounds=rounds, alpha=1.0, tolerance=0.05,
+                cfg, rounds=rounds, alpha=0.5, tolerance=self.TOLERANCE,
                 sample_size=sample_size, output_path=self.out,
             )
 
@@ -140,20 +153,43 @@ class ClosedLoopTests(_Bench):
                          payload["target"]["type_dist"])
 
     def test_biased_generator_converges_and_improves(self):
-        # "money_promise" is honoured a third as often as the rest.
+        # "money_promise" is honoured a third as often as the rest — a gap the
+        # sampler can actually close. Do NOT deepen it further: _sample_categories
+        # draws WITHOUT replacement, so one category's achievable share saturates
+        # near 1/mean_signals_per_message (~0.36 here). Past that the request can
+        # rise without the measurement following it, so the loop stops improving
+        # and the correction this test checks stops being observable.
         compliance = {k: 0.9 for k in _MARKERS}
         compliance["money_promise"] = 0.3
         payload = self._run(compliance)
         first = payload["rounds"][0]["jsd"]["type_dist"]
-        best = payload["rounds"][payload["selected_round"]]["jsd"]["type_dist"]
-        self.assertLessEqual(best, first)
-        # The under-delivered category must be requested MORE than the target.
-        self.assertGreater(payload["calibrated"]["type_dist"]["money_promise"],
+        # Round 0 must genuinely miss tolerance, or the loop stops immediately
+        # and everything below passes vacuously.
+        self.assertGreater(first, self.TOLERANCE)
+
+        # The correction moved the right way: the under-delivered category is
+        # requested MORE next round. Assert on round 1's request, not on
+        # `calibrated`, because `calibrated` is whichever round select_best won —
+        # and select_best ranks by the worst dimension, so a noisy count_dist can
+        # legitimately keep round 0 even when type_dist improved. Which round
+        # wins is test_selected_round_is_the_best_not_the_last's job; this test's
+        # job is the direction of the correction.
+        self.assertGreater(payload["rounds"][1]["request"]["type_dist"]["money_promise"],
                            payload["target"]["type_dist"]["money_promise"])
+
+        # Selection never ships worse than uncalibrated. Compare on the same
+        # scalar select_best uses — the worst dimension — since the selected
+        # round minimises that, not type_dist alone.
+        worst = [max(r["jsd"].values()) for r in payload["rounds"]]
+        self.assertLessEqual(worst[payload["selected_round"]], worst[0])
 
     def test_selected_round_is_the_best_not_the_last(self):
         payload = self._run({k: 0.9 for k in _MARKERS})
-        scores = [r["jsd"]["type_dist"] for r in payload["rounds"]]
+        # Rank by the WORST dimension, which is what controller.select_best uses
+        # (convergence requires every dimension inside tolerance, so the maximum
+        # is the scalar that orders rounds). Ranking on type_dist alone encodes a
+        # different rule and disagrees whenever count_dist is the deciding one.
+        scores = [max(r["jsd"].values()) for r in payload["rounds"]]
         self.assertEqual(payload["selected_round"], scores.index(min(scores)))
 
     def test_calibrated_count_dist_keys_are_ints(self):
