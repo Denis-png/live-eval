@@ -1,0 +1,246 @@
+"""Calibrate a task's generation distributions against its real benchmark.
+
+Run once per (benchmark, cell); the artifact is then reused by every session:
+
+    python -m framework.calibrate --config framework/configs/spam/config.yaml
+
+Calibration is a SEPARATE phase from measurement. Steering runs inside a scored
+session would make them non-i.i.d. and quietly turn results.json's mean+-std --
+the core GET instability signal -- into "generator noise plus controller
+settling". So this emits a tuned spec and the GET session runs unchanged at it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import sys
+from datetime import datetime
+
+from framework.calibration.artifact import (
+    default_calibration_path,
+    write_calibration,
+)
+from framework.calibration.controller import (
+    converged,
+    jsd_report,
+    select_best,
+    stalled,
+    update_request,
+)
+
+DEFAULT_ROUNDS = 3
+DEFAULT_ALPHA = 0.5
+DEFAULT_TOLERANCE = 0.1
+# Below this a 5-category rate carries ~0.08 standard error against a 0.1
+# tolerance: the update would be steering on noise rather than on bias.
+MIN_SAMPLE_SIZE = 100
+MIN_INFORMATIVE = 50
+
+
+def calibration_settings(config: dict, args=None) -> dict:
+    """Merge the optional `calibration:` block with defaults and CLI overrides.
+
+    generation.sample_size is deliberately NOT inherited as-is: it is tuned for
+    eval cost, not estimation precision.
+    """
+    block = config.get("calibration") or {}
+    gen = config.get("generation") or {}
+    settings = {
+        "rounds": block.get("rounds", DEFAULT_ROUNDS),
+        "alpha": block.get("alpha", DEFAULT_ALPHA),
+        "tolerance": block.get("tolerance", DEFAULT_TOLERANCE),
+        "sample_size": block.get(
+            "sample_size", max(gen.get("sample_size", 0), MIN_SAMPLE_SIZE)
+        ),
+    }
+    for key in settings:
+        value = getattr(args, key, None) if args is not None else None
+        if value is not None:
+            settings[key] = value
+    return settings
+
+
+def informative_count(task, rows: list[dict]) -> int:
+    """Samples the measurement is actually estimated from, which is not the
+    round's sample size: SPAM rows for classification (HAM carries no signals),
+    annotated pairs for corruption."""
+    if task.get_generation_strategy() == "class_conditional":
+        return sum(1 for r in rows if r.get("label") == "SPAM")
+    return sum(1 for r in rows
+               if (r.get("corrupted") or r.get("incorrect"))
+               and (r.get("original") or r.get("correct")))
+
+
+def _measure(task, keys: dict[str, str], rows: list[dict]) -> dict[str, dict]:
+    """Re-detect the control inputs on generated rows using the task's own
+    profiler, so real and generated are measured with the same instrument."""
+    profile = task.profile_dataset(rows)
+    return {name: (profile.get(key) or {}) for name, key in keys.items()}
+
+
+def run_calibration(
+    config: dict,
+    *,
+    rounds: int = DEFAULT_ROUNDS,
+    alpha: float = DEFAULT_ALPHA,
+    tolerance: float = DEFAULT_TOLERANCE,
+    sample_size: int | None = None,
+    output_path: str | None = None,
+) -> dict:
+    """Iterate generate -> profile -> correct, writing the artifact each round."""
+    from framework import pipeline
+
+    ctx = pipeline.build_generation_context(config)
+    task, strategy = ctx["task"], ctx["strategy"]
+
+    keys = task.get_calibration_keys()
+    if not keys:
+        raise RuntimeError(
+            f"Task '{task.get_task_name()}' does not support calibration "
+            f"(get_calibration_keys() returned None). Cell: "
+            f"{pipeline.generation_cell_slug(config, strategy)}."
+        )
+    if ctx["error_dist"] is None:
+        raise RuntimeError(
+            f"Cell {pipeline.generation_cell_slug(config, strategy)} of task "
+            f"'{task.get_task_name()}' samples no error distribution, so there "
+            "is nothing to calibrate."
+        )
+
+    target = {name: dict(ctx["error_dist"][name]) for name in keys}
+    settings_size = sample_size or config["generation"]["sample_size"]
+
+    # Only the positive class carries signals, so calibrating at the empirical
+    # balance would waste most of the budget. is_positive only GATES the
+    # _sample_categories call, so positives-only is measurement-equivalent.
+    forced_class_prob = 1.0 if strategy == "class_conditional" else None
+    class_prob = forced_class_prob if forced_class_prob is not None else ctx["class_prob"]
+
+    run_config = copy.deepcopy(config)
+    run_config["generation"]["sample_size"] = settings_size
+
+    path = output_path or default_calibration_path(
+        config, task.get_task_name(), strategy, settings_size
+    )
+    payload = {
+        "meta": {
+            "task": task.get_task_name(),
+            "cell": pipeline.generation_cell_slug(config, strategy),
+            "benchmark": pipeline.benchmark_slug(config),
+            "sample_size": settings_size,
+            "generator": {"provider": config["generation"].get("provider"),
+                          "model": config["generation"].get("model")},
+            "alpha": alpha, "tolerance": tolerance, "rounds": rounds,
+            "forced_class_prob": forced_class_prob,
+            "timestamp": f"{datetime.now():%Y-%m-%dT%H:%M:%S}",
+        },
+        "target": target,
+        "calibrated": dict(target),
+        "selected_round": 0,
+        "rounds": [],
+    }
+
+    request = {name: dict(dist) for name, dist in target.items()}
+    for round_idx in range(rounds + 1):
+        print(f"\n{'='*50}\nCALIBRATION ROUND {round_idx} / {rounds}\n{'='*50}")
+        synthetic = pipeline._run_generation(
+            ctx["generator"], task, run_config, ctx["real_data"],
+            {"type_dist": request["type_dist"], "count_dist": request["count_dist"]},
+            ctx["judge_call"], class_prob, profile=ctx["profile"],
+        )
+        measured = _measure(task, keys, synthetic)
+        n_informative = informative_count(task, synthetic)
+        if n_informative < MIN_INFORMATIVE:
+            print(f"[WARN] round {round_idx} measured on {n_informative} informative "
+                  f"samples (< {MIN_INFORMATIVE}); the update may chase noise.",
+                  file=sys.stderr)
+
+        report = jsd_report(target, measured)
+        payload["rounds"].append({
+            "round": round_idx,
+            "request": {n: dict(d) for n, d in request.items()},
+            "measured": {n: dict(d) for n, d in measured.items()},
+            "jsd": report,
+            "informative_samples": n_informative,
+            "supported_fraction": task.profile_dataset(synthetic).get(
+                "supported_fraction"),
+        })
+        best = select_best(payload["rounds"])
+        payload["selected_round"] = best
+        payload["calibrated"] = {
+            n: dict(d) for n, d in payload["rounds"][best]["request"].items()
+        }
+        write_calibration(path, payload)
+        for name, value in report.items():
+            print(f"  {name} JSD: {value:.4f}")
+
+        if converged(report, tolerance):
+            print(f"Converged at round {round_idx}.")
+            break
+        if stalled(payload["rounds"]):
+            print(f"No improvement for 2 rounds; stopping at round {round_idx}.")
+            break
+        if round_idx >= rounds:
+            print("Round budget exhausted without converging; "
+                  f"keeping best round {best}.")
+            break
+
+        request = {
+            name: update_request(request[name], target[name], measured.get(name) or {},
+                                 alpha=alpha)
+            for name in target
+        }
+
+    print(f"\nCalibration written to {path} (selected round "
+          f"{payload['selected_round']}).")
+    return payload
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Calibrate generation distributions against the real benchmark.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--config", required=True,
+                        help="Task config YAML (task.name selects the task)")
+    parser.add_argument("--rounds", type=int, default=None)
+    parser.add_argument("--alpha", type=float, default=None,
+                        help="Damping in (0,1]; lower is more conservative")
+    parser.add_argument("--tolerance", type=float, default=None,
+                        help="Per-dimension JSD at which the loop stops")
+    parser.add_argument("--sample-size", dest="sample_size", type=int, default=None)
+    parser.add_argument("--mode", choices=("forward", "inverse"), default=None)
+    parser.add_argument("--seedless", dest="seedless", action="store_true",
+                        default=None)
+    parser.add_argument("--no-seedless", dest="seedless", action="store_false")
+    parser.add_argument("--output", default=None,
+                        help="Artifact path (default: beside the task's profiles)")
+    return parser.parse_args()
+
+
+def main() -> None:
+    from framework.profile_dataset import load_config
+
+    args = parse_args()
+    config = load_config(args.config)
+    if args.mode is not None:
+        config["generation"]["mode"] = args.mode
+    if args.seedless is not None:
+        config["generation"]["seedless"] = args.seedless
+
+    settings = calibration_settings(config, args)
+    print(f"Task     : {config['task']['name']}")
+    print(f"Rounds   : {settings['rounds']}  alpha: {settings['alpha']}  "
+          f"tolerance: {settings['tolerance']}")
+    print(f"Samples  : {settings['sample_size']} per round")
+    run_calibration(
+        config,
+        rounds=settings["rounds"], alpha=settings["alpha"],
+        tolerance=settings["tolerance"], sample_size=settings["sample_size"],
+        output_path=args.output,
+    )
+
+
+if __name__ == "__main__":
+    main()
