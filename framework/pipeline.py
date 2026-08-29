@@ -179,30 +179,41 @@ def _apply_calibration(config: dict, task, empirical: dict) -> dict:
               f"framework.calibrate --config <config.yaml>")
         return empirical
 
+    # The whole read-validate-select sequence is guarded, not just the file
+    # read: a JSON-valid but structurally corrupt artifact (a non-dict
+    # "target", a non-object top-level payload, a non-numeric distribution
+    # value) must warn and fall back like any other bad artifact, never crash
+    # the run. AttributeError/TypeError/KeyError cover malformed shapes
+    # (e.g. calling .get on a list/str, float() on a non-numeric value);
+    # OSError/ValueError cover unreadable files and invalid JSON.
     try:
         payload = load_calibration(path)
-    except (OSError, ValueError) as e:
-        print(f"[WARN] calibration {path!r} could not be read ({e}); "
-              "using the empirical distribution.", file=sys.stderr)
+        matched = targets_match(payload.get("target") or {}, empirical)
+        calibrated = payload.get("calibrated") or {}
+        type_dist = calibrated.get("type_dist")
+        count_dist = calibrated.get("count_dist")
+        usable = bool(type_dist) and bool(count_dist)
+        result = {"type_dist": dict(type_dist), "count_dist": dict(count_dist)} if usable else None
+        selected_round = payload.get("selected_round")
+    except (OSError, ValueError, AttributeError, TypeError, KeyError) as e:
+        print(f"[WARN] calibration {path!r} could not be read or is malformed "
+              f"({e}); using the empirical distribution.", file=sys.stderr)
         return empirical
 
-    if not targets_match(payload.get("target") or {}, empirical):
+    if not matched:
         print(f"[WARN] calibration {path!r} was built against a different "
               "benchmark setpoint (dataset or sample size changed); using the "
               "empirical distribution instead.", file=sys.stderr)
         return empirical
 
-    calibrated = payload.get("calibrated") or {}
-    if not calibrated.get("type_dist") or not calibrated.get("count_dist"):
+    if not usable:
         print(f"[WARN] calibration {path!r} has no usable distributions; "
               "using the empirical distribution.", file=sys.stderr)
         return empirical
 
-    _LAST_CALIBRATION = {"path": path,
-                         "selected_round": payload.get("selected_round")}
-    print(f"Calibration: {path} (round {payload.get('selected_round')})")
-    return {"type_dist": dict(calibrated["type_dist"]),
-            "count_dist": dict(calibrated["count_dist"])}
+    _LAST_CALIBRATION = {"path": path, "selected_round": selected_round}
+    print(f"Calibration: {path} (round {selected_round})")
+    return result
 
 
 DEFAULT_PROFILE_DIR = "framework/data/profiles"
@@ -884,6 +895,15 @@ def build_generation_context(config: dict) -> dict:
     the same task, seeds, generator, distributions and class balance. Makes no
     API call: `load_generator` only constructs a client.
     """
+    # _LAST_CALIBRATION is set by _apply_calibration, which only runs when
+    # _should_load_error_distribution(...) is True below. Strategies/modes that
+    # skip that lookup entirely (structured, or corruption forward+seeded) must
+    # not let _build_meta report a PREVIOUS config's calibration in this same
+    # process (e.g. scripts/compare_models.py loops run_pipeline over configs).
+    # Reset unconditionally here, on top of the reset inside _apply_calibration.
+    global _LAST_CALIBRATION
+    _LAST_CALIBRATION = None
+
     task          = load_task(config["task"]["name"])
     real_data     = load_real_data(config, task)
     generator     = load_generator(config["generation"])
