@@ -23,11 +23,26 @@ _DESCRIPTIONS = {
     "spam_keywords": "work in classic spam keywords such as free, win, prize, or claim",
 }
 
+# SPAM patterns cycle so the empirical target is non-degenerate: every one of the
+# five signals carries real mass (min 0.1445, none stranded at the Laplace floor)
+# and the signal-count distribution spans three adjacent values {2: .4, 3: .4,
+# 4: .2} with no rare tail. A fixture exercising only some signals leaves the rest
+# at ~0.008, where under-delivering one cannot move the aggregate JSD and the loop
+# converges at round 0 before correcting anything.
+_SPAM_PATTERNS = [
+    "claim your prize at http://a{i}.example",      # link + keywords
+    "you owe $20 today, respond now!",              # money + urgency
+    "URGENT reply now to claim it!",                # caps + urgency + keywords
+    "WIRE $99 to http://b{i}.example",              # link + money + caps
+    "free bonus $5 at http://c{i}.example now!",    # link + money + urgency + keywords
+]
+
 _ROWS = "label,text\n" + "".join(
     f"ham,could we move the meeting to three tomorrow please number {i}\n"
     for i in range(60)
 ) + "".join(
-    f"spam,claim your prize now http://y{i}.example\n" for i in range(30)
+    f"spam,{pattern.format(i=i)}\n"
+    for i in range(6) for pattern in _SPAM_PATTERNS
 )
 
 
@@ -105,7 +120,10 @@ class InformativeCountTests(unittest.TestCase):
 
 
 class ClosedLoopTests(_Bench):
-    def _run(self, compliance, rounds=3, sample_size=40):
+    # 120, not 40: the driver itself warns below 50 informative samples ("the
+    # update may chase noise"), and count_dist over three values is unstable at
+    # n=40. The closed-loop test must run in the regime the code is designed for.
+    def _run(self, compliance, rounds=3, sample_size=120):
         gen = CompliantFake(compliance)
         cfg = _config(self.path, sample_size=sample_size)
         cfg["calibration"] = {"sample_size": sample_size}
