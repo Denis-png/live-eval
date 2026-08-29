@@ -182,8 +182,10 @@ class ProvenanceIsolationTests(unittest.TestCase):
         with redirect_stdout(io.StringIO()):
             pipeline.load_error_distribution(spam_cfg, spam_real, spam_task)
         # Sanity: the contamination source is real, not a no-op.
+        # Task 7: _LAST_CALIBRATION also carries class_prob (None here — this
+        # artifact's `calibrated` has no class_prob key, i.e. no Stage B ran).
         self.assertEqual(pipeline._LAST_CALIBRATION,
-                         {"path": artifact, "selected_round": 3})
+                         {"path": artifact, "selected_round": 3, "class_prob": None})
 
         # 2) A GEC forward+seeded config never reaches _apply_calibration --
         # build_generation_context must still start clean for it.

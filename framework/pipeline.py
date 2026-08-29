@@ -211,7 +211,8 @@ def _apply_calibration(config: dict, task, empirical: dict) -> dict:
               "using the empirical distribution.", file=sys.stderr)
         return empirical
 
-    _LAST_CALIBRATION = {"path": path, "selected_round": selected_round}
+    _LAST_CALIBRATION = {"path": path, "selected_round": selected_round,
+                         "class_prob": calibrated.get("class_prob")}
     print(f"Calibration: {path} (round {selected_round})")
     return result
 
@@ -810,6 +811,8 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
 def _resolve_class_prob(config: dict, real_reference) -> float:
     """P(positive class) for class-conditional generation. `empirical` → the real
     reference's positive fraction; a float → used directly."""
+    if _LAST_CALIBRATION and isinstance(_LAST_CALIBRATION.get("class_prob"), float):
+        return _LAST_CALIBRATION["class_prob"]
     cb = (config.get("generation") or {}).get("class_balance", "empirical")
     if isinstance(cb, (int, float)):
         return float(cb)

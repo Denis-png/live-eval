@@ -212,7 +212,13 @@ class ClosedLoopTests(_Bench):
         # CONTROLLER RULING R4: a uniformly-compliant fake can converge at round 0
         # and break out early, so the round count is not reliably [1, 2, 3] — the
         # property under test is "one write per round", not a fixed count.
-        self.assertEqual(seen, list(range(1, len(payload["rounds"]) + 1)))
+        #
+        # Task 7 (Stage B): spam is class_conditional, so one more write follows
+        # the main loop — Stage B measures class attrition and (maybe) corrects
+        # class_prob, and persists that onto the SAME round list, hence the
+        # trailing duplicate of the final round count rather than a new entry.
+        self.assertEqual(seen, list(range(1, len(payload["rounds"]) + 1))
+                         + [len(payload["rounds"])])
 
     def test_spam_forces_class_prob_to_one(self):
         # Only SPAM rows carry signals; generating HAM during calibration wastes

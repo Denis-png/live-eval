@@ -552,6 +552,14 @@ class BaseGenerator(ABC):
         Returns records {"text", "label", "technique", "seed"}."""
         rng = rng or random.Random()
         synthetic = []
+        # Per-class attempted/survived counts. Drops are class-asymmetric — a
+        # model refuses phishing text far more than a benign paraphrase, and a
+        # paraphrase trips "identical to seed" far more than an injection — so
+        # the surviving balance drifts from class_prob systematically. Exposed
+        # like last_response_diagnostic for the calibrator to read.
+        attrition = {positive_label: {"attempted": 0, "survived": 0},
+                     negative_label: {"attempted": 0, "survived": 0}}
+        self.last_class_attrition = attrition
         judge_fn = judge_call or self.call_api
         if seed_policy in ("cross_class", "same_class") and not real_seeds:
             return synthetic
@@ -610,6 +618,7 @@ class BaseGenerator(ABC):
 
             is_positive = rng.random() < class_prob
             label = positive_label if is_positive else negative_label
+            attrition[label]["attempted"] += 1
 
             # Every policy targets the empirical signal mix for the positive
             # class — same_class emphasises the sampled signals in its rewrite
@@ -700,6 +709,7 @@ class BaseGenerator(ABC):
                     judge_skip_notice_printed = True
 
                 synthetic.append({"text": text, "label": label, "technique": technique, "seed": source or ""})
+                attrition[label]["survived"] += 1
                 suffix = f" + judge {judge_dt:.1f}s" if judge_prompt else ""
                 print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s{suffix} ✓ ({label}: {technique})", flush=True)
                 if request_delay > 0:

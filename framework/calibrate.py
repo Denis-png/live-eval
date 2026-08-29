@@ -21,6 +21,7 @@ from framework.calibration.artifact import (
     default_calibration_path,
     write_calibration,
 )
+from framework.calibration.class_balance import correct_class_prob
 from framework.calibration.controller import (
     converged,
     jsd_report,
@@ -191,6 +192,31 @@ def run_calibration(
                                  alpha=alpha)
             for name in target
         }
+
+    # Stage B — class balance. Stage A ran at class_prob 1.0 to make every
+    # sample informative, which makes the balance unmeasurable there; one round
+    # at the real balance with Stage A's distributions supplies the attrition.
+    if strategy == "class_conditional":
+        print(f"\n{'='*50}\nCALIBRATION STAGE B — class balance\n{'='*50}")
+        stage_b = pipeline._run_generation(
+            ctx["generator"], task, run_config,
+            ctx["real_data"],
+            {"type_dist": payload["calibrated"]["type_dist"],
+             "count_dist": payload["calibrated"]["count_dist"]},
+            ctx["judge_call"], ctx["class_prob"], profile=ctx["profile"],
+        )
+        attrition = getattr(ctx["generator"], "last_class_attrition", None) or {}
+        corrected = correct_class_prob(ctx["class_prob"], attrition,
+                                       n=len(stage_b))
+        payload["meta"]["class_attrition"] = attrition
+        if corrected is None:
+            print("Class balance inside the noise floor; class_prob unchanged "
+                  f"at {ctx['class_prob']:.4f}.")
+        else:
+            print(f"Class balance corrected: {ctx['class_prob']:.4f} -> "
+                  f"{corrected:.4f}")
+            payload["calibrated"]["class_prob"] = corrected
+        write_calibration(path, payload)
 
     print(f"\nCalibration written to {path} (selected round "
           f"{payload['selected_round']}).")
