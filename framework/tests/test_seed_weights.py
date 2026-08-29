@@ -298,6 +298,18 @@ class SeedWeightWiringTests(_GecBench):
         self.assertEqual(gen.seeds_seen(),
                          [f"{text}|{etype}" for text, etype in _SEEDS])
 
+    def test_mixed_weights_with_one_bad_value_fall_back(self):
+        # The good value comes FIRST on purpose: an `any(float(w) > 0 ...)` guard
+        # short-circuits on it and never coerces the bad one, publishes the dict,
+        # and then raises ValueError inside draw_weighted_seeds mid-run. Every
+        # value must be validated, not just up to the first positive one.
+        self._write_artifact({"R:DET": 1.0, "R:PREP": "bad"})
+        ctx, gen = self._generate(_gec_config(self.bench,
+                                              calibration_path=self.artifact))
+        self.assertIsNone(ctx["seed_weights"])
+        self.assertEqual(gen.seeds_seen(),
+                         [f"{text}|{etype}" for text, etype in _SEEDS])
+
     def test_all_zero_weights_fall_back(self):
         self._write_artifact({"R:DET": 0.0, "R:PREP": 0.0})
         ctx, _ = self._generate(_gec_config(self.bench,
@@ -315,6 +327,55 @@ class SeedWeightWiringTests(_GecBench):
             ctx = pipeline.build_generation_context(cfg)
         self.assertIsNone(ctx["seed_weights"])
         self.assertNotIn("seed_weights", cfg["generation"])
+
+
+class SeedWeightProvenanceTests(_GecBench):
+    """results.json is the only surviving record of what produced a benchmark
+    (artifacts are gitignored), so a run steered by seed weights must say so."""
+
+    def _meta(self, cfg):
+        from framework.tasks.gec.task import GECTask
+        return pipeline._build_meta(cfg, GECTask(), runs_completed=1,
+                                    effective_samples_per_run=[6],
+                                    real_baseline=False)
+
+    def test_meta_records_the_seed_weight_artifact(self):
+        self._write_artifact({"R:DET": 1.0, "R:PREP": 0.0})
+        cfg = _gec_config(self.bench, calibration_path=self.artifact)
+        self._generate(cfg)
+        meta = self._meta(cfg)
+        self.assertEqual(meta["calibration"]["path"], self.artifact)
+        self.assertEqual(meta["calibration"]["selected_round"], 1)
+
+    def test_meta_calibration_is_none_without_seed_weights(self):
+        # The Task 6 isolation guarantee: no artifact must still end at None.
+        cfg = _gec_config(self.bench, calibration_path=None)
+        self._generate(cfg)
+        self.assertIsNone(self._meta(cfg)["calibration"])
+
+    def test_seed_weights_do_not_leak_into_the_next_config(self):
+        # This change adds a SECOND writer of _LAST_CALIBRATION, so the Task 6
+        # isolation guarantee now has a new direction to protect: a
+        # seed-weighted run followed by an uncalibrated one in the same process
+        # (scripts/compare_models.py loops configs) must not inherit the
+        # artifact. build_generation_context's unconditional reset is what
+        # holds this, and the write must stay after it.
+        self._write_artifact({"R:DET": 1.0, "R:PREP": 0.0})
+        calibrated = _gec_config(self.bench, calibration_path=self.artifact)
+        self._generate(calibrated)
+        self.assertIsNotNone(pipeline._LAST_CALIBRATION)  # contamination source is real
+
+        plain = _gec_config(self.bench, calibration_path=None)
+        self._generate(plain)
+        self.assertIsNone(pipeline._LAST_CALIBRATION)
+        self.assertIsNone(self._meta(plain)["calibration"])
+
+    def test_a_failed_artifact_read_leaves_no_provenance(self):
+        with open(self.artifact, "w", encoding="utf-8") as f:
+            f.write("{not json")
+        cfg = _gec_config(self.bench, calibration_path=self.artifact)
+        self._generate(cfg)
+        self.assertIsNone(self._meta(cfg)["calibration"])
 
 
 class _BiasedGenerator(_RecordingGenerator):

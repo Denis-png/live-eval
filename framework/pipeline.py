@@ -924,13 +924,29 @@ def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
         weights = (payload.get("calibrated") or {}).get("seed_weights")
         if not isinstance(weights, dict) or not weights:
             return None
-        if not any(float(w) > 0 for w in weights.values()):
+        # EVERY value is coerced, deliberately not `any(float(w) > 0 ...)`: that
+        # short-circuits, so {"R:DET": 1.0, "R:PREP": "bad"} would pass the guard
+        # and raise inside draw_weighted_seeds mid-run — the exact crash this
+        # check exists to prevent.
+        values = [float(w) for w in weights.values()]
+        if not any(v > 0 for v in values):
             return None
     except (OSError, ValueError, AttributeError, TypeError, KeyError) as e:
         print(f"[WARN] calibration {path!r} could not be read or is malformed "
               f"({e}); drawing seeds in the unweighted first-N order.",
               file=sys.stderr)
         return None
+
+    # Provenance, same as _apply_calibration records for every other cell:
+    # artifacts are gitignored, so results.json is the only surviving record of
+    # what produced a benchmark. Written only on success and only after
+    # build_generation_context's unconditional reset, so a run without an
+    # artifact still ends at None. class_prob is not applicable here — seed
+    # weights are a corruption-cell control input and carry no class balance.
+    global _LAST_CALIBRATION
+    _LAST_CALIBRATION = {"path": path,
+                         "selected_round": payload.get("selected_round"),
+                         "class_prob": None}
     print(f"Calibration: {path} (round {payload.get('selected_round')}) — "
           f"seed weights over {len(weights)} edit types")
     return weights
