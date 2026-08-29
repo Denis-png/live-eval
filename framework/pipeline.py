@@ -735,9 +735,13 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
     else:
         mode = gen_cfg.get("mode", "forward")
         seedless = bool(gen_cfg.get("seedless"))
+        # Hoisted out of the seedless block: forward+seeded needs it too, for the
+        # calibrated seed draw. Every run draws fresh (no fixed seed) — pinning
+        # it would hand every run in a session the identical seed set and
+        # collapse the run-to-run variance the framework exists to measure.
+        rng = random.Random()
         if seedless:
             from framework.profiling.spec_sampler import render_spec, sample_content_spec
-            rng = random.Random()
             side = task.get_profile_side(mode)
             specs = [
                 render_spec(sample_content_spec(profile, rng, side=side))
@@ -789,8 +793,15 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                 request_delay=gen_cfg.get("request_delay", 0.0),
             )
         else:
+            # forward+seeded: the generator picks its own error type, so the only
+            # control input is WHICH seeds it sees. Without calibrated weights
+            # get_seed_pool returns real_data untouched.
+            seed_weights = (gen_cfg.get("seed_weights")
+                            if isinstance(gen_cfg.get("seed_weights"), dict) else None)
             synthetic = generator.generate(
-                real_samples=real_data, error_types=task.get_error_types(),
+                real_samples=task.get_seed_pool(config, real_data, "forward",
+                                                seed_weights=seed_weights, rng=rng),
+                error_types=task.get_error_types(),
                 prompt_instruction=task.get_prompt_instruction(), sample_size=sample_size,
                 judge_prompt=task.get_judge_prompt() if judge_call else None,
                 judge_call=judge_call, request_delay=gen_cfg.get("request_delay", 0.0),
@@ -891,6 +902,40 @@ def _render_plots(config: dict, paths: dict) -> None:
 
 # ── Generation context ────────────────────────────────────────
 
+def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
+                       seedless: bool) -> dict | None:
+    """Calibrated seed weights for cells whose only control input is seed choice.
+
+    GEC forward+seeded never reaches load_error_distribution (the generator picks
+    its own error type, so _should_load_error_distribution is False), so its
+    calibration artifact has to be resolved here instead.
+    """
+    if strategy != "corruption" or mode != "forward" or seedless:
+        return None
+    from framework.calibration.artifact import load_calibration, resolve_calibration_path
+
+    path = resolve_calibration_path(config, task, strategy)
+    if not path:
+        return None
+    # Same guard as _apply_calibration: a JSON-valid but structurally corrupt
+    # artifact must fall back to today's behavior, never crash the run.
+    try:
+        payload = load_calibration(path)
+        weights = (payload.get("calibrated") or {}).get("seed_weights")
+        if not isinstance(weights, dict) or not weights:
+            return None
+        if not any(float(w) > 0 for w in weights.values()):
+            return None
+    except (OSError, ValueError, AttributeError, TypeError, KeyError) as e:
+        print(f"[WARN] calibration {path!r} could not be read or is malformed "
+              f"({e}); drawing seeds in the unweighted first-N order.",
+              file=sys.stderr)
+        return None
+    print(f"Calibration: {path} (round {payload.get('selected_round')}) — "
+          f"seed weights over {len(weights)} edit types")
+    return weights
+
+
 def build_generation_context(config: dict) -> dict:
     """Everything needed to generate for `config`, resolved once.
 
@@ -925,6 +970,13 @@ def build_generation_context(config: dict) -> dict:
     )
     profile = _load_generation_profile(config, task)
 
+    # Published onto the config so _run_generation's forward+seeded branch (which
+    # reads generation.seed_weights) sees them: that cell never calls
+    # _apply_calibration, so this is the only place its artifact can be resolved.
+    seed_weights = _load_seed_weights(config, task, strategy, mode, seedless)
+    if seed_weights:
+        config.setdefault("generation", {})["seed_weights"] = seed_weights
+
     # Real reference feeds class balance, the real baseline, and profiling.
     real_reference = task.get_real_eval_samples(config, real_data)
 
@@ -938,6 +990,7 @@ def build_generation_context(config: dict) -> dict:
         "mode": mode,
         "seedless": seedless,
         "error_dist": error_dist,
+        "seed_weights": seed_weights,
         "profile": profile,
         "real_reference": real_reference,
         "class_prob": _resolve_class_prob(config, real_reference),

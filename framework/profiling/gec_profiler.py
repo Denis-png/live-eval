@@ -235,3 +235,33 @@ def profile_gec_edit_types(
             if total_edits else 0.0
         ),
     }
+
+
+def index_seed_edit_types(rows: list[dict[str, Any]], *, annotator=None) -> dict:
+    """Map ERRANT edit type -> indices of `rows` carrying it.
+
+    A seed carrying several types is indexed under EACH of them, so the buckets
+    overlap. Drawing is two-stage (type by weight, then a seed uniformly within
+    that type) rather than one weighted draw over seeds, which keeps the type
+    weights meaningful when seeds carry different numbers of edits.
+
+    No API call; ERRANT is loaded lazily and can be injected for tests.
+    """
+    if annotator is None:
+        from framework.evaluators.gec._errant_shared import get_annotator
+        annotator = get_annotator()
+
+    index: dict[str, list[int]] = {}
+    for i, row in enumerate(rows):
+        incorrect = row.get("incorrect") or row.get("corrupted")
+        correct = row.get("correct") or row.get("original")
+        if not incorrect or not correct:
+            continue
+        try:
+            edits = annotator.annotate(annotator.parse(incorrect),
+                                       annotator.parse(correct))
+        except Exception:
+            continue
+        for edit_type in sorted({e.type for e in edits if e.type and e.type != "noop"}):
+            index.setdefault(edit_type, []).append(i)
+    return index

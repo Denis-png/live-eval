@@ -102,14 +102,39 @@ def run_calibration(
             f"(get_calibration_keys() returned None). Cell: "
             f"{pipeline.generation_cell_slug(config, strategy)}."
         )
-    if ctx["error_dist"] is None:
+    # Corruption forward+seeded injects no distribution at all — the generator
+    # identifies the seed's error itself. Its one control input is WHICH seeds it
+    # sees, so that cell calibrates seed weights instead (Task 8).
+    seed_mode = (strategy == "corruption" and ctx["mode"] == "forward"
+                 and not ctx["seedless"])
+    if ctx["error_dist"] is None and not seed_mode:
         raise RuntimeError(
             f"Cell {pipeline.generation_cell_slug(config, strategy)} of task "
             f"'{task.get_task_name()}' samples no error distribution, so there "
             "is nothing to calibrate."
         )
+    if seed_mode and "type_dist" not in keys:
+        raise RuntimeError(
+            f"Cell {pipeline.generation_cell_slug(config, strategy)} of task "
+            f"'{task.get_task_name()}' calibrates seed choice, which needs a "
+            "'type_dist' calibration key."
+        )
 
-    target = {name: dict(ctx["error_dist"][name]) for name in keys}
+    # Both dimensions are still MEASURED in seed mode; only type_dist is steered.
+    measure_keys = dict(keys)
+    if seed_mode:
+        # Forward mode leaves the edit COUNT entirely to the generator, so there
+        # is no control input for count_dist: keeping it in the target would make
+        # converged() unsatisfiable and burn the whole round budget for nothing.
+        # It stays in the round trace as a diagnostic instead.
+        keys = {"type_dist": keys["type_dist"]}
+        # ctx["error_dist"] is None here, so the setpoint comes from the seed
+        # pool's own ERRANT profile — the same instrument _measure uses on the
+        # generated rows.
+        seed_profile = task.profile_dataset(ctx["real_reference"])
+        target = {name: dict(seed_profile.get(key) or {}) for name, key in keys.items()}
+    else:
+        target = {name: dict(ctx["error_dist"][name]) for name in keys}
     settings_size = sample_size or config["generation"]["sample_size"]
 
     # Only the positive class carries signals, so calibrating at the empirical
@@ -145,12 +170,19 @@ def run_calibration(
     request = {name: dict(dist) for name, dist in target.items()}
     for round_idx in range(rounds + 1):
         print(f"\n{'='*50}\nCALIBRATION ROUND {round_idx} / {rounds}\n{'='*50}")
+        if seed_mode:
+            # The control input is the seed draw, not an injected distribution.
+            run_config["generation"]["seed_weights"] = request["type_dist"]
+            round_dist = ctx["error_dist"]
+        else:
+            round_dist = {"type_dist": request["type_dist"],
+                          "count_dist": request["count_dist"]}
         synthetic = pipeline._run_generation(
-            ctx["generator"], task, run_config, ctx["real_data"],
-            {"type_dist": request["type_dist"], "count_dist": request["count_dist"]},
+            ctx["generator"], task, run_config, ctx["real_data"], round_dist,
             ctx["judge_call"], class_prob, profile=ctx["profile"],
         )
-        measured = _measure(task, keys, synthetic)
+        measured_all = _measure(task, measure_keys, synthetic)
+        measured = {name: measured_all[name] for name in keys}
         n_informative = informative_count(task, synthetic)
         if n_informative < MIN_INFORMATIVE:
             print(f"[WARN] round {round_idx} measured on {n_informative} informative "
@@ -158,7 +190,7 @@ def run_calibration(
                   file=sys.stderr)
 
         report = jsd_report(target, measured)
-        payload["rounds"].append({
+        entry = {
             "round": round_idx,
             "request": {n: dict(d) for n, d in request.items()},
             "measured": {n: dict(d) for n, d in measured.items()},
@@ -166,12 +198,23 @@ def run_calibration(
             "informative_samples": n_informative,
             "supported_fraction": task.profile_dataset(synthetic).get(
                 "supported_fraction"),
-        })
+        }
+        # Uncontrollable dimensions (seed mode's edit count) are observed but
+        # never steered on; recording them keeps the trace diagnosable.
+        diagnostic = {n: dict(d) for n, d in measured_all.items() if n not in keys}
+        if diagnostic:
+            entry["diagnostic"] = diagnostic
+        payload["rounds"].append(entry)
         best = select_best(payload["rounds"])
         payload["selected_round"] = best
         payload["calibrated"] = {
             n: dict(d) for n, d in payload["rounds"][best]["request"].items()
         }
+        if seed_mode:
+            # The name a run looks for: pipeline._load_seed_weights reads
+            # calibrated.seed_weights, not calibrated.type_dist.
+            payload["calibrated"]["seed_weights"] = dict(
+                payload["calibrated"]["type_dist"])
         write_calibration(path, payload)
         for name, value in report.items():
             print(f"  {name} JSD: {value:.4f}")

@@ -100,6 +100,24 @@ class GECTask(BaseTask):
             return None
         return {"incorrect": incorrect, "correct": correct}
 
+    def get_seed_pool(self, config: dict, real_data: list[dict], mode: str,
+                      *, seed_weights: dict | None = None, rng=None) -> list[dict]:
+        """Forward+seeded has no injectable error distribution — the seed pool is
+        the distribution. When calibration supplied weights, draw seeds so the
+        generator's lossy "same error type, new topic" channel lands on the
+        benchmark's mix. Without weights this is the unchanged first-N pool."""
+        if mode != "forward" or not seed_weights:
+            return real_data
+        import random
+
+        from framework.calibration.seeds import draw_weighted_seeds
+        from framework.profiling.gec_profiler import index_seed_edit_types
+
+        index = index_seed_edit_types(real_data)
+        size = (config.get("generation") or {}).get("sample_size", len(real_data))
+        return draw_weighted_seeds(real_data, index, seed_weights, size,
+                                   rng or random.Random())
+
     def get_real_eval_samples(self, config, real_data):
         """Real GEC benchmark: score models on the real incorrect inputs against
         the real correct references."""

@@ -32,9 +32,13 @@ class SpamTask(BaseTask):
     def get_seedless_class_prompts(self) -> dict[str, str]:
         return self._config.get("seedless_class_prompts", {})
 
-    def get_seed_pool(self, config: dict, real_data: list[dict], mode: str) -> list[dict]:
+    def get_seed_pool(self, config: dict, real_data: list[dict], mode: str,
+                      *, seed_weights: dict | None = None, rng=None) -> list[dict]:
         """Forward mode imitates within a class, so it needs labeled seeds of
-        BOTH classes — parse_row keeps HAM only. Inverse keeps today's pool."""
+        BOTH classes — parse_row keeps HAM only. Inverse keeps today's pool.
+
+        Spam's control input is the signal distribution it already injects, so
+        `seed_weights`/`rng` are accepted for signature compatibility only."""
         if mode != "forward":
             return real_data
         return [r for r in self._load_reference_rows(config) if r.get("text")]

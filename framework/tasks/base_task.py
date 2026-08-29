@@ -101,10 +101,15 @@ class BaseTask(ABC):
         profiles are keyed per label."""
         return "correct"
 
-    def get_seed_pool(self, config: dict, real_data: list[dict], mode: str) -> list[dict]:
+    def get_seed_pool(self, config: dict, real_data: list[dict], mode: str,
+                      *, seed_weights: dict | None = None, rng=None) -> list[dict]:
         """Rows used as generation seeds. Defaults to the parsed real data;
         override when a mode needs a differently-shaped pool (e.g. labeled
-        rows of both classes for classification forward mode)."""
+        rows of both classes for classification forward mode).
+
+        `seed_weights` is the calibrated per-edit-type weighting for cells whose
+        only control input is seed choice (GEC forward+seeded); tasks that do
+        not use it ignore both it and `rng`."""
         return real_data
 
     def get_generation_strategy(self) -> str:
