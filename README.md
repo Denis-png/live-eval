@@ -255,8 +255,14 @@ artifact beside the profile:
 The task comes from `task.name` in the config; `--mode` and `--seedless/--no-seedless`
 select the cell, `--output` overrides the artifact path. Runs then pick the artifact up
 automatically for the same benchmark and cell, printing `Calibration: <path> (round N)`.
-A cell with no artifact prints a `[NOTE]` naming the command that would build one. Pin an
-artifact with `generation.calibration_path`, or set that key to `null` to opt out.
+Every calibratable cell with no artifact prints a `[NOTE]` naming the command that would
+build one. `structured` (taxonomy) has no `(type_dist, count_dist)` axis and is out of
+scope for calibration entirely, so it never prints one either way. Pin an artifact with
+`generation.calibration_path`, or set that key to `null` to opt out.
+
+A calibrated `class_prob` only ever corrects the **`empirical`** balance for differential
+attrition: an explicit float in `generation.class_balance` is a user instruction and always
+wins, calibration included.
 
 Calibration is a **separate phase** on purpose. Steering runs *inside* a scored session
 would make them non-i.i.d. and turn `results.json`'s `mean ± std` — the core GET
@@ -268,7 +274,7 @@ gitignored, so that is the only surviving provenance.
 All settings are optional and have working defaults:
 
     calibration:
-      rounds: 3          # extra rounds after round 0 (round 0 = uncalibrated)
+      rounds: 3          # extra rounds after round 0 (round 0 = the target, before correction)
       alpha: 0.5         # damping; lower is more conservative
       tolerance: 0.1     # per-dimension JSD at which the loop stops
       sample_size: 120   # default max(generation.sample_size, 100)
@@ -277,10 +283,16 @@ All settings are optional and have working defaults:
 for eval cost rather than estimation precision; a round measured on fewer than 50
 informative samples warns that the update may be chasing noise.
 
-The loop emits the **best** round, and round 0 is by construction the uncalibrated
-distribution — so calibration can never make a benchmark worse than not calibrating.
-It is numeric only: no wording is ever added to a generation prompt, which keeps it from
-teaching the generator what the fidelity detectors look for.
+The loop emits the **best** round, and round 0 always requests exactly the target
+distribution, before any correction — so calibration can never make a benchmark worse than
+round 0. For `type_dist`/`count_dist` cells that guarantee coincides with "never worse than
+not calibrating", because round 0 there reproduces today's uncalibrated draw exactly. GEC
+`forward + seeded` is the one exception: its target is the seed pool's own ERRANT profile,
+and round 0 already draws seeds two-stage-weighted **with replacement** rather than the
+uncalibrated first-N order — "never worse than round 0" still holds, but round 0 itself is
+not the same draw as an uncalibrated run for that cell. Calibration is numeric only: no
+wording is ever added to a generation prompt, which keeps it from teaching the generator
+what the fidelity detectors look for.
 
 **Per-cell control input.** `inverse` (seeded and seedless) and `forward + seedless`
 steer `type_dist`/`count_dist`. GEC `forward + seeded` has no injectable distribution —
@@ -300,7 +312,7 @@ Two bounds worth knowing before setting a tolerance:
   replacement, so one category's achievable share saturates near
   `1 / mean_signals_per_message`; measured directly, requesting a 0.830 share yielded
   0.353. Past that ceiling the request keeps rising while the measurement does not
-  follow. The loop degrades safely — the best round wins, and round 0 is uncalibrated —
+  follow. The loop degrades safely — the best round wins, never worse than round 0 —
   but it cannot close that gap.
 - **JSD has a floor above zero.** The target is Laplace-smoothed (so every supported
   category stays sample-able) while the measurement is raw, so even a perfectly compliant

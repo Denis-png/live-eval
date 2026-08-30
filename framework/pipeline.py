@@ -820,13 +820,19 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
 # ── Post-generation helpers (class balance, real baseline, nesting, profiling) ──
 
 def _resolve_class_prob(config: dict, real_reference) -> float:
-    """P(positive class) for class-conditional generation. `empirical` → the real
-    reference's positive fraction; a float → used directly."""
-    if _LAST_CALIBRATION and isinstance(_LAST_CALIBRATION.get("class_prob"), float):
-        return _LAST_CALIBRATION["class_prob"]
+    """P(positive class) for class-conditional generation.
+
+    An explicit float in `generation.class_balance` is a user instruction and
+    always wins, calibration included. A calibrated `class_prob` corrects the
+    EMPIRICAL balance for differential attrition, so it only applies when
+    `class_balance` is `empirical` (the default) — never overriding a balance
+    the user asked for by name. With no calibration, `empirical` falls back to
+    the real reference's positive fraction."""
     cb = (config.get("generation") or {}).get("class_balance", "empirical")
     if isinstance(cb, (int, float)):
         return float(cb)
+    if _LAST_CALIBRATION and isinstance(_LAST_CALIBRATION.get("class_prob"), float):
+        return _LAST_CALIBRATION["class_prob"]
     if real_reference:
         pos = sum(1 for r in real_reference if r.get("label") == "SPAM")
         return pos / len(real_reference)
@@ -916,6 +922,10 @@ def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
 
     path = resolve_calibration_path(config, task, strategy)
     if not path:
+        print(f"[NOTE] no calibration artifact for "
+              f"{generation_cell_slug(config, strategy)}; drawing seeds in the "
+              f"unweighted first-N order. Build one with: python -m "
+              f"framework.calibrate --config <config.yaml>")
         return None
     # Same guard as _apply_calibration: a JSON-valid but structurally corrupt
     # artifact must fall back to today's behavior, never crash the run.

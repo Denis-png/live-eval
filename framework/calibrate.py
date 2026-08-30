@@ -62,22 +62,27 @@ def calibration_settings(config: dict, args=None) -> dict:
     return settings
 
 
-def informative_count(task, rows: list[dict]) -> int:
+def informative_count(task, rows: list[dict], profile: dict | None = None) -> int:
     """Samples the measurement is actually estimated from, which is not the
-    round's sample size: SPAM rows for classification (HAM carries no signals),
-    annotated pairs for corruption."""
+    round's sample size: SPAM rows for classification (HAM carries no signals);
+    for corruption, the surviving pairs ERRANT actually annotated —
+    `profile_gec_edit_types`'s own `n_annotated`, read off the SAME profiling
+    pass `_measure` already made rather than re-annotating every pair a second
+    time just to count them."""
     if task.get_generation_strategy() == "class_conditional":
         return sum(1 for r in rows if r.get("label") == "SPAM")
-    return sum(1 for r in rows
-               if (r.get("corrupted") or r.get("incorrect"))
-               and (r.get("original") or r.get("correct")))
+    return (profile or {}).get("n_annotated", 0)
 
 
-def _measure(task, keys: dict[str, str], rows: list[dict]) -> dict[str, dict]:
-    """Re-detect the control inputs on generated rows using the task's own
-    profiler, so real and generated are measured with the same instrument."""
-    profile = task.profile_dataset(rows)
-    return {name: (profile.get(key) or {}) for name, key in keys.items()}
+def _measure(task, rows: list[dict]) -> dict:
+    """Re-detect the full profile on generated rows using the task's own
+    profiler, so real and generated are measured with the same instrument.
+
+    Returns the WHOLE profile rather than pre-selecting the calibration keys:
+    callers also need `n_annotated`/`supported_fraction` off the same rows, and
+    profiling (a full ERRANT pass for GEC) is expensive enough that doing it
+    twice per round is worth avoiding."""
+    return task.profile_dataset(rows)
 
 
 def run_calibration(
@@ -92,7 +97,19 @@ def run_calibration(
     """Iterate generate -> profile -> correct, writing the artifact each round."""
     from framework import pipeline
 
-    ctx = pipeline.build_generation_context(config)
+    # The setpoint MUST be the real benchmark, never a previously-written
+    # calibration artifact: build_generation_context is also what a normal run
+    # uses to CONSUME an artifact (via load_error_distribution / seed weights),
+    # so calling it on the caller's config would let an existing artifact's
+    # already-calibrated error_dist/class_prob/seed_weights become this round's
+    # "empirical" target, drifting further from the benchmark on every
+    # re-calibration and publishing stale seed weights onto the caller's own
+    # config dict in the process. Force the lookup off on a private copy;
+    # `default_calibration_path`/`generation_cell_slug` below still read the
+    # original `config`, so artifact filenames are unaffected.
+    base_config = copy.deepcopy(config)
+    base_config.setdefault("generation", {})["calibration_path"] = None
+    ctx = pipeline.build_generation_context(base_config)
     task, strategy = ctx["task"], ctx["strategy"]
 
     keys = task.get_calibration_keys()
@@ -135,7 +152,11 @@ def run_calibration(
         target = {name: dict(seed_profile.get(key) or {}) for name, key in keys.items()}
     else:
         target = {name: dict(ctx["error_dist"][name]) for name in keys}
-    settings_size = sample_size or config["generation"]["sample_size"]
+    # Routed through calibration_settings (not read off config["generation"]
+    # directly) so a programmatic caller that omits `sample_size` still gets
+    # the documented max(generation.sample_size, MIN_SAMPLE_SIZE) floor — the
+    # same settings the CLI path (main()) already applies.
+    settings_size = sample_size or calibration_settings(config)["sample_size"]
 
     # Only the positive class carries signals, so calibrating at the empirical
     # balance would waste most of the budget. is_positive only GATES the
@@ -143,7 +164,7 @@ def run_calibration(
     forced_class_prob = 1.0 if strategy == "class_conditional" else None
     class_prob = forced_class_prob if forced_class_prob is not None else ctx["class_prob"]
 
-    run_config = copy.deepcopy(config)
+    run_config = copy.deepcopy(base_config)
     run_config["generation"]["sample_size"] = settings_size
 
     path = output_path or default_calibration_path(
@@ -181,9 +202,10 @@ def run_calibration(
             ctx["generator"], task, run_config, ctx["real_data"], round_dist,
             ctx["judge_call"], class_prob, profile=ctx["profile"],
         )
-        measured_all = _measure(task, measure_keys, synthetic)
+        profile = _measure(task, synthetic)
+        measured_all = {name: (profile.get(key) or {}) for name, key in measure_keys.items()}
         measured = {name: measured_all[name] for name in keys}
-        n_informative = informative_count(task, synthetic)
+        n_informative = informative_count(task, synthetic, profile)
         if n_informative < MIN_INFORMATIVE:
             print(f"[WARN] round {round_idx} measured on {n_informative} informative "
                   f"samples (< {MIN_INFORMATIVE}); the update may chase noise.",
@@ -196,8 +218,7 @@ def run_calibration(
             "measured": {n: dict(d) for n, d in measured.items()},
             "jsd": report,
             "informative_samples": n_informative,
-            "supported_fraction": task.profile_dataset(synthetic).get(
-                "supported_fraction"),
+            "supported_fraction": profile.get("supported_fraction"),
         }
         # Uncontrollable dimensions (seed mode's edit count) are observed but
         # never steered on; recording them keeps the trace diagnosable.

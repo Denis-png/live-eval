@@ -246,3 +246,32 @@ class MalformedArtifactTests(_Bench):
             out = pipeline.load_error_distribution(cfg, self._real_data(cfg), self.task)
         self.assertEqual(out, empirical)
         self.assertIn("WARN", err.getvalue())
+
+
+class ClassProbPrecedenceTests(unittest.TestCase):
+    """I2/I4: Component 5's consumption half. A calibrated class_prob must
+    correct the EMPIRICAL balance for differential attrition, but an explicit
+    float in generation.class_balance is a user instruction and always wins —
+    calibration included. Nothing previously exercised _resolve_class_prob
+    pulling a calibrated value out of _LAST_CALIBRATION at all."""
+
+    def tearDown(self):
+        pipeline._LAST_CALIBRATION = None
+
+    def test_empirical_class_balance_uses_the_calibrated_value(self):
+        pipeline._LAST_CALIBRATION = {"path": "x", "selected_round": 1,
+                                      "class_prob": 0.77}
+        cfg = {"generation": {"class_balance": "empirical"}}
+        self.assertEqual(pipeline._resolve_class_prob(cfg, []), 0.77)
+
+    def test_explicit_class_balance_float_wins_over_a_calibrated_value(self):
+        pipeline._LAST_CALIBRATION = {"path": "x", "selected_round": 1,
+                                      "class_prob": 0.77}
+        cfg = {"generation": {"class_balance": 0.25}}
+        self.assertEqual(pipeline._resolve_class_prob(cfg, []), 0.25)
+
+    def test_no_calibration_falls_back_to_the_real_reference_fraction(self):
+        cfg = {"generation": {"class_balance": "empirical"}}
+        real_reference = [{"label": "SPAM"}, {"label": "HAM"},
+                          {"label": "HAM"}, {"label": "HAM"}]
+        self.assertEqual(pipeline._resolve_class_prob(cfg, real_reference), 0.25)

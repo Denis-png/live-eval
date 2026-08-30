@@ -41,7 +41,11 @@ _ROWS = "label,text\n" + "".join(
     f"ham,could we move the meeting to three tomorrow please number {i}\n"
     for i in range(60)
 ) + "".join(
-    f"spam,{pattern.format(i=i)}\n"
+    # Quoted: "you owe $20 today, respond now!" carries an unquoted comma that
+    # would otherwise truncate the CSV field and silently drop its urgency
+    # signal (the trailing "!"), understating the empirical target computed
+    # from this fixture and invalidating the properties asserted above.
+    f'spam,"{pattern.format(i=i)}"\n'
     for i in range(6) for pattern in _SPAM_PATTERNS
 )
 
@@ -117,6 +121,44 @@ class InformativeCountTests(unittest.TestCase):
         rows = [{"text": "a", "label": "SPAM"}, {"text": "b", "label": "HAM"},
                 {"text": "c", "label": "SPAM"}]
         self.assertEqual(calibrate.informative_count(SpamTask(), rows), 2)
+
+    def test_gec_uses_errant_verified_count_not_field_presence(self):
+        # M4: the spec defines the corruption count as "surviving pairs from
+        # which ERRANT extracted at least one edit" (profile_gec_edit_types'
+        # own n_annotated), not "rows that merely have both text fields" --
+        # which overcounts rows ERRANT could not annotate at all and can let
+        # the under-50 noise warning silently fail to fire.
+        from framework.tasks.gec.task import GECTask
+        from framework.profiling.gec_profiler import profile_gec_edit_types
+
+        class _Edit:
+            def __init__(self, type_):
+                self.type = type_
+
+        class _FlakyAnnotator:
+            def parse(self, text):
+                return text
+
+            def annotate(self, src, ref):
+                if src == "unparseable":
+                    raise ValueError("boom")
+                return [_Edit("R:DET")]
+
+        rows = [
+            {"corrupted": "a", "original": "b"},
+            # Both fields present, but ERRANT fails on this one.
+            {"corrupted": "unparseable", "original": "c"},
+        ]
+        field_presence_count = sum(
+            1 for r in rows if r.get("corrupted") and r.get("original")
+        )
+        self.assertEqual(field_presence_count, 2)  # sanity: the old bug's count
+
+        profile = profile_gec_edit_types(rows, annotator=_FlakyAnnotator())
+        self.assertEqual(profile["n_annotated"], 1)
+        self.assertEqual(
+            calibrate.informative_count(GECTask(), rows, profile), 1
+        )
 
 
 class ClosedLoopTests(_Bench):
@@ -230,6 +272,28 @@ class ClosedLoopTests(_Bench):
         payload = self._run({k: 0.9 for k in _MARKERS}, rounds=1)
         self.assertGreater(payload["rounds"][0]["informative_samples"], 0)
 
+    def test_profile_dataset_runs_once_per_round_not_twice(self):
+        # I3: _measure and the supported_fraction diagnostic used to each call
+        # task.profile_dataset(synthetic) separately -- two full profiling
+        # passes (two ERRANT annotation passes, for GEC) over the same rows.
+        from framework.tasks.spam.task import SpamTask
+        real_profile_dataset = SpamTask.profile_dataset
+        calls = []
+
+        def spy(self, rows):
+            calls.append(len(rows))
+            return real_profile_dataset(self, rows)
+
+        gen = CompliantFake({k: 0.9 for k in _MARKERS})
+        cfg = _config(self.path, sample_size=60)
+        with mock.patch.object(pipeline, "load_generator", return_value=gen), \
+             mock.patch.object(SpamTask, "profile_dataset", spy):
+            payload = calibrate.run_calibration(
+                cfg, rounds=1, alpha=0.5, tolerance=self.TOLERANCE,
+                sample_size=60, output_path=self.out,
+            )
+        self.assertEqual(len(calls), len(payload["rounds"]))
+
 
 class FailFastTests(_Bench):
     def test_uncalibratable_task_raises_before_any_api_call(self):
@@ -254,6 +318,75 @@ class FailFastTests(_Bench):
             with self.assertRaises(RuntimeError):
                 calibrate.run_calibration(cfg, rounds=1, sample_size=6,
                                           output_path=self.out)
+
+    def test_omitted_sample_size_still_gets_the_documented_floor(self):
+        # M6: sample_size used to default to config["generation"]["sample_size"]
+        # directly, bypassing the max(gen, MIN_SAMPLE_SIZE) floor that only
+        # calibration_settings (the CLI path) applied. A programmatic caller
+        # that omits `sample_size` — exactly what run_calibration's own
+        # signature invites — must get the same documented floor.
+        gen = CompliantFake({k: 0.9 for k in _MARKERS})
+        cfg = _config(self.path, sample_size=5)
+        with mock.patch.object(pipeline, "load_generator", return_value=gen):
+            payload = calibrate.run_calibration(
+                cfg, rounds=1, alpha=0.5, tolerance=0.001, output_path=self.out,
+            )
+        self.assertEqual(payload["meta"]["sample_size"], calibrate.MIN_SAMPLE_SIZE)
+
+
+class SetpointRegressionTests(_Bench):
+    """C1: the setpoint MUST be the real benchmark, never a previously-written
+    calibration artifact. run_calibration used to build its context with
+    pipeline.build_generation_context on the caller's own config -- the same
+    function a normal RUN uses to CONSUME an artifact -- so once an artifact
+    existed for the cell, a second calibration would use round 1's own output
+    as its target instead of the empirical distribution, drifting further from
+    the benchmark on every re-calibration."""
+
+    def test_recalibrating_with_a_pinned_artifact_keeps_the_real_setpoint(self):
+        gen = CompliantFake({k: 0.9 for k in _MARKERS})
+        cfg = _config(self.path, sample_size=60)
+        cfg["generation"]["calibration_path"] = None
+        with mock.patch.object(pipeline, "load_generator", return_value=gen):
+            first = calibrate.run_calibration(
+                cfg, rounds=1, alpha=0.5, tolerance=0.001,
+                sample_size=60, output_path=self.out,
+            )
+
+        # Pin the artifact THIS SAME run just wrote -- the natural repeat
+        # workflow (more rounds, a bigger sample, a new generator model).
+        cfg2 = _config(self.path, sample_size=60)
+        cfg2["generation"]["calibration_path"] = self.out
+        with mock.patch.object(pipeline, "load_generator", return_value=gen):
+            second = calibrate.run_calibration(
+                cfg2, rounds=1, alpha=0.5, tolerance=0.001,
+                sample_size=60, output_path=self.out,
+            )
+
+        # The setpoint is the real benchmark's own empirical distribution both
+        # times, regardless of a pinned artifact from a PRIOR calibration.
+        self.assertEqual(second["target"], first["target"])
+
+
+class StageBArtifactTests(_Bench):
+    def test_corrected_class_prob_lands_in_the_written_artifact(self):
+        # I4: nothing previously asserted that Stage B's class-balance
+        # correction actually reaches calibrated.class_prob on disk -- the
+        # name pipeline._resolve_class_prob (via _LAST_CALIBRATION) and a
+        # future run's load_calibration both read.
+        from framework.calibration.artifact import load_calibration
+
+        gen = CompliantFake({k: 0.9 for k in _MARKERS})
+        cfg = _config(self.path, sample_size=60)
+        with mock.patch.object(pipeline, "load_generator", return_value=gen), \
+             mock.patch.object(calibrate, "correct_class_prob", return_value=0.42):
+            payload = calibrate.run_calibration(
+                cfg, rounds=1, alpha=0.5, tolerance=0.001,
+                sample_size=60, output_path=self.out,
+            )
+        self.assertEqual(payload["calibrated"]["class_prob"], 0.42)
+        on_disk = load_calibration(self.out)
+        self.assertEqual(on_disk["calibrated"]["class_prob"], 0.42)
 
 
 if __name__ == "__main__":
