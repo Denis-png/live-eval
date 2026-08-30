@@ -241,6 +241,72 @@ profile path is `framework/data/profiles/<task>_profile.json`; override per-run 
 | Spam | `class_conditional` | inverse / forward × seeded / seedless; class balance from `class_balance` |
 | Taxonomy | `structured` | profile-driven, seedless structured taxonomy generation; see [docs/taxonomy_induction.md](docs/taxonomy_induction.md) |
 
+### Calibration (optional, improves fidelity)
+
+The distributions generation samples from are a *request*. What the generator delivers is
+measurably different, because it honours some categories more readily than others.
+`framework.calibrate` measures that gap and corrects the request, writing a reusable
+artifact beside the profile:
+
+    python -m framework.calibrate --config framework/configs/spam/config.yaml \
+        --rounds 3 --alpha 0.5 --tolerance 0.1 --sample-size 120
+    # writes framework/data/profiles/spam/<benchmark>_<n>_<cell>_calibration.json
+
+The task comes from `task.name` in the config; `--mode` and `--seedless/--no-seedless`
+select the cell, `--output` overrides the artifact path. Runs then pick the artifact up
+automatically for the same benchmark and cell, printing `Calibration: <path> (round N)`.
+A cell with no artifact prints a `[NOTE]` naming the command that would build one. Pin an
+artifact with `generation.calibration_path`, or set that key to `null` to opt out.
+
+Calibration is a **separate phase** on purpose. Steering runs *inside* a scored session
+would make them non-i.i.d. and turn `results.json`'s `mean ± std` — the core GET
+instability signal — into "generator noise plus controller settling". So calibration runs
+once, emits a tuned spec, and the GET session runs unchanged at that fixed setting.
+`meta.calibration` in `results.json` records which artifact produced a run: artifacts are
+gitignored, so that is the only surviving provenance.
+
+All settings are optional and have working defaults:
+
+    calibration:
+      rounds: 3          # extra rounds after round 0 (round 0 = uncalibrated)
+      alpha: 0.5         # damping; lower is more conservative
+      tolerance: 0.1     # per-dimension JSD at which the loop stops
+      sample_size: 120   # default max(generation.sample_size, 100)
+
+`sample_size` deliberately does **not** inherit `generation.sample_size`, which is tuned
+for eval cost rather than estimation precision; a round measured on fewer than 50
+informative samples warns that the update may be chasing noise.
+
+The loop emits the **best** round, and round 0 is by construction the uncalibrated
+distribution — so calibration can never make a benchmark worse than not calibrating.
+It is numeric only: no wording is ever added to a generation prompt, which keeps it from
+teaching the generator what the fidelity detectors look for.
+
+**Per-cell control input.** `inverse` (seeded and seedless) and `forward + seedless`
+steer `type_dist`/`count_dist`. GEC `forward + seeded` has no injectable distribution —
+the generator picks its own error type — so calibration steers **which seeds are fed**
+instead, reweighting the seed pool that is that cell's implicit error distribution; the
+prompt is untouched and runs still draw seeds freshly each run. Spam steers
+`type_dist`/`count_dist` in all four cells, plus `class_prob`, which is corrected in
+closed form from per-class attrition (a model refuses to write spam far more often than
+it refuses a benign paraphrase, so the surviving class balance drifts from the balance
+that was asked for).
+
+#### Limitations
+
+Two bounds worth knowing before setting a tolerance:
+
+- **A concentrated signal mix may be unreachable.** `_sample_categories` draws without
+  replacement, so one category's achievable share saturates near
+  `1 / mean_signals_per_message`; measured directly, requesting a 0.830 share yielded
+  0.353. Past that ceiling the request keeps rising while the measurement does not
+  follow. The loop degrades safely — the best round wins, and round 0 is uncalibrated —
+  but it cannot close that gap.
+- **JSD has a floor above zero.** The target is Laplace-smoothed (so every supported
+  category stays sample-able) while the measurement is raw, so even a perfectly compliant
+  generator scores slightly above 0. Set `tolerance` with that floor in mind rather than
+  chasing 0.
+
 ## Real baseline & fidelity
 
 By default (`evaluation.real_baseline: true`) every run also evaluates the same task
