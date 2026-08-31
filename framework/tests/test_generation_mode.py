@@ -118,13 +118,14 @@ class StructuredRejectionTests(unittest.TestCase):
         )
 
     def test_mode_is_no_longer_rejected(self):
-        # Both values must dispatch; forward's own behaviour is Task 3.
+        # Both values must dispatch; forward's own behaviour is Task 3. At this point
+        # in the plan, mode="forward" still runs the inverse prompt path, so both
+        # modes should produce one artifact from the stub task's parser.
         for mode in ("inverse", "forward"):
             with self.subTest(mode=mode):
-                try:
-                    self._run({"mode": mode})
-                except RuntimeError as exc:
-                    self.assertNotIn("not applicable", str(exc))
+                out = self._run({"mode": mode})
+                self.assertEqual(len(out), 1)
+                self.assertIn("classes", out[0])
 
     def test_seeded_structured_reads_as_unimplemented_not_impossible(self):
         with self.assertRaises(RuntimeError) as ctx:
