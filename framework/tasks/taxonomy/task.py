@@ -171,12 +171,11 @@ class TaxonomyTask(BaseTask):
         domain — every count, depth and branching property emerges, which is what
         makes a forward-vs-inverse comparison measure what targeting buys.
         """
+        spec = self._generation_spec_from_profile(profile, rng=rng)
         if mode == "forward":
-            spec = self._generation_spec_from_profile(profile, rng=rng)
             return self._config["structured_forward_prompt"].format(
                 domain=spec.get("domain", ""),
             )
-        spec = self._generation_spec_from_profile(profile, rng=rng)
         return self._config["structured_generation_prompt"].format(
             spec_json=json.dumps(spec, indent=2, sort_keys=True, ensure_ascii=False),
             feedback_section=self._format_feedback_section(feedback),

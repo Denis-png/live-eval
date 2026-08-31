@@ -176,13 +176,17 @@ knobs that together select one of four **cells**:
 - **`generation.mode`** (`forward` | `inverse`) — *where the annotation comes from*.
   `inverse` draws it independently and **imposes** it on the source; `forward`
   **inherits** it from the source — the seed it was derived from, or the artifact
-  just generated. It also explains a detail the framework treats as incidental: GEC
-  `forward` + seeded is the only cell that loads no empirical distribution, because
-  it is the only cell that imposes nothing — the generator infers the error type
-  from its seed. Every other cell imposes at least part of the annotation and needs
-  a distribution to draw it from: spam `forward` inherits the label from its seed
-  but still imposes the signal mix, and GEC `forward` + seedless draws the error
-  type from the profile while the correction remains the model's own assertion.
+  just generated. It also explains a detail the framework treats as incidental:
+  among the seeded text-level cells (corruption and class_conditional), GEC
+  `forward` + seeded is the only one that loads no empirical distribution, because
+  it is the only one that imposes nothing — the generator infers the error type
+  from its seed. Every other seeded text-level cell imposes at least part of the
+  annotation and needs a distribution to draw it from: spam `forward` inherits the
+  label from its seed but still imposes the signal mix, and GEC `forward` +
+  seedless draws the error type from the profile while the correction remains the
+  model's own assertion. Taxonomy `forward` imposes nothing either, but structured
+  generation never loads an empirical distribution in the first place — in either
+  mode — so it sits outside this comparison entirely.
 
   The axis is task-shape-independent. Back-translation (generate the target, derive
   the source) and doc2query (pick a document, generate a query for it) are inverse

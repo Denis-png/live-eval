@@ -137,7 +137,9 @@ class BaseTask(ABC):
           "class_conditional" — sample a target class, then generate an example of it;
                                 classification tasks. Ignores generation.mode.
           "structured"        — generate a whole structured benchmark artifact from
-                                a profile/spec; mode is not applicable.
+                                a profile/spec; on the mode axis like the others —
+                                inverse imposes a sampled structural target, forward
+                                lets structure emerge from the domain alone.
         Default "corruption"."""
         return "corruption"
 

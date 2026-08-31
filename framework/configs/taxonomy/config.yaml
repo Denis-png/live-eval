@@ -1,8 +1,9 @@
 # Taxonomy Induction — benchmark + task selection.
 #
 # This is the config `python -m framework.profile_dataset` and the taxonomy
-# tooling read. It deliberately carries NO `generation:` block and no
-# `mode` / `seedless` knobs, unlike the other tasks:
+# tooling read. It deliberately carries NO `generation:` block by default,
+# unlike the other tasks — but `generation.mode` / `generation.seedless` DO
+# apply here; add a `generation:` block to set them:
 #
 #   Taxonomy uses the `structured` strategy — one sample is a whole artifact.
 #   It IS on the mode axis: `inverse` (the default) imposes a structural target

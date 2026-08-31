@@ -70,12 +70,12 @@ class ForwardPromptTests(unittest.TestCase):
 
 
 class ForwardDispatchTests(unittest.TestCase):
-    def _run(self, gen_cfg, generator=None):
+    def _run(self, gen_cfg, generator=None, profile=None):
         gen = generator or _Recorder()
         cfg = {"generation": {"sample_size": 1, **gen_cfg},
                "task": {"name": "taxonomy"}}
         out = pipeline._run_generation(gen, TaxonomyTask(), cfg, [], None, None,
-                                       0.5, profile=_PROFILE)
+                                       0.5, profile=profile or _PROFILE)
         return out, gen
 
     def test_forward_runs_no_feedback_loop(self):
@@ -89,6 +89,27 @@ class ForwardDispatchTests(unittest.TestCase):
         # No feedback rounds means one call per sample when parsing succeeds.
         _, gen = self._run({"mode": "forward"})
         self.assertEqual(len(gen.prompts), 1)
+
+    def test_forward_dispatch_prompt_carries_domain_and_withholds_structure(self):
+        # Regression for the `mode=mode` wire at pipeline.py's
+        # generate_structured call: if dispatch dropped it, build_structured_
+        # generation_prompt would default to "inverse" and silently render the
+        # full-target prompt instead. Use a domain absent from every other
+        # fixture string (not "Pizza", which occurs in _VALID) so this can't
+        # pass by coincidence.
+        domain = "Wombat-Colony-77"
+        profile = {"taxonomies": [{**_PROFILE["taxonomies"][0], "domain": domain}]}
+        _, gen = self._run({"mode": "forward"}, profile=profile)
+        self.assertEqual(len(gen.prompts), 1)
+        prompt = gen.prompts[0]
+        self.assertIn(domain, prompt)
+        for leaked in ("n_classes", "n_subclass_axioms", "n_roots", "n_leaves",
+                       "max_depth", "mean_depth", "depth_distribution",
+                       "parent_count_distribution", "child_count_distribution",
+                       "multiple_parent_fraction"):
+            self.assertNotIn(leaked, prompt, f"{leaked} leaked into dispatched forward prompt")
+        for value in ("42", "55", "2.4"):
+            self.assertNotIn(value, prompt, f"target value {value} leaked into dispatched forward prompt")
 
     def test_forward_with_feedback_enabled_fails_before_any_api_call(self):
         gen = _Recorder()
