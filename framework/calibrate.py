@@ -64,13 +64,16 @@ def calibration_settings(config: dict, args=None) -> dict:
 
 def informative_count(task, rows: list[dict], profile: dict | None = None) -> int:
     """Samples the measurement is actually estimated from, which is not the
-    round's sample size: SPAM rows for classification (HAM carries no signals);
+    round's sample size: positive-class rows for classification (the
+    negative class carries no signals);
     for corruption, the surviving pairs ERRANT actually annotated —
     `profile_gec_edit_types`'s own `n_annotated`, read off the SAME profiling
     pass `_measure` already made rather than re-annotating every pair a second
     time just to count them."""
     if task.get_generation_strategy() == "class_conditional":
-        return sum(1 for r in rows if r.get("label") == "SPAM")
+        labels = task.get_class_labels()
+        positive = labels[0] if labels else None
+        return sum(1 for r in rows if r.get("label") == positive)
     return (profile or {}).get("n_annotated", 0)
 
 
@@ -270,8 +273,11 @@ def run_calibration(
             ctx["judge_call"], ctx["class_prob"], profile=ctx["profile"],
         )
         attrition = getattr(ctx["generator"], "last_class_attrition", None) or {}
+        positive_label, negative_label = task.get_class_labels()
         corrected = correct_class_prob(ctx["class_prob"], attrition,
-                                       n=len(stage_b))
+                                       n=len(stage_b),
+                                       positive_label=positive_label,
+                                       negative_label=negative_label)
         payload["meta"]["class_attrition"] = attrition
         if corrected is None:
             print("Class balance inside the noise floor; class_prob unchanged "

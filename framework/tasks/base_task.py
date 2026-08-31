@@ -90,6 +90,25 @@ class BaseTask(ABC):
         inheriting whatever signals its seed happened to carry."""
         return {}
 
+    def get_class_labels(self) -> tuple[str, str] | None:
+        """(positive, negative) label names for `class_conditional` generation.
+
+        The strategy is label -> text, so the dispatcher needs to know what the
+        two classes are CALLED. Returning None means this task is not
+        class-conditional; a class_conditional task that returns None fails fast
+        rather than being generated under someone else's vocabulary.
+        """
+        return None
+
+    def get_negative_generation_prompt(self) -> str | None:
+        """Prompt that produces an example of the NEGATIVE class from a seed.
+
+        Placeholder {sentence}. The positive class is produced by
+        get_inverse_prompt (inject) or get_forward_prompts (imitate); this is
+        its counterpart, and every class_conditional task needs it.
+        """
+        return None
+
     def get_seedless_class_prompts(self) -> dict[str, str]:
         """{label: prompt} for direct per-class seedless generation.
         Placeholders: {spec} and, for the positive class, {error_spec}."""

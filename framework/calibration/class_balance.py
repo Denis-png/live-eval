@@ -24,8 +24,8 @@ def correct_class_prob(
     attrition: dict,
     *,
     n: int,
-    positive_label: str = "SPAM",
-    negative_label: str = "HAM",
+    positive_label: str,
+    negative_label: str,
 ) -> float | None:
     """Request probability that yields `target_fraction` positives after drops.
 

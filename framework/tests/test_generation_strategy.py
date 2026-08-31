@@ -15,8 +15,8 @@ class GenerationStrategyTests(unittest.TestCase):
     def test_taxonomy_is_structured(self):
         self.assertEqual(TaxonomyTask().get_generation_strategy(), "structured")
 
-    def test_spam_ham_prompt_has_placeholder_and_tag(self):
-        p = SpamTask().get_ham_generation_prompt()
+    def test_spam_negative_prompt_has_placeholder_and_tag(self):
+        p = SpamTask().get_negative_generation_prompt()
         self.assertIsNotNone(p)
         self.assertIn("{sentence}", p)
         self.assertIn("Rewritten:", p)

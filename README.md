@@ -426,8 +426,23 @@ the first model runs.
 ## How to Add a New Task
 
 1. Create `framework/tasks/<task>/task.py` subclassing `BaseTask` and
-   implement `get_error_types`, `get_prompt_instruction`, `get_evaluators`,
-   `get_evaluator_fns`, `get_model` (and optionally `get_judge_prompt`).
+   implement the seven abstract methods: `get_error_types`,
+   `get_prompt_instruction`, `get_evaluators`, `get_evaluator_fns`,
+   `get_model`, `get_task_name`, `parse_row`. That is enough for
+   `forward + seeded`; every other capability is an opt-in hook and an
+   unsupported cell fails fast naming the accessor it wanted:
+
+   | To get | Add |
+   |--------|-----|
+   | `inverse` cells | `get_inverse_prompt`, `get_error_descriptions`, `profile_error_distribution` |
+   | `seedless` cells | `get_carrier_prompt` / `get_seedless_forward_prompt` + a `--topics` profile |
+   | real-vs-generated fidelity | `profile_dataset`, `compare_profiles`, `get_real_eval_samples` |
+   | calibration | `get_calibration_keys` |
+   | the `class_conditional` shape | `get_generation_strategy`, `get_class_labels`, `get_negative_generation_prompt`, `get_forward_prompts`, `get_seedless_class_prompts`, `get_seed_pool` |
+
+   `get_class_labels()` returns `(positive, negative)` — the dispatcher takes
+   the class names from the task, so a classification task is never generated
+   under another task's vocabulary.
 2. Create `framework/configs/<task>/<task>.json` with error types, prompts,
    evaluators list, and per-model inference params.
 3. Register the task in `framework/pipeline.py::load_task()`.

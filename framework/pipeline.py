@@ -629,6 +629,23 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
         # the key keeps reproducing today's production behavior unchanged.
         mode = gen_cfg.get("mode", "inverse")
         seedless = bool(gen_cfg.get("seedless"))
+        # The strategy is label -> text, so the class names come from the task.
+        # Hardcoding them here would mean every classification task is generated
+        # under the first one's vocabulary.
+        labels = task.get_class_labels()
+        if not labels:
+            raise RuntimeError(
+                f"{task.get_task_name()} declares the class_conditional strategy "
+                "but get_class_labels() returned None — it must return "
+                "(positive_label, negative_label)."
+            )
+        positive_label, negative_label = labels
+        negative_prompt = task.get_negative_generation_prompt()
+        if not negative_prompt:
+            raise RuntimeError(
+                f"{task.get_task_name()} does not support class_conditional "
+                "generation (no negative_generation_prompt)."
+            )
         # Required regardless of seed_policy — generate_class_conditional's
         # signature has no defaults for these, even though same_class/none
         # policies use forward_prompts/seedless_prompts instead of inject_prompt.
@@ -638,9 +655,9 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
             count_dist=error_dist["count_dist"],
             error_descriptions=task.get_error_descriptions(),
             inject_prompt=task.get_inverse_prompt(),
-            negative_prompt=task.get_ham_generation_prompt(),
-            positive_label="SPAM",
-            negative_label="HAM",
+            negative_prompt=negative_prompt,
+            positive_label=positive_label,
+            negative_label=negative_label,
             sample_size=sample_size,
             judge_prompt=task.get_inverse_judge_prompt() if judge_call else None,
             judge_call=judge_call,
@@ -658,7 +675,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                     )
                 rng = random.Random()
                 specs = [
-                    render_spec(sample_content_spec(profile, rng, label="HAM"))
+                    render_spec(sample_content_spec(profile, rng, label=negative_label))
                     for _ in range(sample_size)
                 ]
                 carriers = generator.generate_carriers(
@@ -691,7 +708,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                     render_spec(sample_content_spec(profile, rng, label=label))
                     for _ in range(sample_size)
                 ]
-                for label in ("SPAM", "HAM")
+                for label in (positive_label, negative_label)
             }
             synthetic = generator.generate_class_conditional(
                 seed_policy="none",
@@ -819,7 +836,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
 
 # ── Post-generation helpers (class balance, real baseline, nesting, profiling) ──
 
-def _resolve_class_prob(config: dict, real_reference) -> float:
+def _resolve_class_prob(config: dict, real_reference, task=None) -> float:
     """P(positive class) for class-conditional generation.
 
     An explicit float in `generation.class_balance` is a user instruction and
@@ -833,9 +850,14 @@ def _resolve_class_prob(config: dict, real_reference) -> float:
         return float(cb)
     if _LAST_CALIBRATION and isinstance(_LAST_CALIBRATION.get("class_prob"), float):
         return _LAST_CALIBRATION["class_prob"]
-    if real_reference:
-        pos = sum(1 for r in real_reference if r.get("label") == "SPAM")
+    labels = task.get_class_labels() if task is not None else None
+    if real_reference and labels:
+        positive = labels[0]
+        pos = sum(1 for r in real_reference if r.get("label") == positive)
         return pos / len(real_reference)
+    # No task, or a task with no class axis: there is no positive label to
+    # count, so an empirical fraction is not defined. Guessing one task's
+    # label here is how the vocabulary leaked in the first place.
     return 0.5
 
 
@@ -1019,7 +1041,7 @@ def build_generation_context(config: dict) -> dict:
         "seed_weights": seed_weights,
         "profile": profile,
         "real_reference": real_reference,
-        "class_prob": _resolve_class_prob(config, real_reference),
+        "class_prob": _resolve_class_prob(config, real_reference, task),
     }
 
 

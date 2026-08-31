@@ -274,4 +274,7 @@ class ClassProbPrecedenceTests(unittest.TestCase):
         cfg = {"generation": {"class_balance": "empirical"}}
         real_reference = [{"label": "SPAM"}, {"label": "HAM"},
                           {"label": "HAM"}, {"label": "HAM"}]
-        self.assertEqual(pipeline._resolve_class_prob(cfg, real_reference), 0.25)
+        # The task is what says which label is positive; this used to fall back
+        # to a hardcoded "SPAM", which is the coupling that was removed.
+        self.assertEqual(
+            pipeline._resolve_class_prob(cfg, real_reference, SpamTask()), 0.25)

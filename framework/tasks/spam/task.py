@@ -52,7 +52,10 @@ class SpamTask(BaseTask):
     def get_inverse_prompt(self) -> str | None:
         return self._config.get("inverse_prompt")
 
-    def get_ham_generation_prompt(self) -> str:
+    def get_class_labels(self) -> tuple[str, str]:
+        return ("SPAM", "HAM")
+
+    def get_negative_generation_prompt(self) -> str:
         return self._config["ham_generation_prompt"]
 
     def get_inverse_judge_prompt(self) -> str | None:
