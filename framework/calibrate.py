@@ -85,7 +85,7 @@ def _measure(task, rows: list[dict]) -> dict:
     callers also need `n_annotated`/`supported_fraction` off the same rows, and
     profiling (a full ERRANT pass for GEC) is expensive enough that doing it
     twice per round is worth avoiding."""
-    return task.profile_dataset(rows)
+    return task.build_fidelity_profile(rows)
 
 
 def run_calibration(
@@ -151,7 +151,7 @@ def run_calibration(
         # ctx["error_dist"] is None here, so the setpoint comes from the seed
         # pool's own ERRANT profile — the same instrument _measure uses on the
         # generated rows.
-        seed_profile = task.profile_dataset(ctx["real_reference"])
+        seed_profile = task.build_fidelity_profile(ctx["real_reference"])
         target = {name: dict(seed_profile.get(key) or {}) for name, key in keys.items()}
     else:
         target = {name: dict(ctx["error_dist"][name]) for name in keys}

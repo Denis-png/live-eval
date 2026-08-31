@@ -32,7 +32,7 @@ class NamingTests(unittest.TestCase):
         )
 
     def test_filename_cannot_collide_with_a_profile_glob(self):
-        # _resolve_profile_path globs "*_<task>_profile.json".
+        # _resolve_benchmark_profile_path globs "*_<task>_profile.json".
         name = calibration_filename(_config(), "spam", "class_conditional", 120)
         self.assertFalse(name.endswith("_spam_profile.json"))
 
@@ -118,8 +118,8 @@ class ResolveTests(unittest.TestCase):
             }
             write_calibration(expected_path, payload)
 
-            # Patch profile_dir to return tmpdir
-            with mock.patch("framework.pipeline.profile_dir", return_value=tmpdir):
+            # Patch benchmark_profile_dir to return tmpdir
+            with mock.patch("framework.pipeline.benchmark_profile_dir", return_value=tmpdir):
                 result = resolve_calibration_path(cfg, _Task(), "class_conditional")
                 self.assertEqual(result, expected_path)
 
@@ -146,8 +146,8 @@ class ResolveTests(unittest.TestCase):
             os.utime(path_1, (1000000, 1000000))
             os.utime(path_2, (2000000, 2000000))
 
-            # Patch profile_dir to return tmpdir
-            with mock.patch("framework.pipeline.profile_dir", return_value=tmpdir):
+            # Patch benchmark_profile_dir to return tmpdir
+            with mock.patch("framework.pipeline.benchmark_profile_dir", return_value=tmpdir):
                 result = resolve_calibration_path(cfg, _Task(), "class_conditional")
                 self.assertEqual(result, path_2)
 

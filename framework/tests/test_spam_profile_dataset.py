@@ -13,7 +13,7 @@ class SpamProfileDatasetTests(unittest.TestCase):
             {"text": "claim your free prize money now", "label": "SPAM"},
             {"text": "see you at lunch tomorrow", "label": "HAM"},
         ]
-        prof = self.task.profile_dataset(rows)
+        prof = self.task.build_fidelity_profile(rows)
         self.assertEqual(prof["n"], 3)
         self.assertEqual(prof["class_balance"]["SPAM"], 2)
         self.assertEqual(prof["class_balance"]["HAM"], 1)
@@ -28,8 +28,8 @@ class SpamProfileDatasetTests(unittest.TestCase):
             {"text": "cheap deals click http://y.com free", "label": "SPAM"},
             {"text": "lunch tomorrow?", "label": "HAM"},
         ]
-        prof = self.task.profile_dataset(rows)
-        cmp = self.task.compare_profiles(prof, prof)
+        prof = self.task.build_fidelity_profile(rows)
+        cmp = self.task.compare_fidelity_profiles(prof, prof)
         self.assertAlmostEqual(cmp["type_dist_jsd"], 0.0)
         self.assertAlmostEqual(cmp["count_dist_jsd"], 0.0)
         self.assertAlmostEqual(cmp["class_balance_delta"], 0.0)
@@ -45,7 +45,7 @@ class SpamFidelityCharacteristicsTests(unittest.TestCase):
         ]
 
     def test_profile_dataset_adds_per_label_hist_and_style(self):
-        profile = self.task.profile_dataset(self.rows)
+        profile = self.task.build_fidelity_profile(self.rows)
         for label in ("HAM", "SPAM"):
             self.assertAlmostEqual(
                 sum(profile["word_count_hist_per_label"][label].values()),
@@ -58,8 +58,8 @@ class SpamFidelityCharacteristicsTests(unittest.TestCase):
         self.assertIn("signal_rate", profile)  # v1 key intact
 
     def test_compare_profiles_identical_zero_divergence(self):
-        profile = self.task.profile_dataset(self.rows)
-        fidelity = self.task.compare_profiles(profile, profile)
+        profile = self.task.build_fidelity_profile(self.rows)
+        fidelity = self.task.compare_fidelity_profiles(profile, profile)
         for label in ("HAM", "SPAM"):
             self.assertAlmostEqual(
                 fidelity["length_jsd_per_label"][label], 0.0, places=6

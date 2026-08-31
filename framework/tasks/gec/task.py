@@ -136,7 +136,7 @@ class GECTask(BaseTask):
             real_data, supported, count_max=count_max, annotator=annotator
         )
 
-    def profile_dataset(self, rows: list[dict], annotator=None) -> dict:
+    def build_fidelity_profile(self, rows: list[dict], annotator=None) -> dict:
         """Edit-type distribution over (corrupted -> original) pairs, re-annotated
         with ERRANT so real and generated are measured identically (a generated
         row's own error_type claim is never trusted). Plus cheap content
@@ -165,7 +165,7 @@ class GECTask(BaseTask):
         profile["style"] = style_profile(texts)
         return profile
 
-    def compare_profiles(self, real: dict, generated: dict) -> dict:
+    def compare_fidelity_profiles(self, real: dict, generated: dict) -> dict:
         """Real->generated deltas + Jensen-Shannon divergences, mirroring the
         spam fidelity block."""
         from framework.profiling.fidelity import jensen_shannon_divergence
@@ -205,7 +205,7 @@ class GECTask(BaseTask):
         }
 
     def get_calibration_keys(self) -> dict[str, str]:
-        # profile_dataset re-annotates with ERRANT and reports EVERY observed
+        # build_fidelity_profile re-annotates with ERRANT and reports EVERY observed
         # type; the controller projects that onto the supported vocabulary the
         # target covers before taking any ratio.
         return {"type_dist": "error_type_dist", "count_dist": "error_count_dist"}

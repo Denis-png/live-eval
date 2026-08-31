@@ -272,22 +272,22 @@ class ClosedLoopTests(_Bench):
         payload = self._run({k: 0.9 for k in _MARKERS}, rounds=1)
         self.assertGreater(payload["rounds"][0]["informative_samples"], 0)
 
-    def test_profile_dataset_runs_once_per_round_not_twice(self):
+    def test_fidelity_profile_is_built_once_per_round_not_twice(self):
         # I3: _measure and the supported_fraction diagnostic used to each call
-        # task.profile_dataset(synthetic) separately -- two full profiling
+        # task.build_fidelity_profile(synthetic) separately -- two full profiling
         # passes (two ERRANT annotation passes, for GEC) over the same rows.
         from framework.tasks.spam.task import SpamTask
-        real_profile_dataset = SpamTask.profile_dataset
+        real_builder = SpamTask.build_fidelity_profile
         calls = []
 
         def spy(self, rows):
             calls.append(len(rows))
-            return real_profile_dataset(self, rows)
+            return real_builder(self, rows)
 
         gen = CompliantFake({k: 0.9 for k in _MARKERS})
         cfg = _config(self.path, sample_size=60)
         with mock.patch.object(pipeline, "load_generator", return_value=gen), \
-             mock.patch.object(SpamTask, "profile_dataset", spy):
+             mock.patch.object(SpamTask, "build_fidelity_profile", spy):
             payload = calibrate.run_calibration(
                 cfg, rounds=1, alpha=0.5, tolerance=self.TOLERANCE,
                 sample_size=60, output_path=self.out,

@@ -42,14 +42,14 @@ class CalibrationKeysTests(unittest.TestCase):
         self.assertIsNone(SentimentTask().get_calibration_keys())
 
     def test_spam_profile_keys_exist_and_are_shape_correct(self):
-        # The mapping is only useful if profile_dataset actually emits them with
+        # The mapping is only useful if build_fidelity_profile actually emits them with
         # the correct shapes: type_dist keyed by string categories, count_dist by int counts.
         # This catches swapped mappings (e.g., accidentally assigning signal_count_dist
         # to "type_dist").
         rows = [{"text": "WIN a FREE $500 prize now http://x.example !",
                  "label": "SPAM"},
                 {"text": "are we still meeting tomorrow afternoon", "label": "HAM"}]
-        profile = SpamTask().profile_dataset(rows)
+        profile = SpamTask().build_fidelity_profile(rows)
         keys = SpamTask().get_calibration_keys()
 
         # Verify keys exist
@@ -84,7 +84,7 @@ class CalibrationKeysTests(unittest.TestCase):
             {"corrupted": "b bad", "original": "b good"},
             {"corrupted": "c good", "original": "c good"},
         ]
-        profile = task.profile_dataset(rows, annotator=annotator)
+        profile = task.build_fidelity_profile(rows, annotator=annotator)
         keys = task.get_calibration_keys()
 
         # Verify keys exist

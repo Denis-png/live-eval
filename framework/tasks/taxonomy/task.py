@@ -268,7 +268,7 @@ class TaxonomyTask(BaseTask):
     def get_real_eval_samples(self, config: dict, real_data: list[dict]) -> list[dict]:
         return [self._eval_sample(row) for row in real_data]
 
-    def profile_dataset(self, rows: list[dict]) -> dict:
+    def build_fidelity_profile(self, rows: list[dict]) -> dict:
         """Profile taxonomy artifacts with the same structural profiler for all sides.
 
         The run-level artifact intentionally strips class-name-bearing debug
@@ -280,7 +280,7 @@ class TaxonomyTask(BaseTask):
 
         return sanitize_taxonomy_profile(profile_taxonomy_rows(rows))
 
-    def compare_profiles(self, real: dict, generated: dict) -> dict:
+    def compare_fidelity_profiles(self, real: dict, generated: dict) -> dict:
         """Real-vs-synthetic structural fidelity for taxonomy profiles."""
         from framework.profiling.taxonomy_fidelity import compare_taxonomy_profiles
 
@@ -318,7 +318,7 @@ class TaxonomyTask(BaseTask):
             compare_taxonomy_profiles,
         )
 
-        synthetic_profile = self.profile_dataset([artifact])
+        synthetic_profile = self.build_fidelity_profile([artifact])
         comparison = compare_taxonomy_profiles(profile, synthetic_profile)
         per_taxonomy = comparison["comparisons"][0] if comparison["comparisons"] else {}
         reference = comparison["real_profile"]

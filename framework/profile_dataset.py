@@ -18,7 +18,7 @@ from framework.profiling.gec_profiler import profile_gec_rows
 
 # Output paths are derived per profile: framework/data/profiles/<task>/
 # <benchmark>_<sample_size>_<task>_profile.json, where sample_size is the number
-# of rows actually profiled (see pipeline.profile_filename). --output overrides.
+# of rows actually profiled (see pipeline.benchmark_profile_filename). --output overrides.
 DEFAULT_GEC_DATASET = "agentlans/grammar-correction"
 DEFAULT_GEC_SPLIT = "train"
 _ENV_VAR_RE = re.compile(r"\$\{([A-Z0-9_]+)\}")
@@ -109,10 +109,10 @@ def _build_topic_call(config: dict):
 def _default_output(config: dict[str, Any], task_name: str, num_samples: int) -> str:
     """Where this profile lands when --output is not given. Built from the same
     helpers the pipeline uses to find it again, so writer and reader agree."""
-    from framework.pipeline import profile_dir, profile_filename
+    from framework.pipeline import benchmark_profile_dir, benchmark_profile_filename
 
-    return os.path.join(profile_dir(task_name),
-                        profile_filename(config, task_name, num_samples))
+    return os.path.join(benchmark_profile_dir(task_name),
+                        benchmark_profile_filename(config, task_name, num_samples))
 
 
 def _fmt_length(words: dict[str, Any]) -> str:

@@ -118,7 +118,7 @@ class TaxonomyFidelityTests(unittest.TestCase):
 
     def test_generated_taxonomy_is_profiled_with_existing_profiler(self):
         task = TaxonomyTask()
-        profile = task.profile_dataset([
+        profile = task.build_fidelity_profile([
             _taxonomy(
                 classes=["A", "B", "C", "D"],
                 axioms=[["B", "A"], ["C", "A"], ["D", "B"], ["D", "C"]],

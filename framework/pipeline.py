@@ -231,18 +231,18 @@ def benchmark_slug(config: dict) -> str:
     return re.sub(r"[^0-9a-zA-Z]+", "_", str(raw)).strip("_").lower()
 
 
-def profile_filename(config: dict, task_name: str, num_samples: int) -> str:
+def benchmark_profile_filename(config: dict, task_name: str, num_samples: int) -> str:
     """<benchmark>_<sample_size>_<task>_profile.json — the sample size is the
     number of rows actually profiled, so the name states what the file covers."""
     return f"{benchmark_slug(config)}_{num_samples}_{task_name}_profile.json"
 
 
-def profile_dir(task_name: str) -> str:
+def benchmark_profile_dir(task_name: str) -> str:
     """Profiles are grouped per task: framework/data/profiles/<task>/."""
     return os.path.join(DEFAULT_PROFILE_DIR, task_name)
 
 
-def _resolve_profile_path(config: dict, task) -> str:
+def _resolve_benchmark_profile_path(config: dict, task) -> str:
     """The profile path seedless generation actually uses.
 
     `generation.profile_path` wins when set. Otherwise the task's profile
@@ -252,7 +252,7 @@ def _resolve_profile_path(config: dict, task) -> str:
     Exactly one profile resolves silently; several is ambiguous and raises,
     naming them, rather than guessing which benchmark the run meant.
 
-    Single source of truth, shared by `_load_generation_profile` (which loads the
+    Single source of truth, shared by `_load_benchmark_profile` (which loads the
     file) and `_build_meta` (which records the path as provenance). Profiles are
     gitignored, so `_build_meta`'s copy is the only surviving record of what
     generated a seedless benchmark."""
@@ -260,7 +260,7 @@ def _resolve_profile_path(config: dict, task) -> str:
     if gen.get("profile_path"):
         return gen["profile_path"]
     task_name = task.get_task_name()
-    pattern = os.path.join(profile_dir(task_name), f"*_{task_name}_profile.json")
+    pattern = os.path.join(benchmark_profile_dir(task_name), f"*_{task_name}_profile.json")
     matches = sorted(glob.glob(pattern))
     if len(matches) == 1:
         return matches[0]
@@ -269,12 +269,12 @@ def _resolve_profile_path(config: dict, task) -> str:
         return pattern
     raise RuntimeError(
         f"{len(matches)} profiles exist for task '{task_name}' in "
-        f"{profile_dir(task_name)}: " + ", ".join(os.path.basename(m) for m in matches)
+        f"{benchmark_profile_dir(task_name)}: " + ", ".join(os.path.basename(m) for m in matches)
         + ". Set generation.profile_path to choose which benchmark to generate from."
     )
 
 
-def _load_generation_profile(config: dict, task) -> dict | None:
+def _load_benchmark_profile(config: dict, task) -> dict | None:
     """Load the benchmark profile that drives seedless generation.
 
     Returns None when generation.seedless is falsy. Runs before the generation
@@ -283,14 +283,14 @@ def _load_generation_profile(config: dict, task) -> dict | None:
     if task.get_generation_strategy() == "structured":
         if gen.get("seedless") is False:
             return None
-        path = _resolve_profile_path(config, task)
+        path = _resolve_benchmark_profile_path(config, task)
         with open(path, encoding="utf-8") as f:
             return json.load(f)
     if not gen.get("seedless"):
         return None
     from framework.profiling.spec_sampler import load_profile
 
-    path = _resolve_profile_path(config, task)
+    path = _resolve_benchmark_profile_path(config, task)
     topics_key = (
         "topics_per_label"
         if task.get_generation_strategy() == "class_conditional"
@@ -419,8 +419,8 @@ def _build_meta(config: dict, task, runs_completed: int,
     `seedless` mirrors generation.seedless (False when the key is absent).
     `profile_path` is the resolved path of the profile that actually drove
     generation when seedless is true — generation.profile_path if the config
-    set one, else the same default `_load_generation_profile` resolves
-    internally (see `_resolve_profile_path`, shared by both) — and None when
+    set one, else the same default `_load_benchmark_profile` resolves
+    internally (see `_resolve_benchmark_profile_path`, shared by both) — and None when
     seedless is false. Profiles are gitignored, so this is the only record of
     what generated a seedless benchmark; it must NOT be left None in the
     common case where seedless is true and profile_path is left unset (both
@@ -449,7 +449,7 @@ def _build_meta(config: dict, task, runs_completed: int,
         "strategy": strategy,
         "mode": mode,
         "seedless": seedless,
-        "profile_path": _resolve_profile_path(config, task) if seedless else None,
+        "profile_path": _resolve_benchmark_profile_path(config, task) if seedless else None,
         "provider": gen["provider"],
         "model": gen["model"],
         "num_runs": num_runs,
@@ -828,18 +828,18 @@ def _nest_results(generated_agg: dict, real_scores: dict,
     return final
 
 
-def _write_profile_artifacts(task, real_reference, all_generated, paths) -> None:
+def _write_fidelity_artifacts(task, real_reference, all_generated, paths) -> None:
     """Persist the real sample + a {real, generated, fidelity} profile when the
-    task supports profiling. No-op for tasks whose profile_dataset returns None."""
+    task supports profiling. No-op for tasks whose build_fidelity_profile returns None."""
     if real_reference is None:
         return
     with open(paths["real_sample"], "w", encoding="utf-8") as f:
         json.dump(real_reference, f, indent=2, ensure_ascii=False)
-    real_profile = task.profile_dataset(real_reference)
+    real_profile = task.build_fidelity_profile(real_reference)
     if real_profile is None:
         return
-    generated_profile = task.profile_dataset(all_generated)
-    fidelity = task.compare_profiles(real_profile, generated_profile)
+    generated_profile = task.build_fidelity_profile(all_generated)
+    fidelity = task.compare_fidelity_profiles(real_profile, generated_profile)
     with open(paths["profile"], "w", encoding="utf-8") as f:
         json.dump({"real": real_profile, "generated": generated_profile,
                    "fidelity": fidelity}, f, indent=2, ensure_ascii=False)
@@ -946,7 +946,7 @@ def build_generation_context(config: dict) -> dict:
         load_error_distribution(config, real_data, task)
         if _should_load_error_distribution(strategy, mode, seedless) else None
     )
-    profile = _load_generation_profile(config, task)
+    profile = _load_benchmark_profile(config, task)
 
     # Published onto the config so _run_generation's forward+seeded branch (which
     # reads generation.seed_weights) sees them: that cell never calls
@@ -1047,7 +1047,7 @@ def run_pipeline(config: dict) -> dict:
         if run_idx + 1 < num_runs:
             print(f"Partial results (run {run_idx + 1}/{num_runs}) saved to {paths['results']}")
 
-    _write_profile_artifacts(task, real_reference, all_generated, paths)
+    _write_fidelity_artifacts(task, real_reference, all_generated, paths)
     _render_plots(config, paths)
     print(f"\nResults saved to {paths['results']}")
     return final

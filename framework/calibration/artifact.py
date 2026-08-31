@@ -17,7 +17,7 @@ def calibration_filename(config: dict, task_name: str, strategy: str,
                          num_samples: int) -> str:
     """<benchmark>_<n>_<cell>_calibration.json.
 
-    The "_calibration.json" suffix cannot be matched by _resolve_profile_path's
+    The "_calibration.json" suffix cannot be matched by _resolve_benchmark_profile_path's
     "*_<task>_profile.json" glob, so the two artifact kinds share a directory
     without colliding.
     """
@@ -29,10 +29,10 @@ def calibration_filename(config: dict, task_name: str, strategy: str,
 
 def default_calibration_path(config: dict, task_name: str, strategy: str,
                              num_samples: int) -> str:
-    from framework.pipeline import profile_dir
+    from framework.pipeline import benchmark_profile_dir
 
     return os.path.join(
-        profile_dir(task_name),
+        benchmark_profile_dir(task_name),
         calibration_filename(config, task_name, strategy, num_samples),
     )
 
@@ -49,14 +49,14 @@ def resolve_calibration_path(config: dict, task, strategy: str) -> str | None:
     """
     import glob
 
-    from framework.pipeline import benchmark_slug, generation_cell_slug, profile_dir
+    from framework.pipeline import benchmark_slug, generation_cell_slug, benchmark_profile_dir
 
     gen = config.get("generation") or {}
     if "calibration_path" in gen:
         return gen["calibration_path"] or None
 
     pattern = os.path.join(
-        profile_dir(task.get_task_name()),
+        benchmark_profile_dir(task.get_task_name()),
         f"{benchmark_slug(config)}_*_{generation_cell_slug(config, strategy)}"
         "_calibration.json",
     )

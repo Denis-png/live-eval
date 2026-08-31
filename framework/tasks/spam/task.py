@@ -111,7 +111,7 @@ class SpamTask(BaseTask):
         supported = set(self.get_error_descriptions().keys())
         return profile_spam_distribution(spam_rows, supported, count_max=count_max)
 
-    def profile_dataset(self, rows: list[dict]) -> dict:
+    def build_fidelity_profile(self, rows: list[dict]) -> dict:
         """Class balance + per-signal fire rate + normalized signal / count
         distributions over the SPAM messages, using the same detectors the
         generator injects (so real and generated are measured identically)."""
@@ -173,7 +173,7 @@ class SpamTask(BaseTask):
             "style_per_label": style_per_label,
         }
 
-    def compare_profiles(self, real: dict, generated: dict) -> dict:
+    def compare_fidelity_profiles(self, real: dict, generated: dict) -> dict:
         """Real→generated deltas + Jensen-Shannon divergences. See fidelity honesty
         note: signals are re-detected by regex, so this measures detector-visible
         distribution match, not ground-truth semantics."""
@@ -219,7 +219,7 @@ class SpamTask(BaseTask):
         }
 
     def get_calibration_keys(self) -> dict[str, str]:
-        # profile_dataset already restricts signals to get_error_descriptions()
+        # build_fidelity_profile already restricts signals to get_error_descriptions()
         # keys, so the measured key space matches the target's by construction.
         return {"type_dist": "signal_type_dist", "count_dist": "signal_count_dist"}
 

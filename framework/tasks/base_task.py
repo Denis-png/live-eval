@@ -200,17 +200,17 @@ class BaseTask(ABC):
             "does not implement build_structural_feedback()."
         )
 
-    def profile_dataset(self, rows: list[dict]) -> dict | None:
+    def build_fidelity_profile(self, rows: list[dict]) -> dict | None:
         """Profile a labeled dataset (rows with "text"+"label") for real-vs-generated
         fidelity. Return None to opt out (default). Override in classification tasks."""
         return None
 
-    def compare_profiles(self, real: dict, generated: dict) -> dict | None:
-        """Fidelity comparison between two profile_dataset() outputs. Default None."""
+    def compare_fidelity_profiles(self, real: dict, generated: dict) -> dict | None:
+        """Fidelity comparison between two build_fidelity_profile() outputs. Default None."""
         return None
 
     def get_calibration_keys(self) -> dict[str, str] | None:
-        """Map control-input name -> the profile_dataset() key that measures it.
+        """Map control-input name -> the build_fidelity_profile() key that measures it.
 
         Lets the calibrator stay as task-agnostic as _sample_categories is: it
         never learns what a "signal" or an "edit type" means, only which key of

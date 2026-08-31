@@ -170,7 +170,7 @@ class SeedlessMetaTests(unittest.TestCase):
 
     def test_profile_path_resolves_to_the_task_dir_when_seedless_and_unset(self):
         # The shipped configs leave generation.profile_path commented out, so
-        # _build_meta must record the path _load_generation_profile actually
+        # _build_meta must record the path _load_benchmark_profile actually
         # resolved — profiles are gitignored, making this the only surviving
         # record of what generated a seedless benchmark. With no profile on disk
         # the resolver hands back the pattern it searched, which still names the

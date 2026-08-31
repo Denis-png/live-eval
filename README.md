@@ -46,7 +46,11 @@ so it can be inspected later.
             openai_generator.py  - OpenAI / Groq / OpenRouter / Mistral (OpenAI-compatible)
             anthropic_generator.py  - Anthropic / MiniMax (Anthropic-compatible)
             google_generator.py
-        profiling/               - empirical distribution profilers + real-vs-generated fidelity
+        profiling/               - two distinct kinds of profile, do not confuse them:
+                                   BENCHMARK profile (topics/length/style, built by
+                                   `profile_dataset`, INPUT to seedless generation) and
+                                   FIDELITY profile (task.build_fidelity_profile, a
+                                   MEASUREMENT of real vs generated)
             errant_distribution.py  - ERRANT-based GEC error distribution
             spam_distribution.py  - spam-signal-based spam error distribution
             fidelity.py           - Jensen-Shannon divergence for distribution fidelity
