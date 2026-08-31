@@ -54,7 +54,12 @@ profiling:
   provider: "openrouter"
   model: "minimax-m3"
   temperature: 0
-  max_tokens: 1024
+  # The consolidation call (raw labels -> canonical topics) grows with the
+  # number of DISTINCT labels, so it scales with --topic-sample-size. Measured
+  # at 1105 completion tokens for a 40-text sample: already over the old 1024.
+  # A truncated consolidation is fail-soft but degrades the profile to
+  # unconsolidated raw labels, which is what seedless generation samples from.
+  max_tokens: 8192
   timeout: 300
   max_retries: 2
 
@@ -66,7 +71,11 @@ judge:
   provider: "openrouter"
   model: "minimax-m3"
   temperature: 0
-  max_tokens: 1024
+  # Verdicts are two lines, but minimax-m3 reasons first: measured 122-982
+  # completion tokens over 8 samples, i.e. 1.0x headroom against the old 1024.
+  # Since truncation is now a hard skip, a truncated judge would DROP a good
+  # sample rather than silently defaulting to keep.
+  max_tokens: 4096
   timeout: 300
   max_retries: 1
 
