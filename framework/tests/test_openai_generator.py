@@ -1,3 +1,4 @@
+import types
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -71,11 +72,15 @@ class OpenAIGeneratorTests(unittest.TestCase):
         self.assertIsNone(gen.last_response_diagnostic)
 
     def test_none_content_records_safe_response_shape(self):
+        # finish_reason is deliberately NOT "length" here: this test covers the
+        # no-usable-content diagnostic path, and a length stop is now a
+        # TruncatedResponse (see TruncationGuardTests). Using "length" would
+        # conflate the two.
         with mock.patch("framework.generators.openai_generator.OpenAI") as openai:
             client = openai.return_value
             client.chat.completions.create.return_value = _response(
                 None,
-                finish_reason="length",
+                finish_reason="content_filter",
                 response_id="resp_123",
                 response_model="xiaomi/mimo-v2.5",
                 usage={"prompt_tokens": 11, "completion_tokens": 22, "total_tokens": 33},
@@ -88,7 +93,7 @@ class OpenAIGeneratorTests(unittest.TestCase):
             })
             self.assertIsNone(gen.call_api("prompt"))
 
-        self.assertEqual(gen.last_response_diagnostic["finish_reason"], "length")
+        self.assertEqual(gen.last_response_diagnostic["finish_reason"], "content_filter")
         self.assertEqual(gen.last_response_diagnostic["response_id"], "resp_123")
         self.assertEqual(gen.last_response_diagnostic["response_model"], "xiaomi/mimo-v2.5")
         self.assertEqual(gen.last_response_diagnostic["usage"]["prompt_tokens"], 11)
@@ -168,3 +173,113 @@ class OpenAIGeneratorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TruncationGuardTests(unittest.TestCase):
+    """A max_tokens stop must never be parsed.
+
+    A truncated reasoning-model response often still carries the answer field
+    names with a half-written value after the last one, so parsing it yields a
+    sample whose gold reference is a fragment. That silently corrupts the
+    benchmark, where a skip merely costs a sample.
+    """
+
+    def _generator(self, finish_reason, content="Generated: x\nGround truth: y"):
+        from framework.generators.openai_generator import OpenAIGenerator
+
+        gen = OpenAIGenerator.__new__(OpenAIGenerator)
+        gen.model, gen.temperature, gen.max_tokens = "m", 1.0, 1024
+        gen.last_response_diagnostic = None
+
+        choice = types.SimpleNamespace(
+            finish_reason=finish_reason,
+            message=types.SimpleNamespace(content=content),
+        )
+        response = types.SimpleNamespace(choices=[choice])
+        gen.client = types.SimpleNamespace(
+            chat=types.SimpleNamespace(
+                completions=types.SimpleNamespace(create=lambda **kw: response)
+            )
+        )
+        return gen
+
+    def test_length_finish_raises_rather_than_returning_partial_text(self):
+        from framework.generators.base_generator import TruncatedResponse
+
+        with self.assertRaises(TruncatedResponse) as ctx:
+            self._generator("length").call_api("p")
+        # The message must name the knob to raise, since that is the fix.
+        self.assertIn("max_tokens=1024", str(ctx.exception))
+
+    def test_truncated_response_is_not_parsed_even_when_fields_are_present(self):
+        # The silent-corruption case: all three fields present, but the last
+        # value is a fragment. Before the guard this was ACCEPTED.
+        from framework.generators.base_generator import TruncatedResponse
+
+        raw = "Error type: article\nGenerated: I am surprise to hear\nGround truth: I am"
+        with self.assertRaises(TruncatedResponse):
+            self._generator("length", raw).call_api("p")
+
+    def test_normal_stop_is_unaffected(self):
+        self.assertEqual(
+            self._generator("stop", "Corrupted: hello there").call_api("p"),
+            "Corrupted: hello there",
+        )
+
+    def test_missing_finish_reason_is_not_treated_as_truncation(self):
+        self.assertEqual(
+            self._generator(None, "Corrupted: hello there").call_api("p"),
+            "Corrupted: hello there",
+        )
+
+
+class TruncationSkipsLoudlyTests(unittest.TestCase):
+    """The guard must degrade to a counted skip, not kill the run."""
+
+    def test_generation_loop_survives_a_truncated_response(self):
+        from framework.generators.base_generator import BaseGenerator, TruncatedResponse
+
+        class _Truncating(BaseGenerator):
+            def __init__(self):
+                self.calls = 0
+
+            def call_api(self, prompt):
+                self.calls += 1
+                if self.calls == 1:
+                    raise TruncatedResponse("response truncated at max_tokens=1024")
+                return ("Error type: article\n"
+                        "Generated: I go to the school yesterday\n"
+                        "Ground truth: I went to school yesterday.")
+
+        gen = _Truncating()
+        out = gen.generate(
+            real_samples=[{"incorrect": "a b c"}, {"incorrect": "d e f"}],
+            error_types=["article"],
+            prompt_instruction="Corrupt: {sentence} ({error_type})",
+            sample_size=2,
+        )
+        # First sample skipped, second kept — the run continues.
+        self.assertEqual(len(out), 1)
+        self.assertEqual(gen.calls, 2)
+
+
+class TruncationDiagnosticTests(unittest.TestCase):
+    def test_truncation_records_the_provider_diagnostic_before_raising(self):
+        """Raising must not cost the observability the None-content path gives."""
+        from framework.generators.base_generator import TruncatedResponse
+
+        with mock.patch("framework.generators.openai_generator.OpenAI") as openai:
+            openai.return_value.chat.completions.create.return_value = _response(
+                None,
+                finish_reason="length",
+                response_id="resp_9",
+                response_model="minimax-m3",
+                usage={"prompt_tokens": 11, "completion_tokens": 1024,
+                       "total_tokens": 1035},
+            )
+            gen = OpenAIGenerator({"provider": "openrouter", "model": "m",
+                                   "api_key": "k", "temperature": 0,
+                                   "max_tokens": 1024})
+            with self.assertRaises(TruncatedResponse):
+                gen.call_api("prompt")
+        self.assertEqual(gen.last_response_diagnostic["finish_reason"], "length")

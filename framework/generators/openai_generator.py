@@ -1,5 +1,5 @@
 from openai import OpenAI
-from .base_generator import BaseGenerator
+from .base_generator import BaseGenerator, TruncatedResponse
 
 # OpenAI-compatible base URLs for providers that mirror the OpenAI API
 _BASE_URLS = {
@@ -69,6 +69,16 @@ class OpenAIGenerator(BaseGenerator):
         response = self.client.chat.completions.create(**kwargs)
         choice = response.choices[0]
         message = choice.message
+        if getattr(choice, "finish_reason", None) == "length":
+            # Record the provider diagnostic first: raising must not cost the
+            # observability the None-content path already provides.
+            self.last_response_diagnostic = self._response_diagnostic(
+                response, choice, message
+            )
+            raise TruncatedResponse(
+                f"response truncated at max_tokens={self.max_tokens} "
+                f"(finish_reason='length') — raise generation.max_tokens"
+            )
         content = message.content
         if not isinstance(content, str):
             self.last_response_diagnostic = self._response_diagnostic(response, choice, message)

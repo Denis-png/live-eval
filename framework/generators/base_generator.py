@@ -19,6 +19,20 @@ _REFUSAL_RE = re.compile(
 _THINK_BLOCK_RE = re.compile(r"(?is)<think>.*?</think>")
 
 
+class TruncatedResponse(RuntimeError):
+    """The provider stopped because it hit max_tokens — the response is
+    incomplete and must never be parsed.
+
+    A truncated reasoning-model response frequently still contains the answer
+    field names, with a half-written value after the last one (e.g.
+    "Ground truth: I am"). Parsing that yields a sample whose gold reference is
+    a fragment, which is worse than no sample: it silently corrupts the
+    benchmark instead of being skipped. Every generation loop already catches
+    per-sample exceptions and continues, so raising here turns truncation into
+    a loud, counted skip in every loop at once.
+    """
+
+
 def _strip_reasoning(raw: str) -> str:
     """Drop closed <think>…</think> chain-of-thought blocks. An UNCLOSED <think>
     (the model opened a reasoning block, never closed it, and glued the answer on)
