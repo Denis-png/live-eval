@@ -203,6 +203,11 @@ def profile_gec_edit_types(
     type_counter: Counter = Counter()
     per_pair: list[int] = []
     for row in rows:
+        # Generated rows carry corrupted/original; real rows carry
+        # incorrect/correct. This function measures GENERATED output, so it
+        # prefers that vocabulary — index_seed_edit_types below reads the real
+        # seed pool and deliberately prefers the other order. Same two fields,
+        # two vocabularies; the precedence says which caller each expects.
         incorrect = row.get("corrupted") or row.get("incorrect")
         correct = row.get("original") or row.get("correct")
         if not incorrect or not correct:
@@ -253,6 +258,10 @@ def index_seed_edit_types(rows: list[dict[str, Any]], *, annotator=None) -> dict
 
     index: dict[str, list[int]] = {}
     for i, row in enumerate(rows):
+        # Real seed rows from parse_row carry incorrect/correct — prefer those
+        # (see the note in profile_gec_edit_types). The fallback matters: GEC's
+        # get_real_eval_samples emits corrupted/original, and calibration indexes
+        # exactly those rows.
         incorrect = row.get("incorrect") or row.get("corrupted")
         correct = row.get("correct") or row.get("original")
         if not incorrect or not correct:

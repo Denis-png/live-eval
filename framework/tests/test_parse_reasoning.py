@@ -101,7 +101,7 @@ class ParseGenerationReasoningTests(unittest.TestCase):
 class GenerateForwardReasoningTests(unittest.TestCase):
     def test_reasoning_forward_kept(self):
         gen = _ReasoningGen([_GEC_FORWARD_RAW])
-        out = gen.generate(
+        out = gen.generate_forward(
             real_samples=[{"incorrect": "she go to school yesterday"}],
             error_types=["verb tense"],
             prompt_instruction="fix {sentence} ({error_type})",

@@ -132,7 +132,7 @@ class _FakeGenerator:
     def call_api(self, prompt):
         return ""
 
-    def generate(self, **kw):
+    def generate_forward(self, **kw):
         return [{"original": "a", "corrupted": "b b b", "error_type": "article"}
                 for _ in range(kw["sample_size"])]
 

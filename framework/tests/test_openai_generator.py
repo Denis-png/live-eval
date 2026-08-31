@@ -252,7 +252,7 @@ class TruncationSkipsLoudlyTests(unittest.TestCase):
                         "Ground truth: I went to school yesterday.")
 
         gen = _Truncating()
-        out = gen.generate(
+        out = gen.generate_forward(
             real_samples=[{"incorrect": "a b c"}, {"incorrect": "d e f"}],
             error_types=["article"],
             prompt_instruction="Corrupt: {sentence} ({error_type})",

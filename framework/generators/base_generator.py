@@ -160,7 +160,7 @@ def _judgement_passes(raw: str) -> bool:
 
 class BaseGenerator(ABC):
 
-    def generate(
+    def generate_forward(
         self,
         real_samples: list[dict],
         error_types: list[str],

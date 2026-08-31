@@ -745,7 +745,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
             # get_seed_pool returns real_data untouched.
             seed_weights = (gen_cfg.get("seed_weights")
                             if isinstance(gen_cfg.get("seed_weights"), dict) else None)
-            synthetic = generator.generate(
+            synthetic = generator.generate_forward(
                 real_samples=task.get_seed_pool(config, real_data, "forward",
                                                 seed_weights=seed_weights, rng=rng),
                 error_types=task.get_error_types(),
