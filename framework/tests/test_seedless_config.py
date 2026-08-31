@@ -237,9 +237,12 @@ class GenerationCellSlugTests(unittest.TestCase):
         self.assertEqual(self._slug("class_conditional", seedless=True),
                          "inverse_seedless")
 
-    def test_structured_has_no_mode_or_seed_axis(self):
-        self.assertEqual(self._slug("structured"), "structured")
-        self.assertEqual(self._slug("structured", mode="forward"), "structured")
+    def test_structured_joins_the_mode_axis(self):
+        # Structured is now on the mode axis like every other strategy, so the
+        # slug includes the mode and is always seedless until seeded structured
+        # generation is implemented.
+        self.assertEqual(self._slug("structured"), "inverse_seedless")
+        self.assertEqual(self._slug("structured", mode="forward"), "forward_seedless")
 
     def test_slug_matches_the_mode_meta_records(self):
         for strategy in ("corruption", "class_conditional"):

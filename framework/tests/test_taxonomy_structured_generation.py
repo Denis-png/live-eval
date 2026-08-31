@@ -168,15 +168,22 @@ class TaxonomyStructuredGenerationTests(unittest.TestCase):
         self.assertIn("classes", out[0])
         self.assertIn("subclass_axioms", out[0])
 
-    def test_unsupported_mode_fails_clearly(self):
+    def test_mode_parameter_is_accepted_for_structured(self):
+        # Structured generation now joins the mode axis. The old test that
+        # checked mode was rejected is obsolete; forward mode's behavior is
+        # Task 3. This test verifies that mode="forward" does not raise a
+        # "not applicable" rejection. It may fail for other reasons (e.g., no
+        # API response) — that is expected.
         gen = FakeGenerator([])
         config = {"generation": {"sample_size": 1, "mode": "forward"}}
-        with self.assertRaises(RuntimeError) as ctx:
+        try:
             _run_generation(
                 gen, self.task, config, real_data=[], error_dist=None,
                 judge_call=None, class_prob=0.5, profile=PROFILE,
             )
-        self.assertIn("mode", str(ctx.exception))
+        except Exception as exc:
+            # The mode parameter should not trigger a "not applicable" error.
+            self.assertNotIn("not applicable", str(exc))
 
     def test_taxonomy_does_not_load_error_distribution(self):
         self.assertFalse(_should_load_error_distribution("structured", None, True))

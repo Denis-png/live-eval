@@ -372,11 +372,14 @@ def generation_cell_slug(config: dict, strategy: str) -> str:
     Naming a session after its setup means a directory listing shows what was
     run without opening results.json, and two cells of the same task can never
     collide in one output directory."""
-    if strategy == "structured":
-        # Structured generation builds from the benchmark's schema alone: it has
-        # no seed/mode axis, so naming it "forward_seedless" would be fiction.
-        return "structured"
-    seeding = "seedless" if (config.get("generation") or {}).get("seedless") else "seeded"
+    # Structured IS on the mode axis — it imposes a sampled target structure
+    # (inverse) or lets structure emerge (forward) — and is seedless until
+    # seeded structured generation is implemented.
+    seeding = (
+        "seedless" if strategy == "structured"
+        or (config.get("generation") or {}).get("seedless")
+        else "seeded"
+    )
     return f"{resolve_mode(config, strategy)}_{seeding}"
 
 
@@ -511,15 +514,14 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
     _profile_driven = False
 
     if strategy == "structured":
-        if gen_cfg.get("mode") not in (None, "structured", "none", "n/a"):
-            raise RuntimeError(
-                f"{task.get_task_name()} uses structured generation; generation.mode "
-                "is not applicable and must be omitted."
-            )
         if gen_cfg.get("seedless") is False:
+            # Not impossible — perturbing a real ontology subtree and keeping the
+            # perturbation as ground truth is coherent. It is unimplemented, and
+            # saying so is what keeps the design open rather than foreclosed.
             raise RuntimeError(
-                f"{task.get_task_name()} structured generation is profile-driven; "
-                "seeded generation is not supported."
+                f"seeded structured generation is not implemented for "
+                f"{task.get_task_name()}; it needs a real-artifact corpus and a "
+                "perturbation operator. Use seedless: true."
             )
         if profile is None:
             raise RuntimeError(

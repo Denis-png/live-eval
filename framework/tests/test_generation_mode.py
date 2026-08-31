@@ -64,3 +64,72 @@ class ContextAgreementTests(unittest.TestCase):
         cfg = {"generation": {"sample_size": 1, "mode": "forward"},
                "task": {"name": "taxonomy"}}
         self.assertEqual(self._context(cfg)["mode"], "forward")
+
+
+class CellSlugTests(unittest.TestCase):
+    def test_structured_slug_is_uniform_with_other_strategies(self):
+        self.assertEqual(
+            pipeline.generation_cell_slug({}, "structured"), "inverse_seedless")
+        self.assertEqual(
+            pipeline.generation_cell_slug(
+                {"generation": {"mode": "forward"}}, "structured"),
+            "forward_seedless")
+
+    def test_other_strategies_unchanged(self):
+        self.assertEqual(
+            pipeline.generation_cell_slug({"generation": {"seedless": True}},
+                                          "corruption"),
+            "forward_seedless")
+        self.assertEqual(
+            pipeline.generation_cell_slug({}, "class_conditional"),
+            "inverse_seeded")
+
+
+class StructuredRejectionTests(unittest.TestCase):
+    """The framework's rule: an unsupported capability says so before any API
+    call and names what is missing. It must not assert impossibility for
+    something that is merely unimplemented."""
+
+    def _task(self):
+        from framework.tasks.base_task import BaseTask
+
+        class _T(BaseTask):
+            def get_generation_strategy(self): return "structured"
+            def get_task_name(self): return "structured_stub"
+            def build_structured_generation_prompt(self, profile, rng=None,
+                                                   feedback=None, mode="inverse"):
+                return "make one"
+            def parse_structured_generation(self, text):
+                return {"classes": ["A"]}
+            def get_error_types(self): return []
+            def get_prompt_instruction(self): return ""
+            def get_evaluators(self): return []
+            def get_evaluator_fns(self): return {}
+            def get_model(self, model_config): return None
+            def parse_row(self, row): return row
+        return _T()
+
+    def _run(self, gen_cfg):
+        cfg = {"generation": {"sample_size": 1, **gen_cfg},
+               "task": {"name": "structured_stub"}}
+        return pipeline._run_generation(
+            _StubGenerator(), self._task(), cfg, [], None, None, 0.5,
+            profile={"taxonomies": [{"domain": "x"}]},
+        )
+
+    def test_mode_is_no_longer_rejected(self):
+        # Both values must dispatch; forward's own behaviour is Task 3.
+        for mode in ("inverse", "forward"):
+            with self.subTest(mode=mode):
+                try:
+                    self._run({"mode": mode})
+                except RuntimeError as exc:
+                    self.assertNotIn("not applicable", str(exc))
+
+    def test_seeded_structured_reads_as_unimplemented_not_impossible(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            self._run({"seedless": False})
+        message = str(ctx.exception)
+        self.assertIn("not implemented", message)
+        self.assertIn("structured_stub", message)
+        self.assertNotIn("not supported", message)
