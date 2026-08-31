@@ -391,3 +391,46 @@ class StageBArtifactTests(_Bench):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CliKeyResolutionTests(_Bench):
+    """framework.calibrate's CLI must resolve api_keys the way framework.main does.
+
+    Every other test in this file injects a fake generator, so nothing else
+    exercises the real construction path — which is exactly where a missing
+    api_key surfaced as a bare KeyError from OpenAIGenerator.__init__.
+    """
+
+    def _config_file(self, api_key="sk-test"):
+        import yaml
+        cfg = _config(self.path)
+        cfg["api_keys"] = {"openai": api_key}
+        cfg["generation"]["provider"] = "openai"
+        cfg["task_models"] = []
+        p = os.path.join(self.dir.name, "cfg.yaml")
+        with open(p, "w", encoding="utf-8") as f:
+            yaml.safe_dump(cfg, f)
+        return p
+
+    def test_cli_injects_the_provider_key_into_the_generation_block(self):
+        seen = {}
+
+        def _capture(config, **kwargs):
+            seen["api_key"] = config["generation"].get("api_key")
+            return {"rounds": [], "selected_round": 0}
+
+        argv = ["calibrate", "--config", self._config_file(), "--rounds", "1"]
+        with mock.patch("sys.argv", argv), \
+             mock.patch.object(calibrate, "run_calibration", side_effect=_capture):
+            calibrate.main()
+        self.assertEqual(seen["api_key"], "sk-test")
+
+    def test_cli_exits_cleanly_when_the_provider_key_is_missing(self):
+        argv = ["calibrate", "--config", self._config_file(api_key=""),
+                "--rounds", "1"]
+        with mock.patch("sys.argv", argv), \
+             mock.patch.object(calibrate, "run_calibration") as run:
+            with self.assertRaises(SystemExit) as ctx:
+                calibrate.main()
+        run.assert_not_called()
+        self.assertIn("openai", str(ctx.exception).lower())

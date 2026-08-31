@@ -310,17 +310,31 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # Same entry-point contract as framework.main: load .env BEFORE the config is
+    # read (load_config expands ${VAR} against os.environ), then inject
+    # api_keys[provider] into the generation/judge blocks. Without this the
+    # generator is constructed with no api_key and dies on a bare KeyError.
+    from framework.main import _load_dotenv, _resolve_api_keys
     from framework.profile_dataset import load_config
 
     args = parse_args()
+    _load_dotenv()
     config = load_config(args.config)
     if args.mode is not None:
         config["generation"]["mode"] = args.mode
     if args.seedless is not None:
         config["generation"]["seedless"] = args.seedless
 
+    # strict: a calibration without a key would otherwise burn the dataset load
+    # and the first round's setup before failing.
+    try:
+        config = _resolve_api_keys(config, strict=True)
+    except ValueError as e:
+        sys.exit(f"[ERROR] {e}")
+
     settings = calibration_settings(config, args)
     print(f"Task     : {config['task']['name']}")
+    print(f"Provider : {config['generation']['provider']} / {config['generation']['model']}")
     print(f"Rounds   : {settings['rounds']}  alpha: {settings['alpha']}  "
           f"tolerance: {settings['tolerance']}")
     print(f"Samples  : {settings['sample_size']} per round")
