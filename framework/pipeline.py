@@ -527,8 +527,24 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
             raise RuntimeError(
                 f"{task.get_task_name()} structured generation requires a profile."
             )
+        mode = resolve_mode(config, strategy)
         feedback_cfg = task.get_feedback_config(gen_cfg)
         feedback_enabled = bool(feedback_cfg.get("enabled", False))
+        if mode == "forward":
+            # get_feedback_config's default is tuned for inverse (the loop drives
+            # an artifact toward an IMPOSED target), so an inherited default of
+            # enabled=true is not itself a contradiction here — forward simply
+            # never runs the loop. Only an explicit request in THIS run's config
+            # is contradictory, since forward imposes no target for it to chase,
+            # and silently ignoring set config is what this framework refuses.
+            explicit_feedback_request = bool((gen_cfg.get("feedback") or {}).get("enabled"))
+            if explicit_feedback_request:
+                raise RuntimeError(
+                    f"{task.get_task_name()}: generation.mode=forward cannot use the "
+                    "structured feedback loop — the loop targets an imposed structure "
+                    "and forward imposes none. Set mode=inverse or disable feedback."
+                )
+            feedback_enabled = False
         # Fail before the first API call, not mid-round: enabling the loop
         # without a comparator is a config/implementation error, and the
         # framework's rule is that an unsupported capability says so up front.
@@ -546,7 +562,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
         rng = random.Random()
         synthetic = generator.generate_structured(
             build_prompt=lambda feedback: task.build_structured_generation_prompt(
-                profile, rng=rng, feedback=feedback
+                profile, rng=rng, feedback=feedback, mode=mode
             ),
             parse=task.parse_structured_generation_with_diagnostics,
             build_feedback=(

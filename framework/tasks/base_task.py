@@ -142,12 +142,15 @@ class BaseTask(ABC):
         return "corruption"
 
     def build_structured_generation_prompt(
-        self, profile: dict, rng=None, feedback: dict | None = None
+        self, profile: dict, rng=None, feedback: dict | None = None,
+        mode: str = "inverse",
     ) -> str:
         """Return one profile-driven structured generation prompt.
 
-        Structured tasks override this. Provider classes remain ontology-agnostic:
-        they only receive the prompt string and return text.
+        `mode` selects where the artifact's structure comes from: `inverse`
+        IMPOSES a target sampled from the profile, `forward` lets it emerge and
+        supplies only the content axis. Structured tasks override this; provider
+        classes remain ontology-agnostic and only receive the prompt string.
         """
         raise NotImplementedError(
             f"{self.get_task_name()} does not support structured generation."

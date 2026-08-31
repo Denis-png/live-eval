@@ -160,8 +160,22 @@ class TaxonomyTask(BaseTask):
             "metadata": row.get("metadata") or {},
         }
 
-    def build_structured_generation_prompt(self, profile: dict, rng=None, feedback: dict | None = None) -> str:
-        """Build a taxonomy generation prompt from structural profile targets only."""
+    def build_structured_generation_prompt(
+        self, profile: dict, rng=None, feedback: dict | None = None,
+        mode: str = "inverse",
+    ) -> str:
+        """Build a taxonomy generation prompt.
+
+        `inverse` imposes a structural target sampled from the real profile (and
+        carries feedback from the previous round). `forward` supplies only the
+        domain — every count, depth and branching property emerges, which is what
+        makes a forward-vs-inverse comparison measure what targeting buys.
+        """
+        if mode == "forward":
+            spec = self._generation_spec_from_profile(profile, rng=rng)
+            return self._config["structured_forward_prompt"].format(
+                domain=spec.get("domain", ""),
+            )
         spec = self._generation_spec_from_profile(profile, rng=rng)
         return self._config["structured_generation_prompt"].format(
             spec_json=json.dumps(spec, indent=2, sort_keys=True, ensure_ascii=False),

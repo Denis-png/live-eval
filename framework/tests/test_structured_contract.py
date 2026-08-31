@@ -22,7 +22,8 @@ class _Structured(BaseTask):
 
     def get_generation_strategy(self): return "structured"
     def get_task_name(self): return "structured_stub"
-    def build_structured_generation_prompt(self, profile, rng=None, feedback=None):
+    def build_structured_generation_prompt(self, profile, rng=None, feedback=None,
+                                           mode="inverse"):
         return "make one"
     def parse_structured_generation(self, text):
         return {"classes": ["A"]} if "good" in text else None
