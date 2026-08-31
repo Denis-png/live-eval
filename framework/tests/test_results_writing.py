@@ -25,6 +25,15 @@ class _ClassConditionalTask:
         return "spam"
 
 
+class _StructuredTask:
+    """Fake task with structured generation (mirrors taxonomy)."""
+    def get_generation_strategy(self):
+        return "structured"
+
+    def get_task_name(self):
+        return "taxonomy"
+
+
 def _config(results_path):
     return {
         "dataset": {"name": "d/ds", "split": "train", "sample_size": 50},
@@ -120,6 +129,18 @@ class BuildMetaTests(unittest.TestCase):
         del cfg["generation"]["mode"]
         meta = _build_meta(cfg, _ClassConditionalTask(), runs_completed=1,
                            effective_samples_per_run=[1], real_baseline=True)
+        self.assertEqual(meta["mode"], "inverse")
+
+    def test_structured_task_defaults_to_inverse_without_config_mode_key(self):
+        # Structured generation samples a target structure from the benchmark's
+        # schema and iterates toward it — an inverse operation by definition.
+        # _build_meta must record "inverse", not None, so downstream analysis
+        # (_strategy_of in scripts/analyze_results.py) groups it correctly.
+        cfg = _config("r.json")
+        del cfg["generation"]["mode"]
+        meta = _build_meta(cfg, _StructuredTask(), runs_completed=1,
+                           effective_samples_per_run=[1], real_baseline=True)
+        self.assertEqual(meta["strategy"], "structured")
         self.assertEqual(meta["mode"], "inverse")
 
 

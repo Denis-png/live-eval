@@ -438,10 +438,7 @@ def _build_meta(config: dict, task, runs_completed: int,
     judge_active = bool(judge) and judge.get("enabled", True) is not False
     num_runs = gen["num_runs"]
     strategy = task.get_generation_strategy()
-    if strategy == "structured":
-        mode = None
-    else:
-        mode = resolve_mode(config, strategy)
+    mode = resolve_mode(config, strategy)
     seedless = True if strategy == "structured" else bool(gen.get("seedless"))
     if ds["source"] == "local":
         dataset_meta = {"source": "local", "path": ds["path"],
