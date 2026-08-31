@@ -115,6 +115,11 @@ Validation rules:
 
 ## Feedback Loop
 
+The feedback loop **is** the inverse-mode mechanism. `mode: inverse` imposes a
+structural target sampled from the real profile, and the loop is how the artifact
+is driven toward it. `mode: forward` imposes no target, so it has no loop —
+enabling `feedback.enabled` alongside it raises before any API call.
+
 The bounded feedback loop is:
 
 ```text
