@@ -10,9 +10,10 @@ from framework.profiling.taxonomy_fidelity import (
 )
 from framework.profiling.taxonomy_profiler import profile_taxonomy_rows
 from framework.tasks.taxonomy import TaxonomyTask
+from framework.generators.base_generator import BaseGenerator
 
 
-class FakeGenerator:
+class FakeGenerator(BaseGenerator):
     def __init__(self, responses):
         self.responses = list(responses)
         self.prompts = []
@@ -204,7 +205,7 @@ class TaxonomyFeedbackLoopTests(unittest.TestCase):
         self.assertNotIn("Feedback from previous generation", gen.prompts[0])
         self.assertIn("Feedback from previous generation", gen.prompts[1])
         self.assertEqual(len(out[0]["generation_feedback"]["rounds"]), 2)
-        self.assertTrue(out[0]["generation_feedback"]["final_taxonomy_feedback_informed"])
+        self.assertTrue(out[0]["generation_feedback"]["final_feedback_informed"])
 
     def test_feedback_disabled_matches_phase4_single_generation(self):
         gen = FakeGenerator([_response(["A", "B"], [["B", "A"]])])

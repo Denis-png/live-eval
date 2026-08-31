@@ -1,5 +1,6 @@
 import random
 import re
+import sys
 import time
 from abc import ABC, abstractmethod
 from typing import Callable
@@ -738,6 +739,128 @@ class BaseGenerator(ABC):
             f"Generated {len(synthetic)} synthetic samples (class-conditional) "
             f"(judge dropped: {judge_dropped}, parse failed: {parse_failed}, refused: {refused})."
         )
+        return synthetic
+
+    def generate_structured(
+        self,
+        build_prompt,
+        parse,
+        build_feedback=None,
+        *,
+        sample_size: int,
+        max_parse_attempts: int = 3,
+        max_feedback_rounds: int = 0,
+        request_delay: float = 0.0,
+    ) -> list[dict]:
+        """Generate whole structured artifacts, one per sample, with an optional
+        per-artifact feedback loop.
+
+        Unlike corruption and class_conditional, where a sample is one sentence
+        and fidelity only means something across a distribution, a structured
+        artifact has its own measurable shape — so it can be compared against
+        the reference and regenerated on its own.
+
+        Stays ontology-agnostic like every other loop here: it never sees the
+        task, the profile, or what the artifact means. Callers bind those.
+
+            build_prompt(feedback) -> str       feedback is None on round 0
+            parse(raw)             -> {"artifact": dict | None, "diagnostic": dict}
+            build_feedback(artifact) -> {"feedback", "comparison",
+                                         "synthetic_profile"}, or None to
+                                        disable the loop entirely
+
+        Each returned artifact carries its own `generation_feedback` metadata:
+        the rounds it took, why attempts were rejected, and whether it stopped
+        early inside tolerance.
+        """
+        feedback_enabled = build_feedback is not None
+        rounds_budget = max(0, max_feedback_rounds) if feedback_enabled else 0
+        max_parse_attempts = max(1, max_parse_attempts)
+        synthetic: list[dict] = []
+
+        for _ in range(sample_size):
+            selected = None
+            metadata: dict = {
+                "feedback_enabled": feedback_enabled,
+                "max_feedback_rounds": rounds_budget,
+                "rounds": [],
+                "early_stopped": False,
+                "final_round_selected": None,
+                "final_feedback_informed": False,
+            }
+            feedback = None
+            for round_idx in range(rounds_budget + 1):
+                parsed = None
+                attempts = 0
+                attempt_diagnostics: list[dict] = []
+                while parsed is None and attempts < max_parse_attempts:
+                    attempts += 1
+                    raw = self.call_api(build_prompt(feedback))
+                    parse_result = parse(raw)
+                    parsed = parse_result["artifact"]
+                    diagnostic = {"attempt": attempts, **parse_result["diagnostic"]}
+                    provider_diagnostic = getattr(self, "last_response_diagnostic", None)
+                    if parsed is None and provider_diagnostic:
+                        diagnostic["provider_response"] = provider_diagnostic
+                    attempt_diagnostics.append(diagnostic)
+                    if parsed is None:
+                        reason = diagnostic.get("rejection_reason", "unknown")
+                        print(
+                            "[SKIP] structured generation returned invalid "
+                            f"JSON/artifact ({reason})."
+                        )
+                    if request_delay > 0:
+                        time.sleep(request_delay)
+
+                if parsed is None:
+                    metadata["rounds"].append({
+                        "round": round_idx,
+                        "feedback_informed": feedback is not None,
+                        "parse_attempts": attempts,
+                        "attempts": attempt_diagnostics,
+                        "valid": False,
+                    })
+                    if selected is not None:
+                        metadata["failed_feedback_round_preserved_previous"] = True
+                    break
+
+                selected = parsed
+                metadata.setdefault("attempts", []).extend(attempt_diagnostics)
+                if not feedback_enabled:
+                    metadata["final_round_selected"] = round_idx
+                    break
+                round_info = build_feedback(selected)
+                feedback_result = round_info["feedback"]
+                metadata["rounds"].append({
+                    "round": round_idx,
+                    "feedback_informed": feedback is not None,
+                    "parse_attempts": attempts,
+                    "attempts": attempt_diagnostics,
+                    "valid": True,
+                    "within_tolerance": feedback_result["within_tolerance"],
+                    "feedback": feedback_result,
+                    "comparison": round_info["comparison"],
+                    "synthetic_profile": round_info["synthetic_profile"],
+                })
+                metadata["final_round_selected"] = round_idx
+                metadata["final_feedback_informed"] = feedback is not None
+                if feedback_result["within_tolerance"]:
+                    metadata["early_stopped"] = True
+                    break
+                if round_idx >= rounds_budget:
+                    break
+                feedback = feedback_result
+
+            if selected is not None:
+                selected["generation_feedback"] = metadata
+                synthetic.append(selected)
+
+        if len(synthetic) < sample_size:
+            print(
+                f"[WARN] structured generation produced {len(synthetic)} valid "
+                f"artifacts for {sample_size} requested.",
+                file=sys.stderr,
+            )
         return synthetic
 
     @abstractmethod

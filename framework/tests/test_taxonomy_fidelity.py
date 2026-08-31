@@ -13,9 +13,10 @@ from framework.profiling.taxonomy_fidelity import (
 )
 from framework.profiling.taxonomy_profiler import profile_taxonomy_rows
 from framework.tasks.taxonomy import TaxonomyTask
+from framework.generators.base_generator import BaseGenerator
 
 
-class FakeGenerator:
+class FakeGenerator(BaseGenerator):
     def __init__(self, responses):
         self.responses = list(responses)
         self.prompts = []

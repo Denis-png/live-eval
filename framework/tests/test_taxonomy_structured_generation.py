@@ -6,9 +6,10 @@ from unittest import mock
 
 from framework.pipeline import _run_generation, _should_load_error_distribution, run_pipeline
 from framework.tasks.taxonomy import TaxonomyTask
+from framework.generators.base_generator import BaseGenerator
 
 
-class FakeGenerator:
+class FakeGenerator(BaseGenerator):
     def __init__(self, responses):
         self.responses = list(responses)
         self.prompts = []

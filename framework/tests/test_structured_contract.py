@@ -12,6 +12,7 @@ before any API call, naming what is missing, and never silently degrades.
 import unittest
 
 from framework import pipeline
+from framework.generators.base_generator import BaseGenerator
 from framework.tasks.base_task import BaseTask
 from framework.tasks.taxonomy.task import TaxonomyTask
 
@@ -34,7 +35,7 @@ class _Structured(BaseTask):
     def parse_row(self, row): return row
 
 
-class _Gen:
+class _Gen(BaseGenerator):
     def __init__(self, replies): self._r = list(replies)
     def call_api(self, prompt): return self._r.pop(0)
 

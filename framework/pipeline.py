@@ -521,15 +521,8 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
             raise RuntimeError(
                 f"{task.get_task_name()} structured generation requires a profile."
             )
-        rng = random.Random()
-        synthetic = []
-        max_parse_attempts = max(1, gen_cfg.get("max_parse_attempts", 3))
         feedback_cfg = task.get_feedback_config(gen_cfg)
         feedback_enabled = bool(feedback_cfg.get("enabled", False))
-        max_feedback_rounds = (
-            max(0, int(feedback_cfg.get("max_rounds", 0)))
-            if feedback_enabled else 0
-        )
         # Fail before the first API call, not mid-round: enabling the loop
         # without a comparator is a config/implementation error, and the
         # framework's rule is that an unsupported capability says so up front.
@@ -542,96 +535,24 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                 "(get_feedback_config) but does not implement "
                 "build_structural_feedback()."
             )
-
-        for _ in range(sample_size):
-            selected = None
-            metadata = {
-                "feedback_enabled": feedback_enabled,
-                "max_feedback_rounds": max_feedback_rounds,
-                "rounds": [],
-                "early_stopped": False,
-                "final_round_selected": None,
-                "final_taxonomy_feedback_informed": False,
-            }
-            feedback = None
-            for round_idx in range(max_feedback_rounds + 1):
-                parsed = None
-                attempts = 0
-                attempt_diagnostics = []
-                while parsed is None and attempts < max_parse_attempts:
-                    attempts += 1
-                    prompt = task.build_structured_generation_prompt(
-                        profile, rng=rng, feedback=feedback
-                    )
-                    raw = generator.call_api(prompt)
-                    # BaseTask supplies a default that wraps the plain parser,
-                    # so there is one path here regardless of what the task
-                    # chose to implement.
-                    parse_result = task.parse_structured_generation_with_diagnostics(raw)
-                    parsed = parse_result["artifact"]
-                    diagnostic = {"attempt": attempts, **parse_result["diagnostic"]}
-                    provider_diagnostic = getattr(generator, "last_response_diagnostic", None)
-                    if parsed is None and provider_diagnostic:
-                        diagnostic["provider_response"] = provider_diagnostic
-                    attempt_diagnostics.append(diagnostic)
-                    if parsed is None:
-                        reason = diagnostic.get("rejection_reason", "unknown")
-                        print(
-                            "[SKIP] structured generation returned invalid "
-                            f"JSON/artifact ({reason})."
-                        )
-
-                if parsed is None:
-                    metadata["rounds"].append({
-                        "round": round_idx,
-                        "feedback_informed": feedback is not None,
-                        "parse_attempts": attempts,
-                        "attempts": attempt_diagnostics,
-                        "valid": False,
-                    })
-                    if selected is not None:
-                        metadata["failed_feedback_round_preserved_previous"] = True
-                        break
-                    break
-
-                selected = parsed
-                metadata.setdefault("attempts", []).extend(attempt_diagnostics)
-                if not feedback_enabled:
-                    metadata["final_round_selected"] = round_idx
-                    break
-                round_info = task.build_structural_feedback(
-                    profile, selected, generation_config=gen_cfg
-                )
-                feedback_result = round_info["feedback"]
-                metadata["rounds"].append({
-                    "round": round_idx,
-                    "feedback_informed": feedback is not None,
-                    "parse_attempts": attempts,
-                    "attempts": attempt_diagnostics,
-                    "valid": True,
-                    "within_tolerance": feedback_result["within_tolerance"],
-                    "feedback": feedback_result,
-                    "comparison": round_info["comparison"],
-                    "synthetic_profile": round_info["synthetic_profile"],
-                })
-                metadata["final_round_selected"] = round_idx
-                metadata["final_taxonomy_feedback_informed"] = feedback is not None
-                if feedback_result["within_tolerance"]:
-                    metadata["early_stopped"] = True
-                    break
-                if round_idx >= max_feedback_rounds:
-                    break
-                feedback = feedback_result
-
-            if selected is not None:
-                selected["generation_feedback"] = metadata
-                synthetic.append(selected)
-        if len(synthetic) < sample_size:
-            print(
-                f"[WARN] structured generation produced {len(synthetic)} valid "
-                f"taxonomies for {sample_size} requested.",
-                file=sys.stderr,
-            )
+        # Delegate the loop itself, like every other strategy. The generator
+        # stays ontology-agnostic: it receives callables, never the task.
+        rng = random.Random()
+        synthetic = generator.generate_structured(
+            build_prompt=lambda feedback: task.build_structured_generation_prompt(
+                profile, rng=rng, feedback=feedback
+            ),
+            parse=task.parse_structured_generation_with_diagnostics,
+            build_feedback=(
+                (lambda artifact: task.build_structural_feedback(
+                    profile, artifact, generation_config=gen_cfg))
+                if feedback_enabled else None
+            ),
+            sample_size=sample_size,
+            max_parse_attempts=gen_cfg.get("max_parse_attempts", 3),
+            max_feedback_rounds=int(feedback_cfg.get("max_rounds", 0)),
+            request_delay=gen_cfg.get("request_delay", 0.0),
+        )
     elif strategy == "class_conditional":
         # No config sets "mode" explicitly today (spam.json's config comment
         # says so) — the default MUST resolve to "inverse" so that omitting
