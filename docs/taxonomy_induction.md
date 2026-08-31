@@ -77,7 +77,6 @@ one complete synthetic taxonomy, not one class or one edge.
 
 Taxonomy generation does not use:
 
-- inverse mode
 - corruption or error-type semantics
 - real benchmark class names as seeds
 - real benchmark subclass edges as seeds
@@ -117,8 +116,11 @@ Validation rules:
 
 The feedback loop **is** the inverse-mode mechanism. `mode: inverse` imposes a
 structural target sampled from the real profile, and the loop is how the artifact
-is driven toward it. `mode: forward` imposes no target, so it has no loop —
-enabling `feedback.enabled` alongside it raises before any API call.
+is driven toward it. `mode: forward` imposes no target, so it has no loop. Setting
+`generation.feedback.enabled` in the RUN config alongside it raises before any
+API call, since that is a request the run made and silently ignoring it would be
+wrong. `taxonomy.json`'s own `feedback` block is a task-level default tuned for
+inverse — it is inherited, not set by the run, so forward simply skips the loop.
 
 The bounded feedback loop is:
 
@@ -267,6 +269,5 @@ limits is proven to solve the issue.
 - no transitive evaluation
 - no semantic or fuzzy matching
 - no seeded taxonomy generation
-- no inverse taxonomy generation
 - current Pizza MVP assumes one real reference ontology for fidelity selection
 - model/provider structured-output behavior can affect real runs

@@ -176,8 +176,13 @@ knobs that together select one of four **cells**:
 - **`generation.mode`** (`forward` | `inverse`) — *where the annotation comes from*.
   `inverse` draws it independently and **imposes** it on the source; `forward`
   **inherits** it from the source — the seed it was derived from, or the artifact
-  just generated. This is why only inverse cells load an empirical error
-  distribution: an imposed annotation has to be drawn from somewhere.
+  just generated. It also explains a detail the framework treats as incidental: GEC
+  `forward` + seeded is the only cell that loads no empirical distribution, because
+  it is the only cell that imposes nothing — the generator infers the error type
+  from its seed. Every other cell imposes at least part of the annotation and needs
+  a distribution to draw it from: spam `forward` inherits the label from its seed
+  but still imposes the signal mix, and GEC `forward` + seedless draws the error
+  type from the profile while the correction remains the model's own assertion.
 
   The axis is task-shape-independent. Back-translation (generate the target, derive
   the source) and doc2query (pick a document, generate a query for it) are inverse
@@ -218,7 +223,7 @@ pinned to `true` (seeded is unimplemented) and only `mode` varies:
 
 | | `seedless: true` |
 |---|---|
-| **`mode: inverse`** (default) | A structural target is sampled from the real profile and imposed; the feedback loop iterates until the artifact is within tolerance. |
+| **`mode: inverse`** (default) | A structural target is sampled from the real profile and imposed; the feedback loop iterates toward it for a bounded number of rounds. |
 | **`mode: forward`** | Only the domain is supplied. Size, depth and branching all emerge, and there is no feedback loop — the baseline for judging what targeting buys. |
 
 ### Setting it
