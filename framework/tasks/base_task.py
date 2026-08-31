@@ -163,6 +163,43 @@ class BaseTask(ABC):
             f"{self.get_task_name()} does not support structured generation."
         )
 
+    def get_feedback_config(self, generation_config: dict | None = None) -> dict:
+        """Per-sample feedback settings for `structured` generation:
+        {"enabled": bool, "max_rounds": int, "tolerances": {...}}.
+
+        A structured artifact is a whole sample with its own measurable shape,
+        so it can be compared against the reference and regenerated on its own —
+        unlike a corruption/classification sample, where fidelity only means
+        something across a distribution. Disabled by default.
+        """
+        return {"enabled": False, "max_rounds": 0}
+
+    def parse_structured_generation_with_diagnostics(self, text: str) -> dict:
+        """Parse one structured response into {"artifact", "diagnostic"}.
+
+        Defaults to wrapping `parse_structured_generation`, so a task only has
+        to implement the plain parser and the dispatcher needs no branch.
+        Override to explain WHY an artifact was rejected.
+        """
+        artifact = self.parse_structured_generation(text)
+        diagnostic: dict = {"valid": artifact is not None}
+        if artifact is None:
+            diagnostic["rejection_reason"] = "invalid_structured_artifact"
+        return {"artifact": artifact, "diagnostic": diagnostic}
+
+    def build_structural_feedback(self, profile: dict, artifact: dict,
+                                  generation_config: dict | None = None) -> dict:
+        """Compare one generated artifact against the reference profile and
+        return {"feedback", "comparison", "synthetic_profile"}.
+
+        Required only when get_feedback_config() enables the loop; the pipeline
+        checks that up front and refuses to start rather than failing mid-round.
+        """
+        raise NotImplementedError(
+            f"{self.get_task_name()} enables the structured feedback loop but "
+            "does not implement build_structural_feedback()."
+        )
+
     def profile_dataset(self, rows: list[dict]) -> dict | None:
         """Profile a labeled dataset (rows with "text"+"label") for real-vs-generated
         fidelity. Return None to opt out (default). Override in classification tasks."""

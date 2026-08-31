@@ -524,12 +524,24 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
         rng = random.Random()
         synthetic = []
         max_parse_attempts = max(1, gen_cfg.get("max_parse_attempts", 3))
-        feedback_cfg = task.get_feedback_config(gen_cfg) if hasattr(task, "get_feedback_config") else {}
+        feedback_cfg = task.get_feedback_config(gen_cfg)
         feedback_enabled = bool(feedback_cfg.get("enabled", False))
         max_feedback_rounds = (
             max(0, int(feedback_cfg.get("max_rounds", 0)))
             if feedback_enabled else 0
         )
+        # Fail before the first API call, not mid-round: enabling the loop
+        # without a comparator is a config/implementation error, and the
+        # framework's rule is that an unsupported capability says so up front.
+        if feedback_enabled and (
+            type(task).build_structural_feedback
+            is BaseTask.build_structural_feedback
+        ):
+            raise RuntimeError(
+                f"{task.get_task_name()} enables the structured feedback loop "
+                "(get_feedback_config) but does not implement "
+                "build_structural_feedback()."
+            )
 
         for _ in range(sample_size):
             selected = None
@@ -552,18 +564,15 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                         profile, rng=rng, feedback=feedback
                     )
                     raw = generator.call_api(prompt)
-                    if hasattr(task, "parse_structured_generation_with_diagnostics"):
-                        parse_result = task.parse_structured_generation_with_diagnostics(raw)
-                        parsed = parse_result["artifact"]
-                        diagnostic = {"attempt": attempts, **parse_result["diagnostic"]}
-                        provider_diagnostic = getattr(generator, "last_response_diagnostic", None)
-                        if parsed is None and provider_diagnostic:
-                            diagnostic["provider_response"] = provider_diagnostic
-                    else:
-                        parsed = task.parse_structured_generation(raw)
-                        diagnostic = {"attempt": attempts, "valid": parsed is not None}
-                        if parsed is None:
-                            diagnostic["rejection_reason"] = "invalid_structured_artifact"
+                    # BaseTask supplies a default that wraps the plain parser,
+                    # so there is one path here regardless of what the task
+                    # chose to implement.
+                    parse_result = task.parse_structured_generation_with_diagnostics(raw)
+                    parsed = parse_result["artifact"]
+                    diagnostic = {"attempt": attempts, **parse_result["diagnostic"]}
+                    provider_diagnostic = getattr(generator, "last_response_diagnostic", None)
+                    if parsed is None and provider_diagnostic:
+                        diagnostic["provider_response"] = provider_diagnostic
                     attempt_diagnostics.append(diagnostic)
                     if parsed is None:
                         reason = diagnostic.get("rejection_reason", "unknown")

@@ -302,18 +302,24 @@ class TaxonomyTask(BaseTask):
 
     def build_structural_feedback(
         self,
-        real_profile: dict,
-        synthetic_taxonomy: dict,
+        profile: dict,
+        artifact: dict,
         generation_config: dict | None = None,
     ) -> dict[str, Any]:
-        """Profile one generated taxonomy and derive structural feedback."""
+        """Profile one generated taxonomy and derive structural feedback.
+
+        Parameter names follow BaseTask's contract (`profile`, `artifact`) so
+        this is a true override and a keyword call against the declared
+        signature works; here they are the real taxonomy profile and one
+        generated taxonomy.
+        """
         from framework.profiling.taxonomy_fidelity import (
             build_generation_feedback,
             compare_taxonomy_profiles,
         )
 
-        synthetic_profile = self.profile_dataset([synthetic_taxonomy])
-        comparison = compare_taxonomy_profiles(real_profile, synthetic_profile)
+        synthetic_profile = self.profile_dataset([artifact])
+        comparison = compare_taxonomy_profiles(profile, synthetic_profile)
         per_taxonomy = comparison["comparisons"][0] if comparison["comparisons"] else {}
         reference = comparison["real_profile"]
         synthetic = comparison["synthetic_profiles"][0] if comparison["synthetic_profiles"] else {}
