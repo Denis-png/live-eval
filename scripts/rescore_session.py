@@ -150,11 +150,11 @@ def rescore_session(session_dir, config, *, skip_eval=False, skip_profile=False,
         print(f"Rescored results written to {results_path}")
 
     if not skip_profile and real_reference:
-        real_profile = task.profile_dataset(real_reference)
+        real_profile = task.build_fidelity_profile(real_reference)
         if real_profile is not None:
             all_generated = [item for run in runs_data for item in run]
-            generated_profile = task.profile_dataset(all_generated)
-            fidelity = task.compare_profiles(real_profile, generated_profile)
+            generated_profile = task.build_fidelity_profile(all_generated)
+            fidelity = task.compare_fidelity_profiles(real_profile, generated_profile)
             profile_path = os.path.join(session_dir, "profile.json")
             with open(profile_path, "w", encoding="utf-8") as f:
                 json.dump({"real": real_profile, "generated": generated_profile,
