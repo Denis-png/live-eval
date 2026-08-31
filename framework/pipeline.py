@@ -352,11 +352,18 @@ def aggregate(all_run_scores: list[dict]) -> dict:
 # ── Output paths ──────────────────────────────────────────────
 
 def resolve_mode(config: dict, strategy: str) -> str:
-    """The mode that actually runs. `corruption` defaults to "forward",
-    `class_conditional` to "inverse" — shared by the session name, _build_meta
-    and the generation dispatch so all three always agree."""
-    return (config.get("generation") or {}).get(
-        "mode", "inverse" if strategy == "class_conditional" else "forward")
+    """The mode that actually runs — shared by the session name, _build_meta and
+    the generation dispatch so all three always agree.
+
+    `mode` asks where the annotation comes from: `inverse` draws it independently
+    and IMPOSES it on the source; `forward` INHERITS it from the source (the seed,
+    or the artifact just generated). Defaults follow what each strategy does when
+    the config says nothing: `corruption` infers the seed's error (forward), while
+    `class_conditional` draws a label and `structured` draws a target structure
+    (both inverse).
+    """
+    default = "forward" if strategy == "corruption" else "inverse"
+    return (config.get("generation") or {}).get("mode", default)
 
 
 def generation_cell_slug(config: dict, strategy: str) -> str:
@@ -937,7 +944,8 @@ def build_generation_context(config: dict) -> dict:
     evaluator_fns = task.get_evaluator_fns()
 
     strategy = task.get_generation_strategy()
-    mode = None if strategy == "structured" else config["generation"].get("mode", "forward")
+    # One source of truth: resolve_mode also feeds the session name and _build_meta.
+    mode = resolve_mode(config, strategy)
     seedless = (
         True if strategy == "structured"
         else bool(config["generation"].get("seedless"))
