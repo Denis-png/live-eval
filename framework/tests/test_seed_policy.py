@@ -193,10 +193,10 @@ class SeedlessPromptValidationTests(unittest.TestCase):
 class InheritTechniqueTests(unittest.TestCase):
     """inherit rewrites a seed of the drawn label. A signal-bearing label's
     template emphasises the sampled signal mix, so naming its technique after
-    the sampled category is honest; a label whose template asks for no
-    signals renders a plain same-label rewrite — template-driven technique
-    naming calls that "rewrite" for every label now, not a label-specific
-    word like the old "imitation"."""
+    the sampled category is honest; a label whose template asks for no signals
+    renders a plain same-label rewrite, still recorded as "imitation" — this is
+    the forward+seeded cell, whose records must stay comparable with the
+    archives written before the symmetric-inverse change."""
 
     def test_technique_reflects_what_actually_happened(self):
         seeds = [{"text": "see you at lunch soon", "label": "HAM"},
@@ -212,9 +212,9 @@ class InheritTechniqueTests(unittest.TestCase):
             )
             self.assertEqual(out[0]["label"], expected_label)
             # The signal-bearing label names its sampled category; the other
-            # label injects nothing and is a plain "rewrite".
+            # label injects nothing and stays "imitation".
             expected_technique = ("phishing_link" if expected_label == "SPAM"
-                                  else "rewrite")
+                                  else "imitation")
             self.assertEqual(out[0]["technique"], expected_technique)
 
 if __name__ == "__main__":
@@ -251,7 +251,7 @@ class ForwardSignalEmphasisTests(unittest.TestCase):
         prompt, record = self._run(class_balance={"SPAM": 0.0, "HAM": 1.0})
         self.assertNotIn("insert a link", prompt)
         self.assertIn("see you at lunch soon", prompt)
-        self.assertEqual(record["technique"], "rewrite")
+        self.assertEqual(record["technique"], "imitation")
 
     def test_missing_prompt_for_a_label_fails_before_any_call(self):
         gen = FakeGenerator("Rewritten: x y z")
@@ -264,3 +264,60 @@ class ForwardSignalEmphasisTests(unittest.TestCase):
         self.assertIn("forward_prompts", str(ctx.exception))
         self.assertIn("HAM", str(ctx.exception))
         self.assertEqual(gen.prompts, [])
+
+
+class NoSignalTechniqueNamingTests(unittest.TestCase):
+    """`technique` for a label whose template asks for no signals is named
+    per SEED POLICY, not one word for all three.
+
+    Archives are the reason. "imitation" (inherit) and "paraphrase" (none) are
+    what the forward and forward+seedless cells have always written, and those
+    two cells are required to behave exactly as they did before the
+    symmetric-inverse change — a single "rewrite" everywhere would have made
+    post-change records non-comparable to the archive on that field for no
+    benefit. `impose` is the one cell whose behaviour genuinely changed (its
+    non-signal label now strips signals off a seed of any class rather than
+    paraphrasing a seed of its own), so it says "rewrite" instead of restoring
+    a "paraphrase" that would now be a lie."""
+
+    HAM_ONLY = {**COMMON, "class_balance": {"SPAM": 0.0, "HAM": 1.0}}
+
+    def test_impose_records_rewrite(self):
+        gen = FakeGenerator("Message: are we still on for lunch tomorrow")
+        out = gen.generate_class_conditional(
+            real_seeds=[{"incorrect": "WIN a FREE prize now http://x.com"}],
+            seed_field="incorrect", sample_size=1, seed_policy="impose",
+            rng=random.Random(0), **self.HAM_ONLY,
+        )
+        self.assertEqual(out[0]["technique"], "rewrite")
+
+    def test_inherit_records_imitation(self):
+        gen = FakeGenerator("Rewritten: glad we could catch up again soon")
+        out = gen.generate_class_conditional(
+            real_seeds=[{"text": "see you at lunch soon", "label": "HAM"}],
+            seed_field="text", sample_size=1, seed_policy="inherit",
+            forward_prompts={"SPAM": "spam {sentence} {error_spec}",
+                             "HAM": "ham {sentence}"},
+            rng=random.Random(0), **self.HAM_ONLY,
+        )
+        self.assertEqual(out[0]["technique"], "imitation")
+
+    def test_none_records_paraphrase(self):
+        gen = FakeGenerator("Message: are we still on for lunch tomorrow")
+        out = gen.generate_class_conditional(
+            real_seeds=None, sample_size=1, seed_policy="none",
+            seedless_prompts={"SPAM": "spam {spec} {error_spec}", "HAM": "ham {spec}"},
+            specs_by_label={"SPAM": ["x"], "HAM": ["topic: chat; roughly 8 words"]},
+            rng=random.Random(0), **self.HAM_ONLY,
+        )
+        self.assertEqual(out[0]["technique"], "paraphrase")
+
+    def test_a_signal_bearing_label_still_names_its_categories(self):
+        # The policy name is the fallback for "no signals drawn", never a
+        # replacement for the sampled category list.
+        gen = FakeGenerator("Message: Win a FREE prize http://x.com now")
+        out = gen.generate_class_conditional(
+            real_seeds=[{"incorrect": "see you at lunch"}], seed_field="incorrect",
+            sample_size=1, seed_policy="impose", rng=random.Random(0), **COMMON,
+        )
+        self.assertEqual(out[0]["technique"], "phishing_link")

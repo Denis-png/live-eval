@@ -51,9 +51,15 @@ class ClassConditionalTests(unittest.TestCase):
     def test_ham_when_prob_zero(self):
         out, gen = _run(["Message: are we still meeting tomorrow afternoon"], 0.0)
         self.assertEqual(out[0]["label"], "HAM")
-        # HAM's template carries no {error_spec}, so it draws no signal mix —
-        # template-driven technique naming calls that "rewrite" for every label,
-        # not a label-specific word like the old "paraphrase".
+        # HAM's template carries no {error_spec}, so it draws no signal mix and
+        # `technique` falls back to the name of the seed policy. This is the
+        # impose (inverse) cell, and it is the ONE cell whose behaviour this
+        # branch deliberately changed: HAM is now imposed on a seed of either
+        # class and strips its signals, so "rewrite" is what happened. The old
+        # "paraphrase" described paraphrasing a HAM seed, which no longer
+        # describes this cell. The forward and seedless cells, whose behaviour
+        # did NOT change, keep their archived "imitation"/"paraphrase" names —
+        # see NoSignalTechniqueNamingTests in test_seed_policy.py.
         self.assertEqual(out[0]["technique"], "rewrite")
         self.assertTrue(gen.calls[0].startswith("Rewrite legitimately:"))
 

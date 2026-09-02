@@ -26,6 +26,22 @@ _THINK_BLOCK_RE = re.compile(r"(?is)<think>.*?</think>")
 # class rather than an imposition on any seed.
 CLASS_CONDITIONAL_SEMANTICS = "symmetric"
 
+# What `technique` records for a label whose own prompt template asks for no
+# signal mix, keyed by seed policy — the label DID something, and which thing it
+# did is the policy. "imitation" (inherit) and "paraphrase" (none) are the names
+# pre-symmetry archives already carry for the forward and forward+seedless
+# cells; keeping them means records from those two cells stay comparable across
+# this change, which is the regression bar for them. `impose` is the one cell
+# whose behaviour genuinely changed — its non-signal label now STRIPS signals
+# off a seed of any class instead of paraphrasing a seed of its own — so it
+# names itself "rewrite" rather than restoring a "paraphrase" that would now be
+# a lie. `technique` has no production consumer; this is archive comparability.
+_NO_SIGNAL_TECHNIQUE = {
+    "impose": "rewrite",
+    "inherit": "imitation",
+    "none": "paraphrase",
+}
+
 
 class TruncatedResponse(RuntimeError):
     """The provider stopped because it hit max_tokens — the response is
@@ -564,7 +580,8 @@ class BaseGenerator(ABC):
           same `real_seeds` pool regardless of which class was drawn, and is
           rendered through `inverse_prompts[label]` (a `Message:` line). A label
           whose own template also contains `{error_spec}` receives the sampled
-          signal mix; a label whose template does not is rendered without one.
+          signal mix; a label whose template does not is rendered without one
+          and recorded as "rewrite".
         - "inherit": the label is drawn from `class_balance`, then the seed is
           taken from the subset of `real_seeds` whose `label_field` happens to
           match the drawn label — under symmetry a drawn label may coincide with
@@ -578,7 +595,8 @@ class BaseGenerator(ABC):
           same-class rewrite, recorded as "imitation".
         - "none": no real seed at all — content comes from a per-label spec pool
           (`specs_by_label`) rendered through `seedless_prompts[label]` (a
-          `Message:` line). The record's "seed" field is "".
+          `Message:` line). The record's "seed" field is "". A label whose
+          template asks for no signals is recorded as "paraphrase".
 
         Every class is LLM-authored, so a classifier cannot separate them on
         authorship artifacts. Seeds/specs are cycled if sample_size exceeds their
@@ -668,7 +686,8 @@ class BaseGenerator(ABC):
             if wants_signals:
                 keys = _sample_categories(type_dist, count_dist, rng)
                 error_spec = "; ".join(error_descriptions.get(k, k) for k in keys)
-            technique = ", ".join(keys) if keys else "rewrite"
+            technique = (", ".join(keys) if keys
+                         else _NO_SIGNAL_TECHNIQUE.get(seed_policy, "rewrite"))
 
             if seed_policy == "impose":
                 if template is None:
