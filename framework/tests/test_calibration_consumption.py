@@ -283,3 +283,67 @@ class ClassProbPrecedenceTests(unittest.TestCase):
         self.assertEqual(
             pipeline._resolve_class_prob(cfg, real_reference, SpamTask()),
             {"SPAM": 0.25, "HAM": 0.75})
+
+
+class _ThreeLabelTask:
+    """Duck-typed stand-in for a task with more than two labels — only
+    get_class_labels() is needed by _resolve_class_prob's numeric branch."""
+    def get_class_labels(self):
+        return ("NEGATIVE", "NEUTRAL", "POSITIVE")
+
+    def get_task_name(self):
+        return "sentiment-fixture"
+
+
+class ClassBalanceFloatTests(unittest.TestCase):
+    """A bare `generation.class_balance` float is the binary legacy spelling of
+    the mapping: P(labels[0]) is what it has always meant for a two-label task
+    (P(SPAM) with ("SPAM", "HAM")), so every existing two-label config must
+    keep working unchanged rather than silently falling through to the
+    empirical/calibrated fallback (I1: a documented config value must never
+    silently do nothing)."""
+
+    def tearDown(self):
+        pipeline._LAST_CALIBRATION = None
+
+    def test_two_labels_float_is_honoured_as_the_first_labels_share(self):
+        pipeline._LAST_CALIBRATION = {"path": "x", "selected_round": 1,
+                                      "class_prob": {"SPAM": 0.05, "HAM": 0.95}}
+        cfg = {"generation": {"class_balance": 0.9}}
+        result = pipeline._resolve_class_prob(cfg, [], SpamTask())
+        self.assertEqual(set(result), {"SPAM", "HAM"})
+        self.assertAlmostEqual(result["SPAM"], 0.9)
+        self.assertAlmostEqual(result["HAM"], 0.1)
+        # Must differ from what empirical/calibrated would give here, or this
+        # test cannot tell "the float was honoured" from "it was ignored".
+        self.assertNotAlmostEqual(result["SPAM"], 0.05)
+
+    def test_more_than_two_labels_float_raises_naming_the_mapping_form(self):
+        cfg = {"generation": {"class_balance": 0.9}}
+        with self.assertRaises(RuntimeError) as ctx:
+            pipeline._resolve_class_prob(cfg, [], _ThreeLabelTask())
+        message = str(ctx.exception)
+        self.assertIn("ambiguous", message)
+        # Names the mapping form to use instead, with the task's own labels.
+        self.assertIn("NEGATIVE", message)
+        self.assertIn("NEUTRAL", message)
+        self.assertIn("POSITIVE", message)
+
+    def test_float_outside_zero_to_one_raises(self):
+        cfg = {"generation": {"class_balance": 1.5}}
+        with self.assertRaises(RuntimeError) as ctx:
+            pipeline._resolve_class_prob(cfg, [], SpamTask())
+        self.assertIn("0..1", str(ctx.exception))
+
+        cfg_negative = {"generation": {"class_balance": -0.1}}
+        with self.assertRaises(RuntimeError):
+            pipeline._resolve_class_prob(cfg_negative, [], SpamTask())
+
+    def test_bool_is_rejected_not_silently_treated_as_a_probability(self):
+        # bool is a subclass of int in Python, so `class_balance: true` would
+        # otherwise silently pass the numeric branch as 1.0 — reject it
+        # explicitly instead.
+        cfg = {"generation": {"class_balance": True}}
+        with self.assertRaises(RuntimeError) as ctx:
+            pipeline._resolve_class_prob(cfg, [], SpamTask())
+        self.assertIn("boolean", str(ctx.exception))

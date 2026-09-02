@@ -796,6 +796,36 @@ def _resolve_class_prob(config: dict, real_reference, task=None) -> dict:
     labels = tuple(task.get_class_labels() or ()) if task is not None else ()
     cb = (config.get("generation") or {}).get("class_balance", "empirical")
 
+    if isinstance(cb, bool):
+        # bool is a subclass of int in Python, so `class_balance: true` would
+        # otherwise silently pass the numeric branch below as 1.0/1. Reject it
+        # explicitly rather than have a YAML typo silently become P(labels[0])==1.
+        raise RuntimeError(
+            f"generation.class_balance is a boolean ({cb!r}), which is not a "
+            "supported value. Use a float 0..1 (two-label tasks only) or an "
+            "explicit {label: weight} mapping."
+        )
+
+    if isinstance(cb, (int, float)):
+        # The binary legacy spelling of the mapping: P(labels[0]) is what
+        # class_balance has always meant for a two-label task (P(SPAM) with
+        # ("SPAM", "HAM")), so a bare number still means exactly that and every
+        # existing two-label config keeps working unchanged. It cannot express
+        # a weight for a third label, so it is only accepted at exactly two.
+        if len(labels) != 2:
+            example = ", ".join(f"{lbl}: <weight>" for lbl in labels)
+            raise RuntimeError(
+                f"generation.class_balance is a bare number ({cb!r}), which is "
+                f"ambiguous across {len(labels)} labels {labels!r} — use an "
+                f"explicit mapping instead, e.g. {{{example}}}."
+            )
+        f = float(cb)
+        if not 0.0 <= f <= 1.0:
+            raise RuntimeError(
+                f"generation.class_balance={f!r} is outside the valid range 0..1."
+            )
+        return {labels[0]: f, labels[1]: 1.0 - f}
+
     if isinstance(cb, dict):
         unknown = [k for k in cb if k not in labels]
         if unknown:
