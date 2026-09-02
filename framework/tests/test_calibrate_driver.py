@@ -467,13 +467,54 @@ class CliKeyResolutionTests(_Bench):
 
 
 class BalanceVectorCalibrationTests(unittest.TestCase):
-    def test_informative_count_counts_signal_bearing_labels(self):
+    def test_informative_count_on_the_real_spam_task(self):
+        # Weak smoke check only: SpamTask's SPAM label is simultaneously
+        # labels[0] (the old positional rule's answer) and the only
+        # signal-bearing label (the new template rule's answer), so this
+        # fixture passes identically under both implementations and cannot
+        # by itself tell them apart -- see
+        # test_informative_count_disagrees_with_the_old_positional_rule
+        # below for the discriminating case.
         from framework import calibrate
         from framework.tasks.spam.task import SpamTask
         rows = [{"text": "a", "label": "SPAM"}, {"text": "b", "label": "HAM"},
                 {"text": "c", "label": "SPAM"}]
         # SPAM's template asks for {error_spec}; HAM's does not.
         self.assertEqual(calibrate.informative_count(SpamTask(), rows), 2)
+
+    def test_informative_count_disagrees_with_the_old_positional_rule(self):
+        # SpamTask's case above cannot distinguish "counts labels[0]" (the
+        # old rule) from "counts labels whose own template carries
+        # {error_spec}" (the new rule), because SPAM is both. This stub's
+        # FIRST label is deliberately NOT the signal-bearing one, so the two
+        # rules give different answers on the same rows.
+        from framework import calibrate
+
+        class _DisagreeingLabelOrderTask:
+            """Duck-typed stand-in: only get_generation_strategy,
+            get_class_labels and get_inverse_class_prompts are needed by
+            informative_count's class_conditional branch."""
+
+            def get_generation_strategy(self):
+                return "class_conditional"
+
+            def get_class_labels(self):
+                return ("NEUTRAL", "URGENT", "CALM")
+
+            def get_inverse_class_prompts(self):
+                # Only URGENT's template asks for signals; it is NOT
+                # labels[0].
+                return {"URGENT": "Rewrite the message urgently: {error_spec}."}
+
+        rows = [{"text": "a", "label": "NEUTRAL"}, {"text": "b", "label": "URGENT"},
+                {"text": "c", "label": "URGENT"}, {"text": "d", "label": "CALM"}]
+        # Old positional rule (positive = labels[0] == "NEUTRAL") would have
+        # counted the single NEUTRAL row: 1. The new template-driven rule
+        # counts the two URGENT rows instead, since URGENT is the only label
+        # whose own prompt carries {error_spec}: 2. These disagree, so this
+        # fixture genuinely discriminates between the two implementations.
+        self.assertEqual(
+            calibrate.informative_count(_DisagreeingLabelOrderTask(), rows), 2)
 
     def test_stage_b_writes_a_balance_vector_into_the_artifact(self):
         import json, os, tempfile
