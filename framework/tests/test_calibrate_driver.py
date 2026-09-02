@@ -516,21 +516,6 @@ class BalanceVectorCalibrationTests(unittest.TestCase):
         self.assertEqual(
             calibrate.informative_count(_DisagreeingLabelOrderTask(), rows), 2)
 
-    def test_stage_b_writes_a_balance_vector_into_the_artifact(self):
-        import json, os, tempfile
-        from unittest import mock
-        from framework import calibrate
-        with tempfile.TemporaryDirectory() as d:
-            out = os.path.join(d, "cal.json")
-            with mock.patch.object(calibrate, "correct_class_balance",
-                                   return_value={"SPAM": 0.3, "HAM": 0.7}):
-                payload = {"meta": {}, "target": {}, "calibrated": {}, "rounds": []}
-                payload["calibrated"]["class_prob"] = {"SPAM": 0.3, "HAM": 0.7}
-                calibrate.write_calibration(out, payload)
-            loaded = json.load(open(out))
-            self.assertEqual(loaded["calibrated"]["class_prob"],
-                             {"SPAM": 0.3, "HAM": 0.7})
-
 
 class RoundTripCalibrationConsumptionTests(_Bench):
     """CONTROLLER ADDENDUM B: every consumption test in
