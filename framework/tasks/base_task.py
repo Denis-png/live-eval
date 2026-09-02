@@ -147,8 +147,10 @@ class BaseTask(ABC):
     def get_generation_strategy(self) -> str:
         """How the pipeline generates synthetic data for this task:
           "corruption"        — corrupt a source text (forward/inverse); text→text tasks.
-          "class_conditional" — sample a target class, then generate an example of it;
-                                classification tasks. Ignores generation.mode.
+          "class_conditional" — draw a target label, then generate an example of it;
+                                classification tasks. On the mode axis like the
+                                others — inverse IMPOSES the drawn label on a seed
+                                of any class, forward INHERITS the seed's own.
           "structured"        — generate a whole structured benchmark artifact from
                                 a profile/spec; on the mode axis like the others —
                                 inverse imposes a sampled structural target, forward
