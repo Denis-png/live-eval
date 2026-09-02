@@ -419,10 +419,6 @@ class StageBArtifactTests(_Bench):
                          {"SPAM": 0.42, "HAM": 0.58})
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CliKeyResolutionTests(_Bench):
     """framework.calibrate's CLI must resolve api_keys the way framework.main does.
 
@@ -517,6 +513,120 @@ class BalanceVectorCalibrationTests(unittest.TestCase):
             calibrate.informative_count(_DisagreeingLabelOrderTask(), rows), 2)
 
 
+class _DifferingFamiliesTask:
+    """Duck-typed class_conditional task whose three prompt families put
+    {error_spec} on DIFFERENT labels.
+
+    Spam cannot discriminate here — all three of its families put {error_spec}
+    on SPAM only — so a stub is the only way to tell "reads the cell's own
+    prompt family" from "always reads the inverse family"."""
+
+    def get_generation_strategy(self):
+        return "class_conditional"
+
+    def get_class_labels(self):
+        return ("A", "B", "C")
+
+    def get_inverse_class_prompts(self):
+        return {"A": "impose A with {error_spec} on {sentence}",
+                "B": "impose B on {sentence}",
+                "C": "impose C on {sentence}"}
+
+    def get_forward_prompts(self):
+        return {"A": "rewrite A from {sentence}",
+                "B": "rewrite B emphasising {error_spec} from {sentence}",
+                "C": "rewrite C from {sentence}"}
+
+    def get_seedless_class_prompts(self):
+        return {"A": "write A from {spec}",
+                "B": "write B from {spec}",
+                "C": "write C from {spec} using {error_spec}"}
+
+
+class CellAwareSignalBearingTests(unittest.TestCase):
+    """The signal-bearing set is a property of the CELL, not of the task.
+
+    Both consumers — the informative sample count and Stage A's forced balance
+    — used to compute it off get_inverse_class_prompts() no matter which cell
+    was being calibrated. `--mode forward` is reachable for class_conditional
+    and renders a different prompt family, so for a task whose families differ
+    in {error_spec} coverage Stage A would force the whole budget onto labels
+    that measure nothing in that cell. One helper now answers it, by cell."""
+
+    CELLS = {
+        ("inverse", False): ["A"],
+        ("inverse", True): ["A"],   # inverse+seedless imposes over carriers
+        ("forward", False): ["B"],
+        ("forward", True): ["C"],
+    }
+
+    def test_every_cell_reads_its_own_prompt_family(self):
+        task = _DifferingFamiliesTask()
+        for (mode, seedless), expected in self.CELLS.items():
+            with self.subTest(mode=mode, seedless=seedless):
+                self.assertEqual(
+                    calibrate.signal_bearing_labels(task, mode=mode, seedless=seedless),
+                    expected)
+
+    def test_default_cell_is_the_class_conditional_default(self):
+        # pipeline._run_generation defaults class_conditional to mode=inverse,
+        # seedless=false; the helper's defaults must name the same cell.
+        self.assertEqual(
+            calibrate.signal_bearing_labels(_DifferingFamiliesTask()), ["A"])
+
+    def test_stage_a_forces_mass_onto_this_cells_bearing_labels(self):
+        task = _DifferingFamiliesTask()
+        for (mode, seedless), expected in self.CELLS.items():
+            with self.subTest(mode=mode, seedless=seedless):
+                self.assertEqual(
+                    calibrate.stage_a_class_balance(task, mode=mode, seedless=seedless),
+                    {expected[0]: 1.0})
+
+    def test_stage_a_splits_evenly_across_several_bearing_labels(self):
+        class _TwoBearing(_DifferingFamiliesTask):
+            def get_inverse_class_prompts(self):
+                return {"A": "a {error_spec} {sentence}",
+                        "B": "b {error_spec} {sentence}",
+                        "C": "c {sentence}"}
+
+        self.assertEqual(calibrate.stage_a_class_balance(_TwoBearing()),
+                         {"A": 0.5, "B": 0.5})
+
+    def test_stage_a_returns_none_when_no_label_bears_signals(self):
+        # Nothing to force onto — the caller keeps its empirical balance.
+        class _NoBearing(_DifferingFamiliesTask):
+            def get_inverse_class_prompts(self):
+                return {lbl: f"{lbl} {{sentence}}" for lbl in ("A", "B", "C")}
+
+        self.assertIsNone(calibrate.stage_a_class_balance(_NoBearing()))
+
+    def test_informative_count_follows_the_cell_too(self):
+        # The two consumers must not be able to disagree: the same rows count
+        # differently per cell, and each cell's count matches its bearing label.
+        task = _DifferingFamiliesTask()
+        rows = [{"label": "A"}, {"label": "A"}, {"label": "B"}, {"label": "C"},
+                {"label": "C"}, {"label": "C"}]
+        expected_counts = {("inverse", False): 2, ("inverse", True): 2,
+                           ("forward", False): 1, ("forward", True): 3}
+        for (mode, seedless), expected in expected_counts.items():
+            with self.subTest(mode=mode, seedless=seedless):
+                self.assertEqual(
+                    calibrate.informative_count(task, rows, mode=mode, seedless=seedless),
+                    expected)
+
+    def test_spam_is_unaffected_because_its_families_agree(self):
+        # The drift is latent for spam: all three families put {error_spec} on
+        # SPAM only, so every cell gives the same answer and the shipped
+        # behaviour is unchanged by making the rule cell-aware.
+        from framework.tasks.spam.task import SpamTask
+        task = SpamTask()
+        for mode, seedless in self.CELLS:
+            with self.subTest(mode=mode, seedless=seedless):
+                self.assertEqual(
+                    calibrate.signal_bearing_labels(task, mode=mode, seedless=seedless),
+                    ["SPAM"])
+
+
 class RoundTripCalibrationConsumptionTests(_Bench):
     """CONTROLLER ADDENDUM B: every consumption test in
     test_calibration_consumption.py seeds pipeline._LAST_CALIBRATION by hand,
@@ -565,3 +675,7 @@ class RoundTripCalibrationConsumptionTests(_Bench):
         empirical_spam_share = 30 / 90
         self.assertNotAlmostEqual(ctx["class_prob"]["SPAM"],
                                   empirical_spam_share, places=2)
+
+
+if __name__ == "__main__":
+    unittest.main()
