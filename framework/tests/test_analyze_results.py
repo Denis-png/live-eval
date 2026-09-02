@@ -111,12 +111,17 @@ class ModeAwarePlottingTests(unittest.TestCase):
     def test_legacy_spam_session_now_resolves_to_inverse_not_dash(self):
         # Regression guard for IMPORTANT 1: a realistic legacy spam session
         # (mode=None, strategy="class_conditional" — _build_meta always
-        # writes "strategy") must group as "inverse", not fall into the dash
-        # bucket the test above exercises directly.
+        # writes "strategy") must resolve its MODE to "inverse", not fall into
+        # the dash bucket the test above exercises directly. It additionally
+        # carries no `class_conditional_semantics`, which reads as the
+        # pre-symmetry "asymmetric" behaviour and keeps it out of the bucket a
+        # re-run under today's semantics occupies (see
+        # test_analyze_strategy_grouping.py).
         legacy_strategy = _strategy_of(
             {"mode": None, "strategy": "class_conditional", "task": "spam", "model": "m"}
         )
-        self.assertEqual(legacy_strategy, "inverse")
+        self.assertEqual(legacy_strategy, "inverse@asymmetric")
+        self.assertNotEqual(legacy_strategy, "-")
 
     def test_model_impact_filename_keeps_mode_suffix_for_real_modes(self):
         rows = [

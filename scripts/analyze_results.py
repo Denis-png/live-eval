@@ -2,9 +2,11 @@
 
 Scans one or more results roots for session dirs (anything holding a
 results.json), keeps the best session per (task, strategy, generation model)
-— strategy being mode plus the seedless flag, so a seedless run never
-shadows or merges with a seeded run of the same mode — and argues the three
-questions the archive exists to answer:
+— strategy being mode plus the seedless flag (plus, for class_conditional
+sessions, the generation semantics they were produced under), so neither a
+seedless run nor a run of superseded semantics shadows or merges with a seeded
+run of the same mode — and argues the three questions the archive exists to
+answer:
 
   1. fidelity   — how close are generated scores to real ones, and do generated
                   benchmarks rank the evaluated models the way the real one does
@@ -29,6 +31,7 @@ import textwrap
 from collections import defaultdict
 from datetime import datetime
 
+from framework.generators.base_generator import CLASS_CONDITIONAL_SEMANTICS
 from framework.plotting.plots import flatten_mean_std, flatten_point, _visible
 
 # ── Fixed entity colors (validated: Okabe-Ito subset, all-pairs CVD-checked;
@@ -117,9 +120,29 @@ def _strategy_of(meta: dict) -> str:
 
     Note: this is NOT `meta["strategy"]` — that key already means the task's
     generation shape ("corruption" / "class_conditional") and is untouched
-    here."""
+    here.
+
+    A `class_conditional` session ALSO carries the generation semantics its
+    samples were produced under (`meta.class_conditional_semantics`; absent
+    means the pre-symmetry `"asymmetric"` behaviour, where the non-signal class
+    was a paraphrase of its own class rather than an imposition on any seed).
+    The cell name alone does not separate those: an archived spam `inverse`
+    session and a re-run of the identical config under symmetric semantics
+    would otherwise land on the same key, and `dedup_sessions` would silently
+    drop whichever had fewer completed runs — pooling two different generation
+    behaviours into one forward-vs-inverse delta. Anything NOT generated under
+    the semantics the code implements today is quarantined into its own
+    `<cell>@<semantics>` bucket. Current-semantics sessions keep the plain cell
+    name, so markers, forward/inverse pairing and the analysis tables are
+    unchanged for everything this code can still produce. Non-class_conditional
+    sessions (GEC's `corruption`, taxonomy's `structured`) never carry the field
+    and are untouched by this."""
     mode = meta.get("mode") or ("inverse" if meta.get("strategy") == "class_conditional" else "forward")
-    return f"{mode}+seedless" if meta.get("seedless") else mode
+    cell = f"{mode}+seedless" if meta.get("seedless") else mode
+    if meta.get("strategy") != "class_conditional":
+        return cell
+    semantics = meta.get("class_conditional_semantics") or "asymmetric"
+    return cell if semantics == CLASS_CONDITIONAL_SEMANTICS else f"{cell}@{semantics}"
 
 
 # ── Session discovery ─────────────────────────────────────────
