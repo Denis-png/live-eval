@@ -12,12 +12,10 @@ api_keys:
 # TweetEval sentiment: 3-class Twitter data (NEG=0, NEU=1, POS=2).
 # Same benchmark used to train the bertweet and RoBERTa sentiment models below.
 dataset:
-  source: huggingface
-  huggingface:
-    name: "cardiffnlp/tweet_eval"
-    subset: "sentiment"
-    split: "test"
-    streaming: true
+  source: local
+  local:
+    path: "framework/data/sentiment/tweeteval_base_150.csv"
+    format: csv
 
 # ── Generation ───────────────────────────────────────────────────────────────
 # Strategy: "corruption" (default) — the LLM rewrites a real tweet, injecting
@@ -25,8 +23,8 @@ dataset:
 # Only "forward" mode is meaningful for corruption tasks (text→text, no class
 # conditioning). Judge is disabled — the prompt format is deterministic enough.
 generation:
-  mode: forward
-  seedless: false
+  mode: inverse
+  seedless: true
   provider: "openrouter"
   model: "deepseek/deepseek-v4-flash"
   temperature: 0.9

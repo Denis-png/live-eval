@@ -314,6 +314,11 @@ def _profile_taxonomy(config: dict[str, Any], output: str) -> str:
 
 def main() -> None:
     """Load the selected benchmark dataset, profile it, and save JSON output."""
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
     args = parse_args()
     config = load_config(args.config)
     if args.task == "taxonomy" and args.topics:
@@ -325,6 +330,9 @@ def main() -> None:
     elif args.task == "spam":
         _profile_spam(config, args.output,
                       topic_call, args.topic_sample_size)
+    elif args.task == "sentiment":
+        _profile_sentiment(config, args.output or DEFAULT_SENTIMENT_OUTPUT,
+                           topic_call, args.topic_sample_size)
     else:
         _profile_gec(config, args.output,
                      topic_call, args.topic_sample_size)
