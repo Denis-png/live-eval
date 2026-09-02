@@ -115,9 +115,12 @@ so it can be inspected later.
                          `mode` (`forward` | `inverse`) and `seedless`
                          (`true` | `false`, default `false`).
    - `class_balance`   — `empirical` (default: the real dataset's per-label
-                         distribution) or an explicit mapping, e.g. `{SPAM: 0.3, HAM: 0.7}`.
-                         An explicit mapping is a user instruction and beats a calibrated
-                         balance; calibration refines `empirical` only. Values are
+                         distribution), an explicit mapping, e.g. `{SPAM: 0.3, HAM: 0.7}`,
+                         or a bare float, which is the two-label spelling of that mapping
+                         (`0.3` means `{first label: 0.3, second: 0.7}`) and raises for a
+                         task with three or more labels, where it cannot say what it means.
+                         An explicit value is a user instruction and beats a calibrated
+                         balance; calibration refines `empirical` only. Mapping values are
                          normalized, so relative weights are what matter. Naming a label
                          the task does not declare aborts before any API call.
    - `evaluation.real_baseline` — also score the task models on the real benchmark

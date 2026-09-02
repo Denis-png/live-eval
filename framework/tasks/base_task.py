@@ -84,10 +84,16 @@ class BaseTask(ABC):
         return None
 
     def get_forward_prompts(self) -> dict[str, str]:
-        """{label: prompt} for same-class imitation in classification forward
-        mode. Placeholder {sentence}; the positive class also gets {error_spec}
-        so forward generation can target the empirical signal mix instead of
-        inheriting whatever signals its seed happened to carry."""
+        """{label: prompt} for INHERITING a seed's own class in classification
+        forward mode.
+
+        Placeholder {sentence}. A label whose template also contains
+        {error_spec} receives a sampled signal mix, so forward generation can
+        target the empirical mix instead of inheriting whatever signals its seed
+        happened to carry — the same template rule
+        get_inverse_class_prompts() follows, and the only thing that decides it.
+        There is no "positive class"; a label declares its own needs.
+        """
         return {}
 
     def get_class_labels(self) -> tuple[str, ...] | None:
@@ -112,8 +118,13 @@ class BaseTask(ABC):
         return {}
 
     def get_seedless_class_prompts(self) -> dict[str, str]:
-        """{label: prompt} for direct per-class seedless generation.
-        Placeholders: {spec} and, for the positive class, {error_spec}."""
+        """{label: prompt} for direct per-label seedless generation.
+
+        Placeholder {spec} (a rendered content spec, in place of a real seed).
+        A label whose template also contains {error_spec} receives a sampled
+        signal mix — the same template rule the other two prompt families
+        follow, not a rule about which label is "positive".
+        """
         return {}
 
     def get_profile_side(self, mode: str) -> str:

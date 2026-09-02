@@ -639,8 +639,18 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                         f"seedless=true (no carrier_prompt)."
                     )
                 rng = random.Random()
-                # The carrier is drawn from the LAST label's content profile,
-                # because it is the class being transformed away from.
+                # The rule is: the LAST label's content profile supplies the
+                # carrier. Under symmetric semantics there is no "class being
+                # transformed away from" — the target label is drawn
+                # independently of the carrier and imposed on it, so any label's
+                # profile would be a defensible source. For spam this resolves
+                # to HAM (labels = ("SPAM", "HAM")), the same carrier the
+                # asymmetric implementation produced, so the cell's behaviour is
+                # unchanged. For a task with three or more labels the choice is
+                # arbitrary and unspecified: nothing in the design says which
+                # class a seedless carrier should be drawn from, and the first
+                # such task should settle it deliberately rather than inherit
+                # this line.
                 specs = [
                     render_spec(sample_content_spec(profile, rng, label=labels[-1]))
                     for _ in range(sample_size)
