@@ -110,6 +110,42 @@ class SpamCellDispatchTests(unittest.TestCase):
         self.assertIn("data/spam_ref.csv", message)
         self.assertFalse(self.generator.generate_class_conditional.called)
 
+    def test_inverse_missing_a_labels_prompt_raises_before_any_generator_call(self):
+        """The sixth unsupported-cell guard, and the only one that was
+        uncovered: inverse renders EVERY drawn label through
+        get_inverse_class_prompts(), so a label present in get_class_labels()
+        but absent from that mapping must abort before any API call — not
+        lazily, once rng happens to draw the uncovered label somewhere between
+        the first and the last paid call of the run."""
+        only_spam = {"SPAM": SpamTask().get_inverse_class_prompts()["SPAM"]}
+        rows = [{"text": "hi", "label": "HAM"}, {"text": "WIN", "label": "SPAM"}]
+        with mock.patch.object(SpamTask, "get_inverse_class_prompts",
+                               return_value=only_spam):
+            with mock.patch.object(SpamTask, "_load_reference_rows", return_value=rows):
+                with self.assertRaises(RuntimeError) as ctx:
+                    _run_generation(self.generator, self.task,
+                                    _config("inverse", False),
+                                    [{"incorrect": "see you at lunch"}],
+                                    DIST, None, 0.5, profile=None)
+        message = str(ctx.exception)
+        self.assertIn("spam", message)
+        self.assertIn("HAM", message)                        # names the label
+        self.assertIn("get_inverse_class_prompts", message)  # and the accessor
+        self.assertFalse(self.generator.generate_class_conditional.called)
+
+    def test_inverse_seedless_missing_prompt_raises_before_synthesizing_carriers(self):
+        """Same guard on the seedless half of inverse: carrier synthesis is
+        itself a paid generator call, so the check must precede it too."""
+        only_spam = {"SPAM": SpamTask().get_inverse_class_prompts()["SPAM"]}
+        with mock.patch.object(SpamTask, "get_inverse_class_prompts",
+                               return_value=only_spam):
+            with self.assertRaises(RuntimeError) as ctx:
+                _run_generation(self.generator, self.task, _config("inverse", True),
+                                [], DIST, None, 0.5, profile=PROFILE)
+        self.assertIn("HAM", str(ctx.exception))
+        self.assertFalse(self.generator.generate_carriers.called)
+        self.assertFalse(self.generator.generate_class_conditional.called)
+
     def test_forward_seedless_raises_without_seedless_class_prompts(self):
         """A spam task double that lacks seedless_class_prompts has no per-label
         template to drive the seed_policy="none" cell — must fail fast."""

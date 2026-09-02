@@ -289,6 +289,36 @@ class ClassProbPrecedenceTests(unittest.TestCase):
             pipeline._resolve_class_prob(cfg, real_reference, SpamTask()),
             {"SPAM": 0.25, "HAM": 0.75})
 
+    def test_unknown_label_in_the_mapping_raises_before_any_api_call(self):
+        # A typo must not silently generate nothing of that class: the mapping
+        # would normalise around the labels it DOES know and the misspelt one
+        # would just never be drawn, producing a whole paid run at the wrong
+        # balance with no diagnostic. _resolve_class_prob runs during context
+        # build, before any generator call.
+        cfg = {"generation": {"class_balance": {"SPAM": 0.3, "HAMM": 0.7}}}
+        with self.assertRaises(RuntimeError) as ctx:
+            pipeline._resolve_class_prob(cfg, [], SpamTask())
+        message = str(ctx.exception)
+        self.assertIn("HAMM", message)          # names the offender
+        self.assertIn("SPAM", message)          # and the labels that do exist
+        self.assertIn("HAM", message)
+
+    def test_unknown_label_raises_even_alongside_only_known_ones(self):
+        # The check is "every key is declared", not "at least one key is".
+        cfg = {"generation": {"class_balance": {"SPAM": 0.3, "HAM": 0.6,
+                                                "PHISHING": 0.1}}}
+        with self.assertRaises(RuntimeError) as ctx:
+            pipeline._resolve_class_prob(cfg, [], SpamTask())
+        self.assertIn("PHISHING", str(ctx.exception))
+
+    def test_a_partial_mapping_of_known_labels_is_still_accepted(self):
+        # Naming a subset is not an error — the unnamed label simply gets zero
+        # weight. Only names the task does not declare abort.
+        result = pipeline._resolve_class_prob(
+            {"generation": {"class_balance": {"SPAM": 1.0}}}, [], SpamTask())
+        self.assertAlmostEqual(result["SPAM"], 1.0)
+        self.assertAlmostEqual(result["HAM"], 0.0)
+
 
 class _ThreeLabelTask:
     """Duck-typed stand-in for a task with more than two labels — only
