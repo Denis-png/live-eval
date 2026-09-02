@@ -20,63 +20,21 @@ def _survival(block: dict) -> float | None:
     return survived / attempted
 
 
-def correct_class_prob(
-    target_fraction: float,
-    attrition: dict,
-    *,
-    n: int,
-    positive_label: str,
-    negative_label: str,
-) -> float | None:
-    """Request probability that yields `target_fraction` positives after drops.
-
-        class_prob* = (f / s_pos) / (f / s_pos + (1 - f) / s_neg)
-
-    Returns None when the measured deviation is inside the binomial noise floor
-    (2 standard errors), when a class produced nothing, or when the correction
-    is not a usable probability. None means "leave class_prob alone".
-    """
-    s_pos = _survival(attrition.get(positive_label))
-    s_neg = _survival(attrition.get(negative_label))
-    if s_pos is None or s_neg is None or n <= 0:
-        return None
-
-    f = float(target_fraction)
-    if not 0.0 < f < 1.0:
-        return None
-
-    # Fraction the current rates would actually deliver at class_prob == f.
-    delivered_pos = f * s_pos
-    delivered_neg = (1.0 - f) * s_neg
-    if delivered_pos + delivered_neg <= 0:
-        return None
-    delivered = delivered_pos / (delivered_pos + delivered_neg)
-
-    noise_floor = 2.0 * math.sqrt(f * (1.0 - f) / n)
-    if abs(delivered - f) <= noise_floor:
-        return None
-
-    pos = f / s_pos
-    neg = (1.0 - f) / s_neg
-    corrected = pos / (pos + neg)
-    if not 0.0 < corrected <= 1.0:
-        return None
-    return corrected
-
-
 def correct_class_balance(
     target: dict[str, float],
     attrition: dict,
     *,
     n: int,
 ) -> dict[str, float] | None:
-    """N-label generalisation of correct_class_prob.
+    """Balance vector that yields `target` after differential attrition.
 
         corrected[label] ∝ target[label] / survival[label]      (then normalised)
 
-    Reduces exactly to the binary form for two labels. Labels are read off
+    Holds any number of labels, and reduces exactly to the binary closed form
+    `(f/s_pos) / (f/s_pos + (1-f)/s_neg)` for two of them. Labels are read off
     `target`, so no positive/negative parameters are needed — carrying one
-    task's class names as defaults is what made the binary version spam-shaped.
+    task's class names in the signature is what made the superseded binary
+    version spam-shaped.
 
     Returns None (leave the balance alone) when there is nothing to correct:
     fewer than two labels, no usable survival data, or every label's delivered
@@ -84,7 +42,9 @@ def correct_class_balance(
     unknown (zero survivors) has its weight left equal to its raw target share —
     not divided by a guessed rate — while the rest are corrected around it; the
     vector as a whole still renormalises, so that label's OWN final share still
-    moves (guessing its rate would be worse than not correcting it).
+    moves (guessing its rate would be worse than not correcting it). The binary
+    version returned None outright in that case; correcting the labels whose
+    rates ARE known is strictly more information than discarding the round.
     """
     if len(target) < 2 or n <= 0:
         return None

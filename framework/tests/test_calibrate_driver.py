@@ -398,9 +398,9 @@ class StageBArtifactTests(_Bench):
         # I4: nothing previously asserted that Stage B's class-balance
         # correction actually reaches calibrated.class_prob on disk -- the
         # name pipeline._resolve_class_prob (via _LAST_CALIBRATION) and a
-        # future run's load_calibration both read. Stage B now corrects a
-        # full balance VECTOR (correct_class_balance), not a single positive-
-        # class float (correct_class_prob).
+        # future run's load_calibration both read. Stage B corrects a full
+        # balance VECTOR (correct_class_balance), not the single positive-class
+        # float the superseded binary helper returned.
         from framework.calibration.artifact import load_calibration
 
         gen = CompliantFake({k: 0.9 for k in _MARKERS})
