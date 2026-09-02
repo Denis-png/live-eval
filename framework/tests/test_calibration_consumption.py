@@ -7,6 +7,7 @@ from unittest import mock
 
 from framework import pipeline
 from framework.calibration.artifact import write_calibration
+from framework.generators.base_generator import CLASS_CONDITIONAL_SEMANTICS
 from framework.tasks.gec.task import GECTask
 from framework.tasks.spam.task import SpamTask
 
@@ -59,7 +60,8 @@ class ConsumptionTests(_Bench):
         first = sorted(calibrated["type_dist"])[0]
         calibrated["type_dist"][first] = calibrated["type_dist"][first] + 0.05
         write_calibration(self.artifact, {
-            "meta": {}, "target": empirical, "calibrated": calibrated,
+            "meta": {"class_conditional_semantics": CLASS_CONDITIONAL_SEMANTICS},
+            "target": empirical, "calibrated": calibrated,
             "selected_round": 1, "rounds": [],
         })
         out = pipeline.load_error_distribution(cfg, self._real_data(cfg), self.task)
@@ -70,7 +72,8 @@ class ConsumptionTests(_Bench):
         empirical = self.task.profile_error_distribution(
             self._real_data(cfg), config=cfg)
         write_calibration(self.artifact, {
-            "meta": {}, "target": empirical, "calibrated": empirical,
+            "meta": {"class_conditional_semantics": CLASS_CONDITIONAL_SEMANTICS},
+            "target": empirical, "calibrated": empirical,
             "selected_round": 0, "rounds": [],
         })
         out = pipeline.load_error_distribution(cfg, self._real_data(cfg), self.task)
@@ -112,7 +115,8 @@ class MetaTests(_Bench):
         empirical = self.task.profile_error_distribution(
             self._real_data(cfg), config=cfg)
         write_calibration(self.artifact, {
-            "meta": {}, "target": empirical, "calibrated": empirical,
+            "meta": {"class_conditional_semantics": CLASS_CONDITIONAL_SEMANTICS},
+            "target": empirical, "calibrated": empirical,
             "selected_round": 2, "rounds": [],
         })
         with redirect_stdout(io.StringIO()):
@@ -175,7 +179,8 @@ class ProvenanceIsolationTests(unittest.TestCase):
         empirical = spam_task.profile_error_distribution(spam_real, config=spam_cfg)
         artifact = os.path.join(self.dir.name, "spam_cal.json")
         write_calibration(artifact, {
-            "meta": {}, "target": empirical, "calibrated": empirical,
+            "meta": {"class_conditional_semantics": CLASS_CONDITIONAL_SEMANTICS},
+            "target": empirical, "calibrated": empirical,
             "selected_round": 3, "rounds": [],
         })
         spam_cfg["generation"]["calibration_path"] = artifact

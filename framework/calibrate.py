@@ -29,6 +29,7 @@ from framework.calibration.controller import (
     stalled,
     update_request,
 )
+from framework.generators.base_generator import CLASS_CONDITIONAL_SEMANTICS
 
 DEFAULT_ROUNDS = 3
 DEFAULT_ALPHA = 0.5
@@ -194,6 +195,9 @@ def run_calibration(
             "alpha": alpha, "tolerance": tolerance, "rounds": rounds,
             "forced_class_prob": forced_class_prob,
             "timestamp": f"{datetime.now():%Y-%m-%dT%H:%M:%S}",
+            "class_conditional_semantics": (
+                CLASS_CONDITIONAL_SEMANTICS if strategy == "class_conditional" else None
+            ),
         },
         "target": target,
         "calibrated": dict(target),

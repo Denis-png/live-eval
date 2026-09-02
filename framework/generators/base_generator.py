@@ -19,6 +19,13 @@ _REFUSAL_RE = re.compile(
 # Reasoning models (e.g. minimax-m3) wrap chain-of-thought in <think>…</think>.
 _THINK_BLOCK_RE = re.compile(r"(?is)<think>.*?</think>")
 
+# Names what class_conditional's inverse cell DOES, so a calibration artifact
+# measured under one behaviour cannot silently steer another. Bump this string
+# whenever the generated distribution changes shape; "asymmetric" was the
+# pre-symmetry behaviour where the negative class was a paraphrase of its own
+# class rather than an imposition on any seed.
+CLASS_CONDITIONAL_SEMANTICS = "symmetric"
+
 
 class TruncatedResponse(RuntimeError):
     """The provider stopped because it hit max_tokens — the response is

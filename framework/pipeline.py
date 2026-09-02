@@ -8,6 +8,7 @@ from datetime import datetime
 
 import numpy as np
 from framework.data_loading import iter_local_rows, resolve_dataset_config
+from framework.generators.base_generator import CLASS_CONDITIONAL_SEMANTICS
 from framework.generators.factory import load_generator
 from framework.tasks.base_task import BaseTask
 
@@ -205,6 +206,16 @@ def _apply_calibration(config: dict, task, empirical: dict) -> dict:
               "benchmark setpoint (dataset or sample size changed); using the "
               "empirical distribution instead.", file=sys.stderr)
         return empirical
+
+    if strategy == "class_conditional":
+        stored = (payload.get("meta") or {}).get("class_conditional_semantics")
+        if stored != CLASS_CONDITIONAL_SEMANTICS:
+            print(f"[WARN] calibration {path!r} was measured under "
+                  f"{stored or 'asymmetric (pre-marker)'} class-conditional "
+                  f"semantics, but this build generates "
+                  f"{CLASS_CONDITIONAL_SEMANTICS}. Using the empirical "
+                  "distribution; recalibrate to use it.", file=sys.stderr)
+            return empirical
 
     if not usable:
         print(f"[WARN] calibration {path!r} has no usable distributions; "
@@ -471,6 +482,10 @@ def _build_meta(config: dict, task, runs_completed: int,
         "real_baseline": real_baseline,
         "class_balance": gen.get("class_balance", "empirical"),
         "calibration": _LAST_CALIBRATION,
+        "class_conditional_semantics": (
+            CLASS_CONDITIONAL_SEMANTICS
+            if strategy == "class_conditional" else None
+        ),
     }
 
 
