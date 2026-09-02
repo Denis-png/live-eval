@@ -56,10 +56,19 @@ class SpamSeedPoolTests(unittest.TestCase):
             pool = task.get_seed_pool({"dataset": {}}, [{"incorrect": "x"}], "forward")
         self.assertEqual(pool, rows)
 
-    def test_inverse_mode_returns_real_data_unchanged(self):
+    def test_inverse_mode_returns_the_same_labeled_both_class_pool_as_forward(self):
+        # Pre-symmetry, inverse returned real_data unchanged — parse_row's
+        # HAM-only output — so inverse could only ever impose a label onto a
+        # HAM seed. Inverse now draws its target independently of the seed's
+        # own class, so it needs SPAM seeds too: the same both-class rows
+        # forward already used, reshaped to real_data's "incorrect" field.
         task = SpamTask()
+        rows = [{"text": "hi", "label": "HAM"}, {"text": "WIN", "label": "SPAM"}]
         real = [{"incorrect": "x"}]
-        self.assertIs(task.get_seed_pool({"dataset": {}}, real, "inverse"), real)
+        with mock.patch.object(SpamTask, "_load_reference_rows", return_value=rows):
+            pool = task.get_seed_pool({"dataset": {}}, real, "inverse")
+        self.assertEqual(pool, [{"incorrect": "hi", "label": "HAM"},
+                                 {"incorrect": "WIN", "label": "SPAM"}])
 
 
 if __name__ == "__main__":

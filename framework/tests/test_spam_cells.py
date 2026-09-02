@@ -34,13 +34,22 @@ class SpamCellDispatchTests(unittest.TestCase):
     def _policy(self):
         return self.generator.generate_class_conditional.call_args.kwargs["seed_policy"]
 
-    def test_inverse_seeded_uses_impose_with_real_data(self):
+    def test_inverse_seeded_uses_impose_with_the_labeled_both_class_pool(self):
+        # Pre-symmetry, inverse seeded straight from real_data — parse_row's
+        # HAM-only output — so imposing SPAM was impossible: there were no
+        # SPAM seeds in the pool. Inverse now goes through get_seed_pool, the
+        # same labeled both-class source forward uses, so it can impose either
+        # label onto either class's seed.
+        rows = [{"text": "hi", "label": "HAM"}, {"text": "WIN", "label": "SPAM"}]
         real = [{"incorrect": "see you at lunch"}]
-        _run_generation(self.generator, self.task, _config("inverse", False), real,
-                        DIST, None, 0.5, profile=None)
+        with mock.patch.object(SpamTask, "_load_reference_rows", return_value=rows):
+            _run_generation(self.generator, self.task, _config("inverse", False), real,
+                            DIST, None, 0.5, profile=None)
         self.assertEqual(self._policy(), "impose")
         kwargs = self.generator.generate_class_conditional.call_args.kwargs
-        self.assertEqual(kwargs["real_seeds"], real)
+        self.assertEqual(kwargs["real_seeds"], [{"incorrect": "hi", "label": "HAM"},
+                                                  {"incorrect": "WIN", "label": "SPAM"}])
+        self.assertEqual(kwargs["seed_field"], "incorrect")
         self.assertFalse(self.generator.generate_carriers.called)
 
     def test_inverse_seedless_feeds_carriers_as_seeds(self):

@@ -34,14 +34,22 @@ class SpamTask(BaseTask):
 
     def get_seed_pool(self, config: dict, real_data: list[dict], mode: str,
                       *, seed_weights: dict | None = None, rng=None) -> list[dict]:
-        """Forward mode imitates within a class, so it needs labeled seeds of
-        BOTH classes — parse_row keeps HAM only. Inverse keeps today's pool.
+        """Labeled seeds of BOTH classes, for forward AND inverse.
+
+        parse_row keeps HAM only, which is why inverse used to produce HAM by
+        paraphrasing another HAM seed: there were no spam seeds to impose a
+        label on. Inverse draws its target independently, so it needs the same
+        both-class reference rows forward already used — reshaped to each
+        policy's own seed_field convention: forward's seed_policy="inherit"
+        reads "text" (unchanged), while inverse's seed_policy="impose" reads
+        "incorrect", matching real_data's post-parse_row shape.
 
         Spam's control input is the signal distribution it already injects, so
         `seed_weights`/`rng` are accepted for signature compatibility only."""
-        if mode != "forward":
-            return real_data
-        return [r for r in self._load_reference_rows(config) if r.get("text")]
+        rows = [r for r in self._load_reference_rows(config) if r.get("text")]
+        if mode == "forward":
+            return rows
+        return [{"incorrect": r["text"], "label": r["label"]} for r in rows]
 
     def get_prompt_instruction(self) -> str:
         return self._config["prompt"]

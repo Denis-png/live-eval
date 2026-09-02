@@ -55,6 +55,8 @@ class PipelineClassConditionalTests(unittest.TestCase):
                               lambda self, real_data, count_max=5, config=None: _CANNED_DIST), \
                  patch.object(SpamTask, "get_real_eval_samples",
                               lambda self, config, real_data: _REAL_REF), \
+                 patch.object(SpamTask, "_load_reference_rows",
+                              lambda self, config: _REAL_REF), \
                  patch.object(SpamTask, "get_model", lambda self, mc: _FakeModel(mc)):
                 final = pipeline.run_pipeline(config)
 
@@ -92,6 +94,8 @@ class PipelineClassConditionalTests(unittest.TestCase):
                               lambda self, real_data, count_max=5, config=None: _CANNED_DIST), \
                  patch.object(SpamTask, "get_real_eval_samples",
                               lambda self, config, real_data: _REAL_REF), \
+                 patch.object(SpamTask, "_load_reference_rows",
+                              lambda self, config: _REAL_REF), \
                  patch.object(SpamTask, "get_model", lambda self, mc: _FakeModel(mc)), \
                  mock.patch.object(
                      pipeline, "_evaluate_real_baseline",

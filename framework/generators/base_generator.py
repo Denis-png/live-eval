@@ -577,7 +577,11 @@ class BaseGenerator(ABC):
         authorship artifacts. Seeds/specs are cycled if sample_size exceeds their
         count.
 
-        Returns records {"text", "label", "technique", "seed"}."""
+        Returns records {"text", "label", "technique", "source_label", "seed"}.
+        source_label is the seed row's own `label_field` value (None when the
+        seed carried no such field, e.g. seed_policy="none" or an unlabeled
+        pool) — it is the seed's class, which under "impose" may differ from
+        the drawn `label`."""
         rng = rng or random.Random()
         synthetic = []
         # Per-label attempted/survived counts. Drops are label-asymmetric — a
@@ -636,6 +640,7 @@ class BaseGenerator(ABC):
             # every later draw in the run shifts. inherit can't do this — its
             # seed choice depends on the drawn label — but it's new code with no
             # equivalence requirement to preserve.
+            seed = None
             if seed_policy == "impose":
                 seed = real_seeds[(i - 1) % len(real_seeds)]
                 source = seed.get(seed_field)
@@ -730,7 +735,10 @@ class BaseGenerator(ABC):
                           f"to compare against (seed_policy='none').", flush=True)
                     judge_skip_notice_printed = True
 
-                synthetic.append({"text": text, "label": label, "technique": technique, "seed": source or ""})
+                synthetic.append({"text": text, "label": label,
+                                  "technique": technique,
+                                  "source_label": (seed or {}).get(label_field),
+                                  "seed": source or ""})
                 attrition[label]["survived"] += 1
                 suffix = f" + judge {judge_dt:.1f}s" if judge_prompt else ""
                 print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s{suffix} ✓ ({label}: {technique})", flush=True)

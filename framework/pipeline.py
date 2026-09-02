@@ -637,8 +637,10 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                 real_seeds = [{"text": text} for text in carriers]
                 seed_field = "text"
             else:
-                # Post-parse_row contract: the seed text always lives in "incorrect".
-                real_seeds = real_data
+                # get_seed_pool's labeled both-class pool — the same one forward
+                # uses — so inverse can impose a label onto either class's seed,
+                # not just paraphrase within the HAM-only real_data pool.
+                real_seeds = task.get_seed_pool(config, real_data, "inverse")
                 seed_field = "incorrect"
             synthetic = generator.generate_class_conditional(
                 real_seeds=real_seeds,
