@@ -217,8 +217,6 @@ class InheritTechniqueTests(unittest.TestCase):
                                   else "imitation")
             self.assertEqual(out[0]["technique"], expected_technique)
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class ForwardSignalEmphasisTests(unittest.TestCase):
@@ -321,3 +319,7 @@ class NoSignalTechniqueNamingTests(unittest.TestCase):
             sample_size=1, seed_policy="impose", rng=random.Random(0), **COMMON,
         )
         self.assertEqual(out[0]["technique"], "phishing_link")
+
+
+if __name__ == "__main__":
+    unittest.main()
