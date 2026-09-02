@@ -111,15 +111,6 @@ class BaseTask(ABC):
         """
         return {}
 
-    def get_negative_generation_prompt(self) -> str | None:
-        """Prompt that produces an example of the NEGATIVE class from a seed.
-
-        Placeholder {sentence}. The positive class is produced by
-        get_inverse_prompt (inject) or get_forward_prompts (imitate); this is
-        its counterpart, and every class_conditional task needs it.
-        """
-        return None
-
     def get_seedless_class_prompts(self) -> dict[str, str]:
         """{label: prompt} for direct per-class seedless generation.
         Placeholders: {spec} and, for the positive class, {error_spec}."""

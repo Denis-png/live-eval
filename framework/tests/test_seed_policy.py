@@ -15,77 +15,84 @@ class FakeGenerator(BaseGenerator):
 
 
 COMMON = dict(
-    class_prob=1.0, positive_label="SPAM", negative_label="HAM",
+    class_balance={"SPAM": 1.0, "HAM": 0.0}, labels=("SPAM", "HAM"),
+    inverse_prompts={"SPAM": "inject {error_spec} into {sentence}",
+                      "HAM": "rewrite {sentence}"},
     type_dist={"phishing_link": 1.0}, count_dist={1: 1.0},
     error_descriptions={"phishing_link": "insert a link"},
-    inject_prompt="inject {error_spec} into {sentence}",
-    negative_prompt="rewrite {sentence}",
 )
 
 
 class SeedPolicyTests(unittest.TestCase):
-    def test_cross_class_seeds_from_the_negative_class_only(self):
-        gen = FakeGenerator("Corrupted: Win a FREE prize http://x.com now")
+    def test_impose_seeds_regardless_of_label(self):
+        # impose's seed is purely index-based over real_seeds; it does not
+        # depend on which label the draw happens to land on. The only real
+        # seed here reads as ordinary chat, yet the forced SPAM draw is still
+        # rendered through it.
+        gen = FakeGenerator("Message: Win a FREE prize http://x.com now")
         out = gen.generate_class_conditional(
             real_seeds=[{"incorrect": "see you at lunch"}], seed_field="incorrect",
-            sample_size=1, seed_policy="cross_class", rng=random.Random(0), **COMMON,
+            sample_size=1, seed_policy="impose", rng=random.Random(0), **COMMON,
         )
         self.assertEqual(out[0]["label"], "SPAM")
         self.assertIn("see you at lunch", gen.prompts[0])
 
-    def test_cross_class_missing_seed_consumes_no_rng_draw(self):
+    def test_impose_missing_seed_consumes_no_rng_draw(self):
         # Regression for a restructuring bug: an earlier version of this loop
-        # drew `is_positive` (and, when positive, sampled categories) BEFORE
-        # resolving/checking the seed, so a row with a falsy seed field
+        # drew the label (and, when it wanted signals, sampled categories)
+        # BEFORE resolving/checking the seed, so a row with a falsy seed field
         # silently burned an rng draw even though that iteration was skipped.
-        # That shifts every later draw and breaks cross_class's required
+        # That shifts every later draw and breaks impose's required
         # byte-for-byte equivalence with the pre-restructure implementation,
         # which resolved the seed — and skipped on a missing one — before
         # touching rng at all.
         #
-        # Random(10) is load-bearing: its first two random() calls land on
-        # OPPOSITE sides of class_prob=0.5 (0.5714..., then 0.4288...). Do not
-        # swap it for a "simpler" seed — a seed whose first two draws land on
-        # the SAME side can't tell the correct ordering apart from the buggy
-        # one, since both consume the same class for the surviving sample.
-        #
-        # Row 0 has a falsy seed field and must be skipped before any rng
-        # draw; row 1 is the only sample generated (sample_size=2). Correct
-        # (seed-resolved-first) ordering: skipping row 0 costs zero draws, so
-        # row 1's is_positive draw is the run's FIRST random() call (0.5714,
-        # >= 0.5 -> False -> HAM). Under the buggy ordering, row 0's
-        # is_positive draw would have already consumed that first call, so
-        # row 1 would consume the SECOND call instead (0.4288, < 0.5 -> True
-        # -> SPAM) — a different, wrong, label.
-        gen = FakeGenerator("Rewritten: glad we could catch up again soon")
-        seeds = [{"incorrect": ""}, {"incorrect": "valid seed sentence here"}]
-        common = {**COMMON, "class_prob": 0.5}
-        out = gen.generate_class_conditional(
-            real_seeds=seeds, seed_field="incorrect", sample_size=2,
-            seed_policy="cross_class", rng=random.Random(10), **common,
-        )
-        self.assertEqual(len(out), 1)
-        self.assertEqual(out[0]["label"], "HAM")
+        # Expressed as an invariant rather than a hardcoded threshold (the
+        # label draw is now `rng.choices` over a balance vector, not
+        # `rng.random() < class_prob`, so the old raw threshold arithmetic no
+        # longer applies): a run that SKIPS a leading row with a missing seed
+        # field must produce byte-identical output, under the same rng seed,
+        # to a run that never included that row at all. If the skip consumed
+        # a draw, the two runs would diverge.
+        common = {**COMMON, "class_balance": {"SPAM": 0.5, "HAM": 0.5}}
 
-    def test_same_class_picks_a_seed_of_the_drawn_class(self):
+        gen_with_gap = FakeGenerator("Rewritten: glad we could catch up again soon")
+        seeds_with_gap = [{"incorrect": ""}, {"incorrect": "valid seed sentence here"}]
+        out_with_gap = gen_with_gap.generate_class_conditional(
+            real_seeds=seeds_with_gap, seed_field="incorrect", sample_size=2,
+            seed_policy="impose", rng=random.Random(10), **common,
+        )
+
+        gen_without_gap = FakeGenerator("Rewritten: glad we could catch up again soon")
+        seeds_without_gap = [{"incorrect": "valid seed sentence here"}]
+        out_without_gap = gen_without_gap.generate_class_conditional(
+            real_seeds=seeds_without_gap, seed_field="incorrect", sample_size=1,
+            seed_policy="impose", rng=random.Random(10), **common,
+        )
+
+        self.assertEqual(len(out_with_gap), 1)
+        self.assertEqual([r["label"] for r in out_with_gap],
+                         [r["label"] for r in out_without_gap])
+
+    def test_inherit_picks_a_seed_of_the_drawn_label(self):
         gen = FakeGenerator("Rewritten: CLAIM your FREE reward today")
         seeds = [{"text": "see you at lunch", "label": "HAM"},
                  {"text": "WIN cash now", "label": "SPAM"}]
         out = gen.generate_class_conditional(
             real_seeds=seeds, seed_field="text", sample_size=1,
-            seed_policy="same_class", forward_prompts={"SPAM": "spam {sentence} :: {error_spec}", "HAM": "ham {sentence}"},
+            seed_policy="inherit", forward_prompts={"SPAM": "spam {sentence} :: {error_spec}", "HAM": "ham {sentence}"},
             rng=random.Random(0), **COMMON,
         )
         self.assertEqual(out[0]["label"], "SPAM")
         self.assertIn("WIN cash now", gen.prompts[0])
         self.assertNotIn("see you at lunch", gen.prompts[0])
 
-    def test_same_class_missing_class_in_pool_raises(self):
+    def test_inherit_missing_label_in_pool_raises(self):
         gen = FakeGenerator("Rewritten: x")
         with self.assertRaises(RuntimeError) as ctx:
             gen.generate_class_conditional(
                 real_seeds=[{"text": "hi", "label": "HAM"}], seed_field="text",
-                sample_size=1, seed_policy="same_class",
+                sample_size=1, seed_policy="inherit",
                 forward_prompts={"SPAM": "spam {sentence} :: {error_spec}", "HAM": "ham {sentence}"}, rng=random.Random(0), **COMMON,
             )
         self.assertIn("SPAM", str(ctx.exception))
@@ -133,9 +140,9 @@ class SeedPolicyTests(unittest.TestCase):
         self.assertEqual(out[0]["label"], "SPAM")
         self.assertEqual(judge_calls, [])
 
-    def test_none_policy_negative_class_uses_its_own_prompt(self):
+    def test_none_policy_other_label_uses_its_own_prompt(self):
         gen = FakeGenerator("Message: are we still on for lunch tomorrow")
-        common = {**COMMON, "class_prob": 0.0}
+        common = {**COMMON, "class_balance": {"SPAM": 0.0, "HAM": 1.0}}
         out = gen.generate_class_conditional(
             real_seeds=None, sample_size=1, seed_policy="none",
             seedless_prompts={"SPAM": "spam {spec} {error_spec}", "HAM": "ham {spec}"},
@@ -149,7 +156,7 @@ class SeedPolicyTests(unittest.TestCase):
 
 class SeedlessPromptValidationTests(unittest.TestCase):
     """seed_policy="none" indexes seedless_prompts/specs_by_label by the drawn
-    label inside the loop, so a task supplying only one class must fail before
+    label inside the loop, so a task supplying only one label must fail before
     the first API call rather than KeyError-ing partway through a paid run."""
 
     def _kwargs(self, **over):
@@ -183,27 +190,31 @@ class SeedlessPromptValidationTests(unittest.TestCase):
         self.assertEqual(len(out), 1)
 
 
-class SameClassTechniqueTests(unittest.TestCase):
-    """same_class rewrites a seed of the target class. The positive class now
-    emphasises the sampled signal mix, so reporting it is honest; the negative
-    class injects nothing and stays "imitation"."""
+class InheritTechniqueTests(unittest.TestCase):
+    """inherit rewrites a seed of the drawn label. A signal-bearing label's
+    template emphasises the sampled signal mix, so naming its technique after
+    the sampled category is honest; a label whose template asks for no
+    signals renders a plain same-label rewrite — template-driven technique
+    naming calls that "rewrite" for every label now, not a label-specific
+    word like the old "imitation"."""
 
     def test_technique_reflects_what_actually_happened(self):
         seeds = [{"text": "see you at lunch soon", "label": "HAM"},
                  {"text": "WIN cash now today", "label": "SPAM"}]
-        for class_prob, expected_label in ((1.0, "SPAM"), (0.0, "HAM")):
+        cases = (({"SPAM": 1.0, "HAM": 0.0}, "SPAM"), ({"SPAM": 0.0, "HAM": 1.0}, "HAM"))
+        for class_balance, expected_label in cases:
             gen = FakeGenerator("Rewritten: brand new message here")
             out = gen.generate_class_conditional(
-                **{**COMMON, "class_prob": class_prob},
+                **{**COMMON, "class_balance": class_balance},
                 real_seeds=seeds, seed_field="text", sample_size=1,
-                seed_policy="same_class", forward_prompts={"SPAM": "spam {sentence} :: {error_spec}", "HAM": "ham {sentence}"},
+                seed_policy="inherit", forward_prompts={"SPAM": "spam {sentence} :: {error_spec}", "HAM": "ham {sentence}"},
                 rng=random.Random(0),
             )
             self.assertEqual(out[0]["label"], expected_label)
-            # The positive class now emphasises a sampled signal mix, so naming
-            # it is honest; the negative class still injects nothing.
+            # The signal-bearing label names its sampled category; the other
+            # label injects nothing and is a plain "rewrite".
             expected_technique = ("phishing_link" if expected_label == "SPAM"
-                                  else "imitation")
+                                  else "rewrite")
             self.assertEqual(out[0]["technique"], expected_technique)
 
 if __name__ == "__main__":
@@ -212,42 +223,42 @@ if __name__ == "__main__":
 
 class ForwardSignalEmphasisTests(unittest.TestCase):
     """Forward mode used to inherit whatever signals its seed happened to carry,
-    so it could not target the empirical distribution the way inverse does. The
-    positive class now rewrites its seed emphasising a sampled signal mix."""
+    so it could not target the empirical distribution the way inverse does. A
+    signal-bearing label now rewrites its seed emphasising a sampled signal mix."""
 
     SEEDS = [{"text": "see you at lunch soon", "label": "HAM"},
              {"text": "WIN cash now today", "label": "SPAM"}]
     PROMPTS = {"SPAM": "rewrite {sentence} emphasising {error_spec}",
                "HAM": "rewrite {sentence}"}
 
-    def _run(self, class_prob):
+    def _run(self, class_balance):
         gen = FakeGenerator("Rewritten: a brand new message here")
         out = gen.generate_class_conditional(
-            **{**COMMON, "class_prob": class_prob},
+            **{**COMMON, "class_balance": class_balance},
             real_seeds=self.SEEDS, seed_field="text", sample_size=1,
-            seed_policy="same_class", forward_prompts=self.PROMPTS,
+            seed_policy="inherit", forward_prompts=self.PROMPTS,
             rng=random.Random(0),
         )
         return gen.prompts[0], out[0]
 
-    def test_positive_class_receives_the_sampled_signal_mix(self):
-        prompt, record = self._run(class_prob=1.0)
+    def test_signal_bearing_label_receives_the_sampled_signal_mix(self):
+        prompt, record = self._run(class_balance={"SPAM": 1.0, "HAM": 0.0})
         self.assertIn("insert a link", prompt)          # rendered error_spec
-        self.assertIn("WIN cash now today", prompt)     # its own-class seed
+        self.assertIn("WIN cash now today", prompt)     # its own-label seed
         self.assertEqual(record["technique"], "phishing_link")
 
-    def test_negative_class_gets_no_signal_mix(self):
-        prompt, record = self._run(class_prob=0.0)
+    def test_other_label_gets_no_signal_mix(self):
+        prompt, record = self._run(class_balance={"SPAM": 0.0, "HAM": 1.0})
         self.assertNotIn("insert a link", prompt)
         self.assertIn("see you at lunch soon", prompt)
-        self.assertEqual(record["technique"], "imitation")
+        self.assertEqual(record["technique"], "rewrite")
 
-    def test_missing_prompt_for_a_class_fails_before_any_call(self):
+    def test_missing_prompt_for_a_label_fails_before_any_call(self):
         gen = FakeGenerator("Rewritten: x y z")
         with self.assertRaises(RuntimeError) as ctx:
             gen.generate_class_conditional(
                 **COMMON, real_seeds=self.SEEDS, seed_field="text", sample_size=2,
-                seed_policy="same_class", forward_prompts={"SPAM": "only {sentence} {error_spec}"},
+                seed_policy="inherit", forward_prompts={"SPAM": "only {sentence} {error_spec}"},
                 rng=random.Random(0),
             )
         self.assertIn("forward_prompts", str(ctx.exception))

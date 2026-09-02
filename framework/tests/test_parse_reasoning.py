@@ -57,15 +57,28 @@ class _ReasoningGen(BaseGenerator):
         return self._responses.pop(0)
 
 
+_SPAM_RAW_MESSAGE_TAG = (
+    "<think>\nThe user wants me to transform a legitimate message by inserting a "
+    "suspicious link/URL and promising money. Let me pick something that flows "
+    "naturally.Message: Neva mind it's ok.. claim your $500 reward now at "
+    "http://claim-prize-fast.xyz/win"
+)
+
+
 class GenerateClassConditionalReasoningTests(unittest.TestCase):
     def test_reasoning_spam_kept(self):
-        gen = _ReasoningGen([_SPAM_RAW])
+        # impose renders every label through inverse_prompts under the
+        # "Message:" tag, so the reasoning-glued fixture must use that tag —
+        # _SPAM_RAW above ("Corrupted:") stays as-is for _parse_tagged's own
+        # generic tag test, which is not about this call path.
+        gen = _ReasoningGen([_SPAM_RAW_MESSAGE_TAG])
         out = gen.generate_class_conditional(
             real_seeds=[{"incorrect": "neva mind it's ok"}], seed_field="incorrect",
-            class_prob=1.0, type_dist={"phishing_link": 1.0}, count_dist={1: 1.0},
+            class_balance={"SPAM": 1.0, "HAM": 0.0}, labels=("SPAM", "HAM"),
+            inverse_prompts={"SPAM": "{sentence} {error_spec}", "HAM": "{sentence}"},
+            type_dist={"phishing_link": 1.0}, count_dist={1: 1.0},
             error_descriptions={"phishing_link": "add a link"},
-            inject_prompt="{sentence} {error_spec}", negative_prompt="{sentence}",
-            positive_label="SPAM", negative_label="HAM", sample_size=1, rng=Random(0),
+            seed_policy="impose", sample_size=1, rng=Random(0),
         )
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["label"], "SPAM")

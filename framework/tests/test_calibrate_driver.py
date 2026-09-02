@@ -263,10 +263,12 @@ class ClosedLoopTests(_Bench):
                          + [len(payload["rounds"])])
 
     def test_spam_forces_class_prob_to_one(self):
-        # Only SPAM rows carry signals; generating HAM during calibration wastes
-        # roughly 7 of every 8 calls at the empirical balance.
+        # Only SPAM's template asks for signals; generating HAM during
+        # calibration wastes roughly 7 of every 8 calls at the empirical
+        # balance. All mass is forced onto the signal-bearing labels — spam
+        # has exactly one, so its weight is 1.0.
         payload = self._run({k: 0.9 for k in _MARKERS}, rounds=1)
-        self.assertEqual(payload["meta"]["forced_class_prob"], 1.0)
+        self.assertEqual(payload["meta"]["forced_class_prob"], {"SPAM": 1.0})
 
     def test_records_informative_samples_per_round(self):
         payload = self._run({k: 0.9 for k in _MARKERS}, rounds=1)

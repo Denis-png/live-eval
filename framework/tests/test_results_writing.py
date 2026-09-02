@@ -123,7 +123,7 @@ class BuildMetaTests(unittest.TestCase):
 
     def test_class_conditional_task_defaults_to_inverse_without_config_mode_key(self):
         # Omitting generation.mode must keep reproducing today's production
-        # behavior (cross_class over real seeds), so the recorded default is
+        # behavior (impose over real seeds), so the recorded default is
         # "inverse", not the corruption strategy's "forward" default.
         cfg = _config("r.json")
         del cfg["generation"]["mode"]

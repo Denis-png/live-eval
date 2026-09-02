@@ -65,4 +65,5 @@ class BuildGenerationContextTests(unittest.TestCase):
 
     def test_class_prob_is_the_empirical_spam_fraction(self):
         ctx = self._build()
-        self.assertAlmostEqual(ctx["class_prob"], 8 / 20, places=6)
+        self.assertAlmostEqual(ctx["class_prob"]["SPAM"], 8 / 20, places=6)
+        self.assertAlmostEqual(ctx["class_prob"]["HAM"], 12 / 20, places=6)

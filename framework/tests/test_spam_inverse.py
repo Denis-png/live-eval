@@ -9,13 +9,6 @@ class SpamInverseConfigTests(unittest.TestCase):
     def setUp(self):
         self.task = SpamTask()
 
-    def test_inverse_prompt_has_placeholders(self):
-        p = self.task.get_inverse_prompt()
-        self.assertIsNotNone(p)
-        self.assertIn("{sentence}", p)
-        self.assertIn("{error_spec}", p)
-        self.assertIn("Corrupted:", p)
-
     def test_inverse_judge_prompt_has_placeholders(self):
         p = self.task.get_inverse_judge_prompt()
         self.assertIsNotNone(p)

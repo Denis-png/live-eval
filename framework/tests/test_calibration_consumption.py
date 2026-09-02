@@ -249,9 +249,9 @@ class MalformedArtifactTests(_Bench):
 
 
 class ClassProbPrecedenceTests(unittest.TestCase):
-    """I2/I4: Component 5's consumption half. A calibrated class_prob must
+    """I2/I4: Component 5's consumption half. A calibrated balance must
     correct the EMPIRICAL balance for differential attrition, but an explicit
-    float in generation.class_balance is a user instruction and always wins —
+    MAPPING in generation.class_balance is a user instruction and always wins —
     calibration included. Nothing previously exercised _resolve_class_prob
     pulling a calibrated value out of _LAST_CALIBRATION at all."""
 
@@ -260,21 +260,26 @@ class ClassProbPrecedenceTests(unittest.TestCase):
 
     def test_empirical_class_balance_uses_the_calibrated_value(self):
         pipeline._LAST_CALIBRATION = {"path": "x", "selected_round": 1,
-                                      "class_prob": 0.77}
+                                      "class_prob": {"SPAM": 0.77, "HAM": 0.23}}
         cfg = {"generation": {"class_balance": "empirical"}}
-        self.assertEqual(pipeline._resolve_class_prob(cfg, []), 0.77)
+        self.assertEqual(
+            pipeline._resolve_class_prob(cfg, [], SpamTask()),
+            {"SPAM": 0.77, "HAM": 0.23})
 
-    def test_explicit_class_balance_float_wins_over_a_calibrated_value(self):
+    def test_explicit_class_balance_mapping_wins_over_a_calibrated_value(self):
         pipeline._LAST_CALIBRATION = {"path": "x", "selected_round": 1,
-                                      "class_prob": 0.77}
-        cfg = {"generation": {"class_balance": 0.25}}
-        self.assertEqual(pipeline._resolve_class_prob(cfg, []), 0.25)
+                                      "class_prob": {"SPAM": 0.77, "HAM": 0.23}}
+        cfg = {"generation": {"class_balance": {"SPAM": 0.25, "HAM": 0.75}}}
+        self.assertEqual(
+            pipeline._resolve_class_prob(cfg, [], SpamTask()),
+            {"SPAM": 0.25, "HAM": 0.75})
 
     def test_no_calibration_falls_back_to_the_real_reference_fraction(self):
         cfg = {"generation": {"class_balance": "empirical"}}
         real_reference = [{"label": "SPAM"}, {"label": "HAM"},
                           {"label": "HAM"}, {"label": "HAM"}]
-        # The task is what says which label is positive; this used to fall back
+        # The task is what says which labels exist; this used to fall back
         # to a hardcoded "SPAM", which is the coupling that was removed.
         self.assertEqual(
-            pipeline._resolve_class_prob(cfg, real_reference, SpamTask()), 0.25)
+            pipeline._resolve_class_prob(cfg, real_reference, SpamTask()),
+            {"SPAM": 0.25, "HAM": 0.75})

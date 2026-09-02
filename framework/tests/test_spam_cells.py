@@ -34,11 +34,11 @@ class SpamCellDispatchTests(unittest.TestCase):
     def _policy(self):
         return self.generator.generate_class_conditional.call_args.kwargs["seed_policy"]
 
-    def test_inverse_seeded_uses_cross_class_with_real_data(self):
+    def test_inverse_seeded_uses_impose_with_real_data(self):
         real = [{"incorrect": "see you at lunch"}]
         _run_generation(self.generator, self.task, _config("inverse", False), real,
                         DIST, None, 0.5, profile=None)
-        self.assertEqual(self._policy(), "cross_class")
+        self.assertEqual(self._policy(), "impose")
         kwargs = self.generator.generate_class_conditional.call_args.kwargs
         self.assertEqual(kwargs["real_seeds"], real)
         self.assertFalse(self.generator.generate_carriers.called)
@@ -49,16 +49,16 @@ class SpamCellDispatchTests(unittest.TestCase):
                         DIST, None, 0.5, profile=PROFILE)
         self.assertTrue(self.generator.generate_carriers.called)
         kwargs = self.generator.generate_class_conditional.call_args.kwargs
-        self.assertEqual(kwargs["seed_policy"], "cross_class")
+        self.assertEqual(kwargs["seed_policy"], "impose")
         self.assertEqual(kwargs["real_seeds"], [{"text": "a synthetic ham message"}])
 
-    def test_forward_seeded_uses_same_class_with_labeled_pool(self):
+    def test_forward_seeded_uses_inherit_with_labeled_pool(self):
         rows = [{"text": "hi", "label": "HAM"}, {"text": "WIN", "label": "SPAM"}]
         with mock.patch.object(SpamTask, "_load_reference_rows", return_value=rows):
             _run_generation(self.generator, self.task, _config("forward", False),
                             [{"incorrect": "x"}], DIST, None, 0.5, profile=None)
         kwargs = self.generator.generate_class_conditional.call_args.kwargs
-        self.assertEqual(kwargs["seed_policy"], "same_class")
+        self.assertEqual(kwargs["seed_policy"], "inherit")
         self.assertEqual(kwargs["real_seeds"], rows)
 
     def test_forward_seedless_uses_none_policy_with_per_label_specs(self):

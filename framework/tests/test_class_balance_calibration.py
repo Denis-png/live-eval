@@ -58,17 +58,19 @@ class AttritionRecordingTests(unittest.TestCase):
         seeds = [{"incorrect": f"let us meet at three tomorrow {i}"}
                  for i in range(len(responses))]
         gen.generate_class_conditional(
-            real_seeds=seeds, seed_field="incorrect", class_prob=class_prob,
+            real_seeds=seeds, seed_field="incorrect",
+            class_balance={"SPAM": class_prob, "HAM": 1 - class_prob},
+            labels=("SPAM", "HAM"),
+            inverse_prompts={"SPAM": _INJECT, "HAM": _HAM},
             type_dist={"phishing_link": 1.0}, count_dist={1: 1.0},
-            error_descriptions=_DESC, inject_prompt=_INJECT, negative_prompt=_HAM,
-            positive_label="SPAM", negative_label="HAM",
-            sample_size=len(responses), rng=Random(0),
+            error_descriptions=_DESC, sample_size=len(responses),
+            seed_policy="impose", rng=Random(0),
         )
         return gen.last_class_attrition
 
     def test_counts_attempted_and_survived_per_class(self):
-        out = self._run(["Corrupted: click http://x.example to win cash now",
-                         "Corrupted: another http://y.example offer here"], 1.0)
+        out = self._run(["Message: click http://x.example to win cash now",
+                         "Message: another http://y.example offer here"], 1.0)
         self.assertEqual(out["SPAM"], {"attempted": 2, "survived": 2})
         self.assertEqual(out["HAM"], {"attempted": 0, "survived": 0})
 
@@ -77,8 +79,8 @@ class AttritionRecordingTests(unittest.TestCase):
         self.assertEqual(out["SPAM"], {"attempted": 1, "survived": 0})
 
     def test_negative_class_attrition_tracked_separately(self):
-        # A paraphrase that comes back identical to its seed is dropped.
-        out = self._run(["Rewritten: let us meet at three tomorrow 0"], 0.0)
+        # A rewrite that comes back identical to its seed is dropped.
+        out = self._run(["Message: let us meet at three tomorrow 0"], 0.0)
         self.assertEqual(out["HAM"], {"attempted": 1, "survived": 0})
 
 

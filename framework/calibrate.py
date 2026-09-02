@@ -161,10 +161,17 @@ def run_calibration(
     # same settings the CLI path (main()) already applies.
     settings_size = sample_size or calibration_settings(config)["sample_size"]
 
-    # Only the positive class carries signals, so calibrating at the empirical
-    # balance would waste most of the budget. is_positive only GATES the
-    # _sample_categories call, so positives-only is measurement-equivalent.
-    forced_class_prob = 1.0 if strategy == "class_conditional" else None
+    # Only labels whose prompt asks for signals carry them, so calibrating at the
+    # empirical balance would spend most of the budget on samples that measure
+    # nothing. Force all mass onto the signal-bearing labels — the draw only
+    # GATES which template renders, it does not change _sample_categories.
+    forced_class_prob = None
+    if strategy == "class_conditional":
+        prompts = task.get_inverse_class_prompts()
+        bearing = [lbl for lbl in (task.get_class_labels() or ())
+                   if "{error_spec}" in (prompts.get(lbl) or "")]
+        if bearing:
+            forced_class_prob = {lbl: 1.0 / len(bearing) for lbl in bearing}
     class_prob = forced_class_prob if forced_class_prob is not None else ctx["class_prob"]
 
     run_config = copy.deepcopy(base_config)
@@ -274,16 +281,20 @@ def run_calibration(
         )
         attrition = getattr(ctx["generator"], "last_class_attrition", None) or {}
         positive_label, negative_label = task.get_class_labels()
-        corrected = correct_class_prob(ctx["class_prob"], attrition,
+        # correct_class_prob is still the binary closed form (correct_class_balance
+        # is the N-label generalisation, wired in by a later task) — read the
+        # positive label's own share out of the balance vector as its target.
+        target_fraction = ctx["class_prob"].get(positive_label, 0.0)
+        corrected = correct_class_prob(target_fraction, attrition,
                                        n=len(stage_b),
                                        positive_label=positive_label,
                                        negative_label=negative_label)
         payload["meta"]["class_attrition"] = attrition
         if corrected is None:
             print("Class balance inside the noise floor; class_prob unchanged "
-                  f"at {ctx['class_prob']:.4f}.")
+                  f"at {target_fraction:.4f}.")
         else:
-            print(f"Class balance corrected: {ctx['class_prob']:.4f} -> "
+            print(f"Class balance corrected: {target_fraction:.4f} -> "
                   f"{corrected:.4f}")
             payload["calibrated"]["class_prob"] = corrected
         write_calibration(path, payload)
