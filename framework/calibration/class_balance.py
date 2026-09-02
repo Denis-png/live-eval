@@ -61,3 +61,63 @@ def correct_class_prob(
     if not 0.0 < corrected <= 1.0:
         return None
     return corrected
+
+
+def correct_class_balance(
+    target: dict[str, float],
+    attrition: dict,
+    *,
+    n: int,
+) -> dict[str, float] | None:
+    """N-label generalisation of correct_class_prob.
+
+        corrected[label] ∝ target[label] / survival[label]      (then normalised)
+
+    Reduces exactly to the binary form for two labels. Labels are read off
+    `target`, so no positive/negative parameters are needed — carrying one
+    task's class names as defaults is what made the binary version spam-shaped.
+
+    Returns None (leave the balance alone) when there is nothing to correct:
+    fewer than two labels, no usable survival data, or every label's delivered
+    share already inside its own binomial noise floor. A label whose survival is
+    unknown (zero survivors) keeps its target share while the rest are corrected
+    around it — guessing its rate would be worse than not correcting it.
+    """
+    if len(target) < 2 or n <= 0:
+        return None
+
+    survival = {label: _survival(attrition.get(label)) for label in target}
+    if not any(rate is not None for rate in survival.values()):
+        return None
+
+    # What the current rates would actually deliver at the requested balance.
+    delivered_raw = {
+        label: float(target[label]) * (survival[label] if survival[label] else 0.0)
+        for label in target
+    }
+    delivered_total = sum(delivered_raw.values())
+    if delivered_total <= 0:
+        return None
+    delivered = {k: v / delivered_total for k, v in delivered_raw.items()}
+
+    # Correct only when at least one label is outside its own 2-SE band.
+    outside = False
+    for label, share in target.items():
+        p = float(share)
+        if not 0.0 < p < 1.0:
+            continue
+        if abs(delivered[label] - p) > 2.0 * math.sqrt(p * (1.0 - p) / n):
+            outside = True
+            break
+    if not outside:
+        return None
+
+    weights = {
+        label: (float(target[label]) / survival[label]
+                if survival[label] else float(target[label]))
+        for label in target
+    }
+    total = sum(weights.values())
+    if total <= 0:
+        return None
+    return {label: w / total for label, w in weights.items()}
