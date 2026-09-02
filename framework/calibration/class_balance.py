@@ -1,9 +1,10 @@
 """Closed-form class-balance correction for differential attrition.
 
-`is_positive = rng.random() < class_prob` is drawn by the pipeline, not the LLM,
-so the expected balance equals class_prob AT THE POINT OF THE DRAW. Samples are
-dropped after it at unequal per-class rates, so the surviving balance drifts.
-Because survival is directly observable, no feedback loop is needed: invert it.
+`_draw_label` weight-samples a label from the balance vector, drawn by the
+pipeline, not the LLM, so the expected balance equals class_prob AT THE POINT
+OF THE DRAW. Samples are dropped after it at unequal per-class rates, so the
+surviving balance drifts. Because survival is directly observable, no feedback
+loop is needed: invert it.
 """
 
 from __future__ import annotations
@@ -80,8 +81,10 @@ def correct_class_balance(
     Returns None (leave the balance alone) when there is nothing to correct:
     fewer than two labels, no usable survival data, or every label's delivered
     share already inside its own binomial noise floor. A label whose survival is
-    unknown (zero survivors) keeps its target share while the rest are corrected
-    around it — guessing its rate would be worse than not correcting it.
+    unknown (zero survivors) has its weight left equal to its raw target share —
+    not divided by a guessed rate — while the rest are corrected around it; the
+    vector as a whole still renormalises, so that label's OWN final share still
+    moves (guessing its rate would be worse than not correcting it).
     """
     if len(target) < 2 or n <= 0:
         return None

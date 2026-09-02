@@ -71,6 +71,29 @@ class CompliantFake(BaseGenerator):
         return "Corrupted: " + " ".join(["hello there friend"] + emitted)
 
 
+class DifferentialAttritionFake(CompliantFake):
+    """CompliantFake, but HAM survives far less often than SPAM.
+
+    class_balance.py's own docstring names the mechanism this stands in for: a
+    model refuses a phishing rewrite far more than it drops a benign
+    paraphrase, so the surviving balance drifts from the requested one. Stage A
+    forces class_prob to all-SPAM, so this never fires there; Stage B draws at
+    the REAL empirical balance, which is exactly where a genuine attrition gap
+    between labels needs to show up for correct_class_balance to have
+    something real to invert — not a mocked return value standing in for it.
+    """
+
+    HAM_SURVIVAL = 0.15
+
+    def call_api(self, prompt: str) -> str:
+        if "LEGITIMATE message" not in prompt:
+            return super().call_api(prompt)
+        self.calls += 1
+        if self.rng.random() < self.HAM_SURVIVAL:
+            return "Message: could we reschedule the call to tomorrow please"
+        return "I'm sorry, I cannot help with that request."
+
+
 def _config(path, sample_size=5):
     return {
         "dataset": {"source": "local", "local": {"path": path, "format": "csv"}},
@@ -371,24 +394,29 @@ class SetpointRegressionTests(_Bench):
 
 
 class StageBArtifactTests(_Bench):
-    def test_corrected_class_prob_lands_in_the_written_artifact(self):
+    def test_corrected_class_balance_lands_in_the_written_artifact(self):
         # I4: nothing previously asserted that Stage B's class-balance
         # correction actually reaches calibrated.class_prob on disk -- the
         # name pipeline._resolve_class_prob (via _LAST_CALIBRATION) and a
-        # future run's load_calibration both read.
+        # future run's load_calibration both read. Stage B now corrects a
+        # full balance VECTOR (correct_class_balance), not a single positive-
+        # class float (correct_class_prob).
         from framework.calibration.artifact import load_calibration
 
         gen = CompliantFake({k: 0.9 for k in _MARKERS})
         cfg = _config(self.path, sample_size=60)
         with mock.patch.object(pipeline, "load_generator", return_value=gen), \
-             mock.patch.object(calibrate, "correct_class_prob", return_value=0.42):
+             mock.patch.object(calibrate, "correct_class_balance",
+                               return_value={"SPAM": 0.42, "HAM": 0.58}):
             payload = calibrate.run_calibration(
                 cfg, rounds=1, alpha=0.5, tolerance=0.001,
                 sample_size=60, output_path=self.out,
             )
-        self.assertEqual(payload["calibrated"]["class_prob"], 0.42)
+        self.assertEqual(payload["calibrated"]["class_prob"],
+                         {"SPAM": 0.42, "HAM": 0.58})
         on_disk = load_calibration(self.out)
-        self.assertEqual(on_disk["calibrated"]["class_prob"], 0.42)
+        self.assertEqual(on_disk["calibrated"]["class_prob"],
+                         {"SPAM": 0.42, "HAM": 0.58})
 
 
 if __name__ == "__main__":
@@ -436,3 +464,78 @@ class CliKeyResolutionTests(_Bench):
                 calibrate.main()
         run.assert_not_called()
         self.assertIn("openai", str(ctx.exception).lower())
+
+
+class BalanceVectorCalibrationTests(unittest.TestCase):
+    def test_informative_count_counts_signal_bearing_labels(self):
+        from framework import calibrate
+        from framework.tasks.spam.task import SpamTask
+        rows = [{"text": "a", "label": "SPAM"}, {"text": "b", "label": "HAM"},
+                {"text": "c", "label": "SPAM"}]
+        # SPAM's template asks for {error_spec}; HAM's does not.
+        self.assertEqual(calibrate.informative_count(SpamTask(), rows), 2)
+
+    def test_stage_b_writes_a_balance_vector_into_the_artifact(self):
+        import json, os, tempfile
+        from unittest import mock
+        from framework import calibrate
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "cal.json")
+            with mock.patch.object(calibrate, "correct_class_balance",
+                                   return_value={"SPAM": 0.3, "HAM": 0.7}):
+                payload = {"meta": {}, "target": {}, "calibrated": {}, "rounds": []}
+                payload["calibrated"]["class_prob"] = {"SPAM": 0.3, "HAM": 0.7}
+                calibrate.write_calibration(out, payload)
+            loaded = json.load(open(out))
+            self.assertEqual(loaded["calibrated"]["class_prob"],
+                             {"SPAM": 0.3, "HAM": 0.7})
+
+
+class RoundTripCalibrationConsumptionTests(_Bench):
+    """CONTROLLER ADDENDUM B: every consumption test in
+    test_calibration_consumption.py seeds pipeline._LAST_CALIBRATION by hand,
+    already dict-shaped -- none of them goes through the real write path, so
+    758 passing tests missed that Stage B wrote a float there while
+    _resolve_class_prob had already switched to isinstance(..., dict), which
+    silently discards it. This drives run_calibration end to end against a
+    generator with a REAL differential attrition (not a mocked
+    correct_class_balance return), then loads the artifact it wrote back
+    through the normal run path (pipeline.build_generation_context) and checks
+    that a fresh run's class_prob is the CALIBRATED balance, genuinely
+    different from the raw empirical one.
+    """
+
+    def test_calibrated_balance_reaches_a_fresh_runs_class_prob(self):
+        gen = DifferentialAttritionFake({k: 0.9 for k in _MARKERS})
+        cfg = _config(self.path, sample_size=120)
+        cfg["calibration"] = {"sample_size": 120}
+        with mock.patch.object(pipeline, "load_generator", return_value=gen):
+            payload = calibrate.run_calibration(
+                cfg, rounds=1, alpha=0.5, tolerance=0.001,
+                sample_size=120, output_path=self.out,
+            )
+
+        calibrated_balance = payload["calibrated"].get("class_prob")
+        # Stage B must have found a real, outside-noise-floor gap: HAM's
+        # survival is engineered far below SPAM's, so `None` here means the
+        # fixture stopped exercising the correction, not that it's fine.
+        self.assertIsInstance(calibrated_balance, dict)
+
+        # Load the artifact back through the SAME path a normal run uses to
+        # consume one -- not a hand-seeded _LAST_CALIBRATION -- so this
+        # actually exercises the write -> read loop rather than assuming it.
+        run_cfg = _config(self.path, sample_size=5)
+        run_cfg["generation"]["calibration_path"] = self.out
+        with mock.patch.object(pipeline, "load_generator", return_value=gen):
+            ctx = pipeline.build_generation_context(run_cfg)
+
+        self.assertEqual(ctx["class_prob"], calibrated_balance)
+
+        # And genuinely different from the raw empirical balance (30 SPAM /
+        # 90 total in _ROWS) -- HAM's heavy attrition must have actually
+        # moved the corrected weights, or this test cannot tell "the
+        # calibrated balance reached generation" from "it was ignored and the
+        # empirical fallback happened to be read instead".
+        empirical_spam_share = 30 / 90
+        self.assertNotAlmostEqual(ctx["class_prob"]["SPAM"],
+                                  empirical_spam_share, places=2)

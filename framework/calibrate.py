@@ -21,7 +21,7 @@ from framework.calibration.artifact import (
     default_calibration_path,
     write_calibration,
 )
-from framework.calibration.class_balance import correct_class_prob
+from framework.calibration.class_balance import correct_class_balance
 from framework.calibration.controller import (
     converged,
     jsd_report,
@@ -64,16 +64,19 @@ def calibration_settings(config: dict, args=None) -> dict:
 
 def informative_count(task, rows: list[dict], profile: dict | None = None) -> int:
     """Samples the measurement is actually estimated from, which is not the
-    round's sample size: positive-class rows for classification (the
-    negative class carries no signals);
+    round's sample size: for classification, rows whose label's own prompt
+    template asks for a signal mix (a label whose template carries no
+    {error_spec} contributes no measurable signal, regardless of how many
+    labels the task has);
     for corruption, the surviving pairs ERRANT actually annotated —
     `profile_gec_edit_types`'s own `n_annotated`, read off the SAME profiling
     pass `_measure` already made rather than re-annotating every pair a second
     time just to count them."""
     if task.get_generation_strategy() == "class_conditional":
-        labels = task.get_class_labels()
-        positive = labels[0] if labels else None
-        return sum(1 for r in rows if r.get("label") == positive)
+        prompts = task.get_inverse_class_prompts()
+        bearing = {lbl for lbl in (task.get_class_labels() or ())
+                   if "{error_spec}" in (prompts.get(lbl) or "")}
+        return sum(1 for r in rows if r.get("label") in bearing)
     return (profile or {}).get("n_annotated", 0)
 
 
@@ -280,22 +283,16 @@ def run_calibration(
             ctx["judge_call"], ctx["class_prob"], profile=ctx["profile"],
         )
         attrition = getattr(ctx["generator"], "last_class_attrition", None) or {}
-        positive_label, negative_label = task.get_class_labels()
-        # correct_class_prob is still the binary closed form (correct_class_balance
-        # is the N-label generalisation, wired in by a later task) — read the
-        # positive label's own share out of the balance vector as its target.
-        target_fraction = ctx["class_prob"].get(positive_label, 0.0)
-        corrected = correct_class_prob(target_fraction, attrition,
-                                       n=len(stage_b),
-                                       positive_label=positive_label,
-                                       negative_label=negative_label)
+        corrected = correct_class_balance(ctx["class_prob"], attrition,
+                                          n=len(stage_b))
         payload["meta"]["class_attrition"] = attrition
         if corrected is None:
-            print("Class balance inside the noise floor; class_prob unchanged "
-                  f"at {target_fraction:.4f}.")
+            print("Class balance inside the noise floor; unchanged at "
+                  + ", ".join(f"{k}={v:.4f}" for k, v in sorted(ctx["class_prob"].items())))
         else:
-            print(f"Class balance corrected: {target_fraction:.4f} -> "
-                  f"{corrected:.4f}")
+            print("Class balance corrected: "
+                  + ", ".join(f"{k} {ctx['class_prob'][k]:.4f}->{corrected[k]:.4f}"
+                              for k in sorted(corrected)))
             payload["calibrated"]["class_prob"] = corrected
         write_calibration(path, payload)
 
