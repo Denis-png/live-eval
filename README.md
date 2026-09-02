@@ -173,9 +173,24 @@ task *shape*, `corruption` (GEC) or `class_conditional` (Spam) — which the pip
 dispatches on. Independently of that shape, **every task** reads two generation
 knobs that together select one of four **cells**:
 
-- **`generation.mode`** (`forward` | `inverse`) — *what real signal drives content*,
-  regardless of whether that signal comes from a real seed or a synthesized one (see
-  `seedless` below).
+- **`generation.mode`** (`forward` | `inverse`) — *where the annotation comes from*.
+  `inverse` draws it independently and **imposes** it on the source; `forward`
+  **inherits** it from the source — the seed it was derived from, or the artifact
+  just generated. It also explains a detail the framework treats as incidental:
+  among the seeded text-level cells (corruption and class_conditional), GEC
+  `forward` + seeded is the only one that loads no empirical distribution, because
+  it is the only one that imposes nothing — the generator infers the error type
+  from its seed. Every other seeded text-level cell imposes at least part of the
+  annotation and needs a distribution to draw it from: spam `forward` inherits the
+  label from its seed but still imposes the signal mix, and GEC `forward` +
+  seedless draws the error type from the profile while the correction remains the
+  model's own assertion. Taxonomy `forward` imposes nothing either, but structured
+  generation never loads an empirical distribution in the first place — in either
+  mode — so it sits outside this comparison entirely.
+
+  The axis is task-shape-independent. Back-translation (generate the target, derive
+  the source) and doc2query (pick a document, generate a query for it) are inverse
+  under this definition; annotating text you just generated is forward.
 - **`generation.seedless`** (`true` | `false`, default `false`) — *whether real
   benchmark text ever reaches the generation prompt*. `false` ("seeded") passes a
   real sample from the dataset as a seed. `true` drops real seeds entirely: a
@@ -206,6 +221,14 @@ an LLM" artifacts.
 |---|---|---|
 | **`mode: inverse`** (default) | `seed_policy="cross_class"`: SPAM = inject an empirically-profiled mix of spam **signals** (link, money, ALL-CAPS, urgency, keywords) into a real HAM seed; HAM = paraphrase a real HAM seed. | Same cross-class flow, but the HAM seed is a carrier synthesized from the profile via `generate_carriers()` (needs `carrier_prompt`) instead of a real message. |
 | **`mode: forward`** | `seed_policy="same_class"`: each class imitates within itself — rewrites a real labeled seed of that class (SPAM or HAM) into a new message of the same kind. Needs `forward_prompt`. | `seed_policy="none"`: per-label profile-sampled content specs, no real seed at all. Needs `seedless_class_prompts`. |
+
+**`structured` (Taxonomy)** — one sample is a whole artifact, so `seedless` is
+pinned to `true` (seeded is unimplemented) and only `mode` varies:
+
+| | `seedless: true` |
+|---|---|
+| **`mode: inverse`** (default) | A structural target is sampled from the real profile and imposed; the feedback loop iterates toward it for a bounded number of rounds. |
+| **`mode: forward`** | Only the domain is supplied. Size, depth and branching all emerge, and there is no feedback loop — the baseline for judging what targeting buys. |
 
 ### Setting it
 

@@ -168,15 +168,19 @@ class TaxonomyStructuredGenerationTests(unittest.TestCase):
         self.assertIn("classes", out[0])
         self.assertIn("subclass_axioms", out[0])
 
-    def test_unsupported_mode_fails_clearly(self):
-        gen = FakeGenerator([])
-        config = {"generation": {"sample_size": 1, "mode": "forward"}}
-        with self.assertRaises(RuntimeError) as ctx:
-            _run_generation(
-                gen, self.task, config, real_data=[], error_dist=None,
-                judge_call=None, class_prob=0.5, profile=PROFILE,
-            )
-        self.assertIn("mode", str(ctx.exception))
+    def test_structured_accepts_an_explicit_mode(self):
+        # Structured generation now joins the mode axis. At this point in the plan,
+        # mode="forward" still runs the inverse prompt path (forward's own behavior
+        # is Task 3), so it should succeed and return one taxonomy artifact.
+        gen = FakeGenerator([_response()])
+        config = {"generation": {"sample_size": 1, "mode": "forward", "feedback": {"enabled": False}}}
+        out = _run_generation(
+            gen, self.task, config, real_data=[], error_dist=None,
+            judge_call=None, class_prob=0.5, profile=PROFILE,
+        )
+        self.assertEqual(len(out), 1)
+        self.assertIn("classes", out[0])
+        self.assertIn("subclass_axioms", out[0])
 
     def test_taxonomy_does_not_load_error_distribution(self):
         self.assertFalse(_should_load_error_distribution("structured", None, True))

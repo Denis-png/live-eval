@@ -137,17 +137,22 @@ class BaseTask(ABC):
           "class_conditional" — sample a target class, then generate an example of it;
                                 classification tasks. Ignores generation.mode.
           "structured"        — generate a whole structured benchmark artifact from
-                                a profile/spec; mode is not applicable.
+                                a profile/spec; on the mode axis like the others —
+                                inverse imposes a sampled structural target, forward
+                                lets structure emerge from the domain alone.
         Default "corruption"."""
         return "corruption"
 
     def build_structured_generation_prompt(
-        self, profile: dict, rng=None, feedback: dict | None = None
+        self, profile: dict, rng=None, feedback: dict | None = None,
+        mode: str = "inverse",
     ) -> str:
         """Return one profile-driven structured generation prompt.
 
-        Structured tasks override this. Provider classes remain ontology-agnostic:
-        they only receive the prompt string and return text.
+        `mode` selects where the artifact's structure comes from: `inverse`
+        IMPOSES a target sampled from the profile, `forward` lets it emerge and
+        supplies only the content axis. Structured tasks override this; provider
+        classes remain ontology-agnostic and only receive the prompt string.
         """
         raise NotImplementedError(
             f"{self.get_task_name()} does not support structured generation."

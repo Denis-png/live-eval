@@ -352,11 +352,18 @@ def aggregate(all_run_scores: list[dict]) -> dict:
 # ── Output paths ──────────────────────────────────────────────
 
 def resolve_mode(config: dict, strategy: str) -> str:
-    """The mode that actually runs. `corruption` defaults to "forward",
-    `class_conditional` to "inverse" — shared by the session name, _build_meta
-    and the generation dispatch so all three always agree."""
-    return (config.get("generation") or {}).get(
-        "mode", "inverse" if strategy == "class_conditional" else "forward")
+    """The mode that actually runs — shared by the session name, _build_meta and
+    the generation dispatch so all three always agree.
+
+    `mode` asks where the annotation comes from: `inverse` draws it independently
+    and IMPOSES it on the source; `forward` INHERITS it from the source (the seed,
+    or the artifact just generated). Defaults follow what each strategy does when
+    the config says nothing: `corruption` infers the seed's error (forward), while
+    `class_conditional` draws a label and `structured` draws a target structure
+    (both inverse).
+    """
+    default = "forward" if strategy == "corruption" else "inverse"
+    return (config.get("generation") or {}).get("mode", default)
 
 
 def generation_cell_slug(config: dict, strategy: str) -> str:
@@ -365,11 +372,14 @@ def generation_cell_slug(config: dict, strategy: str) -> str:
     Naming a session after its setup means a directory listing shows what was
     run without opening results.json, and two cells of the same task can never
     collide in one output directory."""
-    if strategy == "structured":
-        # Structured generation builds from the benchmark's schema alone: it has
-        # no seed/mode axis, so naming it "forward_seedless" would be fiction.
-        return "structured"
-    seeding = "seedless" if (config.get("generation") or {}).get("seedless") else "seeded"
+    # Structured IS on the mode axis — it imposes a sampled target structure
+    # (inverse) or lets structure emerge (forward) — and is seedless until
+    # seeded structured generation is implemented.
+    seeding = (
+        "seedless" if strategy == "structured"
+        or (config.get("generation") or {}).get("seedless")
+        else "seeded"
+    )
     return f"{resolve_mode(config, strategy)}_{seeding}"
 
 
@@ -431,10 +441,7 @@ def _build_meta(config: dict, task, runs_completed: int,
     judge_active = bool(judge) and judge.get("enabled", True) is not False
     num_runs = gen["num_runs"]
     strategy = task.get_generation_strategy()
-    if strategy == "structured":
-        mode = None
-    else:
-        mode = resolve_mode(config, strategy)
+    mode = resolve_mode(config, strategy)
     seedless = True if strategy == "structured" else bool(gen.get("seedless"))
     if ds["source"] == "local":
         dataset_meta = {"source": "local", "path": ds["path"],
@@ -507,22 +514,37 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
     _profile_driven = False
 
     if strategy == "structured":
-        if gen_cfg.get("mode") not in (None, "structured", "none", "n/a"):
-            raise RuntimeError(
-                f"{task.get_task_name()} uses structured generation; generation.mode "
-                "is not applicable and must be omitted."
-            )
         if gen_cfg.get("seedless") is False:
+            # Not impossible — perturbing a real ontology subtree and keeping the
+            # perturbation as ground truth is coherent. It is unimplemented, and
+            # saying so is what keeps the design open rather than foreclosed.
             raise RuntimeError(
-                f"{task.get_task_name()} structured generation is profile-driven; "
-                "seeded generation is not supported."
+                f"seeded structured generation is not implemented for "
+                f"{task.get_task_name()}; it needs a real-artifact corpus and a "
+                "perturbation operator. Use seedless: true."
             )
         if profile is None:
             raise RuntimeError(
                 f"{task.get_task_name()} structured generation requires a profile."
             )
+        mode = resolve_mode(config, strategy)
         feedback_cfg = task.get_feedback_config(gen_cfg)
         feedback_enabled = bool(feedback_cfg.get("enabled", False))
+        if mode == "forward":
+            # get_feedback_config's default is tuned for inverse (the loop drives
+            # an artifact toward an IMPOSED target), so an inherited default of
+            # enabled=true is not itself a contradiction here — forward simply
+            # never runs the loop. Only an explicit request in THIS run's config
+            # is contradictory, since forward imposes no target for it to chase,
+            # and silently ignoring set config is what this framework refuses.
+            explicit_feedback_request = bool((gen_cfg.get("feedback") or {}).get("enabled"))
+            if explicit_feedback_request:
+                raise RuntimeError(
+                    f"{task.get_task_name()}: generation.mode=forward cannot use the "
+                    "structured feedback loop — the loop targets an imposed structure "
+                    "and forward imposes none. Set mode=inverse or disable feedback."
+                )
+            feedback_enabled = False
         # Fail before the first API call, not mid-round: enabling the loop
         # without a comparator is a config/implementation error, and the
         # framework's rule is that an unsupported capability says so up front.
@@ -540,7 +562,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
         rng = random.Random()
         synthetic = generator.generate_structured(
             build_prompt=lambda feedback: task.build_structured_generation_prompt(
-                profile, rng=rng, feedback=feedback
+                profile, rng=rng, feedback=feedback, mode=mode
             ),
             parse=task.parse_structured_generation_with_diagnostics,
             build_feedback=(
@@ -937,7 +959,8 @@ def build_generation_context(config: dict) -> dict:
     evaluator_fns = task.get_evaluator_fns()
 
     strategy = task.get_generation_strategy()
-    mode = None if strategy == "structured" else config["generation"].get("mode", "forward")
+    # One source of truth: resolve_mode also feeds the session name and _build_meta.
+    mode = resolve_mode(config, strategy)
     seedless = (
         True if strategy == "structured"
         else bool(config["generation"].get("seedless"))
