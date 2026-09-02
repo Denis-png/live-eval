@@ -122,3 +122,52 @@ class InformativeCountTests(unittest.TestCase):
         from framework import calibrate
         rows = [{"label": "TOXIC"}, {"label": "CIVIL"}, {"label": "TOXIC"}]
         self.assertEqual(calibrate.informative_count(_Toxicity(), rows), 2)
+
+
+class LabelSetTests(unittest.TestCase):
+    def test_spam_labels_are_an_ordered_sequence(self):
+        labels = SpamTask().get_class_labels()
+        self.assertEqual(tuple(labels), ("SPAM", "HAM"))
+        self.assertGreaterEqual(len(labels), 2)
+
+    def test_non_classification_tasks_still_declare_none(self):
+        from framework.tasks.gec.task import GECTask
+        self.assertIsNone(GECTask().get_class_labels())
+
+
+class InverseClassPromptTests(unittest.TestCase):
+    def test_base_declares_the_accessor(self):
+        from framework.tasks.base_task import BaseTask
+        self.assertTrue(hasattr(BaseTask, "get_inverse_class_prompts"))
+
+    def test_spam_supplies_one_prompt_per_label(self):
+        task = SpamTask()
+        prompts = task.get_inverse_class_prompts()
+        self.assertEqual(set(prompts), set(task.get_class_labels()))
+        for label, template in prompts.items():
+            self.assertIn("{sentence}", template, f"{label} takes a seed")
+
+    def test_only_the_signal_bearing_label_asks_for_an_error_spec(self):
+        # The template rule: SPAM's prompt declares it wants signals, HAM's does
+        # not. No code decides this, and no accessor declares it.
+        prompts = SpamTask().get_inverse_class_prompts()
+        self.assertIn("{error_spec}", prompts["SPAM"])
+        self.assertNotIn("{error_spec}", prompts["HAM"])
+
+    def test_prompts_do_not_assume_the_seed_is_legitimate(self):
+        # Symmetric inverse feeds either class into either prompt, so neither
+        # may label its input "Legitimate message".
+        for label, template in SpamTask().get_inverse_class_prompts().items():
+            self.assertNotIn("Legitimate message:", template,
+                             f"{label} still assumes a HAM seed")
+
+    def test_the_negative_prompt_strips_rather_than_merely_abstains(self):
+        # Receiving a SPAM seed, the HAM prompt must remove signals, not just
+        # decline to add them. This is what produces the hard negatives.
+        ham = SpamTask().get_inverse_class_prompts()["HAM"].lower()
+        self.assertTrue("remove" in ham or "strip" in ham,
+                        "HAM prompt must instruct removal of spam signals")
+
+    def test_all_inverse_prompts_answer_with_the_same_tag(self):
+        for template in SpamTask().get_inverse_class_prompts().values():
+            self.assertIn("Message: <", template)
