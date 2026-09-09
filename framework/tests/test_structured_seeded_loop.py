@@ -91,11 +91,22 @@ class SeededLoopTests(unittest.TestCase):
         out, _ = _run(_Gen())
         self.assertEqual(out[0]["source_max_depth"], 1)
 
-    def test_no_feedback_metadata_is_emitted(self):
-        # Seeded cells run no feedback loop: gold is exact, so there is nothing
-        # to iterate toward. Emitting empty rounds would imply one ran.
+    def test_the_record_carries_exactly_the_contracted_keys(self):
+        # Was an assertNotIn("generation_feedback", ...) against a fixture that
+        # never contains it and a loop that never adds it -- it could not fail,
+        # and it would not have noticed feedback metadata emitted under any
+        # other name. Pin the whole key set instead: the parsed artifact, plus
+        # gold's provenance, plus the parse diagnostics. Seeded cells run no
+        # feedback loop (gold is exact, so there is nothing to iterate toward),
+        # so ANY extra key here is either an unannounced schema change or the
+        # loop generate_structured_seeded exists to not run.
         out, _ = _run(_Gen())
-        self.assertNotIn("generation_feedback", out[0])
+        self.assertEqual(
+            set(out[0]),
+            set(_parse_ok(None)["artifact"])
+            | {"domain", "source_max_depth", "seeded_diagnostics"},
+        )
+        self.assertEqual(out[0]["seeded_diagnostics"], {"attempts": [{"attempt": 1}]})
 
 
 if __name__ == "__main__":
