@@ -67,17 +67,28 @@ class ContextAgreementTests(unittest.TestCase):
 
 
 class CellSlugTests(unittest.TestCase):
-    def test_structured_slug_is_uniform_with_other_strategies(self):
-        # Structured joined the seeding axis alongside the mode axis once
-        # seeded structured generation landed: omitting generation.seedless now
-        # defaults to "seeded" for structured exactly like every other
-        # strategy (see test_other_strategies_unchanged below), instead of the
-        # old hardcoded-to-seedless special case.
+    def test_structured_slug_names_the_cell_that_actually_ran(self):
+        # Structured is on the seeding axis as well as the mode axis, and the
+        # slug reads that axis through resolve_seedless -- the same answer the
+        # dispatch, _build_meta and build_generation_context use. An omitted
+        # key means SEEDLESS for structured (seeded structured generation needs
+        # a real-artifact corpus), and the slug has to say so: reading it as
+        # "seeded" while the dispatch ran seedless is exactly the disagreement
+        # the resolver exists to end.
         self.assertEqual(
-            pipeline.generation_cell_slug({}, "structured"), "inverse_seeded")
+            pipeline.generation_cell_slug({}, "structured"), "inverse_seedless")
         self.assertEqual(
             pipeline.generation_cell_slug(
                 {"generation": {"mode": "forward"}}, "structured"),
+            "forward_seedless")
+        self.assertEqual(
+            pipeline.generation_cell_slug(
+                {"generation": {"seedless": False}}, "structured"),
+            "inverse_seeded")
+        self.assertEqual(
+            pipeline.generation_cell_slug(
+                {"generation": {"mode": "forward", "seedless": False}},
+                "structured"),
             "forward_seeded")
 
     def test_other_strategies_unchanged(self):

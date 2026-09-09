@@ -199,13 +199,18 @@ knobs that together select one of four **cells**:
   The axis is task-shape-independent. Back-translation (generate the target, derive
   the source) and doc2query (pick a document, generate a query for it) are inverse
   under this definition; annotating text you just generated is forward.
-- **`generation.seedless`** (`true` | `false`, default `false`) — *whether real
-  benchmark text ever reaches the generation prompt*. `false` ("seeded") passes a
-  real sample from the dataset as a seed. `true` drops real seeds entirely: a
+- **`generation.seedless`** (`true` | `false`) — *whether real benchmark text ever
+  reaches the generation prompt*. `false` ("seeded") passes a real sample from the
+  dataset as a seed. `true` drops real seeds entirely: a
   benchmark **profile** (built once per clone by `profile_dataset`, see
   "Seedless prerequisite: profiling" below) is sampled instead to synthesize the
   content spec (topic, length, style) that goes into the prompt — the LLM invents
   the text from that spec rather than transforming a real sentence.
+
+  Omitting the key means `false` (seeded) for every strategy except `structured`,
+  which defaults to `true` because its seeded cells need a real-artifact corpus.
+  `pipeline.resolve_seedless` is the single answer the session name, the
+  generation dispatch, the results `meta` and `calibrate` all read.
 
 `mode` and `seedless` combine freely; a task shape only needs to support the cells it
 declares prompts for (see "Fail-fast" below).

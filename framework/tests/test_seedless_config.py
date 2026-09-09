@@ -215,6 +215,19 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class _StrategyTask:
+    """Minimal task stub: _build_meta reads only the strategy and the name."""
+
+    def __init__(self, strategy):
+        self._strategy = strategy
+
+    def get_generation_strategy(self):
+        return self._strategy
+
+    def get_task_name(self):
+        return self._strategy
+
+
 class GenerationCellSlugTests(unittest.TestCase):
     """Session directories are named after the setup that produced them, so a
     listing shows what was run without opening results.json."""
@@ -240,18 +253,35 @@ class GenerationCellSlugTests(unittest.TestCase):
     def test_structured_joins_the_mode_axis(self):
         # Structured is now on the mode axis like every other strategy, so the
         # slug includes the mode. Since seeded structured generation landed,
-        # structured is on the seeding axis too: omitting generation.seedless
-        # defaults to "seeded", same as class_conditional's default above.
-        self.assertEqual(self._slug("structured"), "inverse_seeded")
-        self.assertEqual(self._slug("structured", mode="forward"), "forward_seeded")
+        # structured is on the seeding axis too -- but its default there is
+        # "seedless" (resolve_seedless), because seeded structured generation
+        # needs a real-artifact corpus that class_conditional does not.
+        self.assertEqual(self._slug("structured"), "inverse_seedless")
+        self.assertEqual(self._slug("structured", mode="forward"), "forward_seedless")
+        self.assertEqual(self._slug("structured", seedless=False), "inverse_seeded")
 
-    def test_slug_matches_the_mode_meta_records(self):
-        for strategy in ("corruption", "class_conditional"):
-            config = {"generation": {}}
-            self.assertTrue(
-                self._slug(strategy).startswith(pipeline.resolve_mode(config, strategy)),
-                strategy,
-            )
+    def test_slug_matches_the_cell_meta_records(self):
+        # Both halves, and structured included: the slug read an omitted
+        # `seedless` as seeded for structured while _build_meta hardcoded True,
+        # so a seeded session was named "seeded" and archived as "seedless" --
+        # analyze_results then filed it in the seedless bucket, colliding with
+        # the real seedless session, and dedup_sessions dropped one of them.
+        for strategy in ("corruption", "class_conditional", "structured"):
+            for generation in ({}, {"seedless": True}, {"seedless": False},
+                               {"mode": "forward"}, {"mode": "inverse"}):
+                config = {
+                    "task": {"name": strategy},
+                    "dataset": {"name": "d/ds", "split": "train"},
+                    "generation": dict(generation, provider="p", model="m",
+                                       num_runs=1, sample_size=2),
+                }
+                meta = pipeline._build_meta(
+                    config, _StrategyTask(strategy), runs_completed=1,
+                    effective_samples_per_run=[2], real_baseline=False)
+                meta_cell = (f"{meta['mode']}_"
+                             f"{'seedless' if meta['seedless'] else 'seeded'}")
+                self.assertEqual(self._slug(strategy, **generation), meta_cell,
+                                 (strategy, generation))
 
 
 class ProfileNamingTests(unittest.TestCase):
