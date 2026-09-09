@@ -261,6 +261,29 @@ This is treated as a model/configuration limitation rather than a taxonomy
 validator failure. The validation note does not imply that increasing token
 limits is proven to solve the issue.
 
+## Seeded Generation
+
+`generation.seedless: false` samples a subtree of the real ontology and computes
+its gold structure directly:
+
+- **forward+seeded** inherits the subtree's own shape. No profile is consulted.
+- **inverse+seeded** imposes a structural target sampled from the real profile,
+  applying edit operators (`drop_leaf`, `reparent`, `collapse_level`,
+  `add_sibling`) to move the subtree toward it.
+
+The model then receives that structure with every class anonymised as `C0, C1,
+...` and a target domain, and must return one new class identifier per
+anonymised class with every relation preserved. The response is checked for
+isomorphism against the gold; a mismatch is a counted skip.
+
+Ground truth is therefore never parsed from model output. That is deliberate: a
+drifting model loses its sample rather than redefining the reference. It also
+keeps the source ontology's class names out of the generated benchmark, so a
+model under test cannot score by recalling a canonical tutorial ontology.
+
+Seeded cells run no feedback loop — the gold is exact, so there is nothing to
+iterate toward.
+
 ## Current MVP Limitations
 
 - asserted direct named subclass relations only
@@ -268,6 +291,5 @@ limits is proven to solve the issue.
 - no ontology reasoner or classification
 - no transitive evaluation
 - no semantic or fuzzy matching
-- no seeded taxonomy generation
 - current Pizza MVP assumes one real reference ontology for fidelity selection
 - model/provider structured-output behavior can affect real runs

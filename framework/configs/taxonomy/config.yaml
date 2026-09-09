@@ -52,9 +52,14 @@ task:
 #                       so it runs with feedback off (enabling it here is refused,
 #                       since forward imposes no target for the loop to chase).
 #
-# `seedless` is effectively pinned to true. Seeded structured generation —
-# perturb a real ontology subtree and keep the perturbation as ground truth — is
-# coherent but unimplemented, and `seedless: false` says exactly that.
+#   `seedless: false` runs the SEEDED cells: a subtree of the real ontology is
+#   sampled, its gold structure is computed exactly (forward keeps the subtree's
+#   own shape; inverse edits it toward a target sampled from the profile), and
+#   the model is asked only to re-verbalise that structure into a new domain.
+#   Output is verified against the gold by isomorphism and discarded on
+#   mismatch, so a bad generation costs a sample and never corrupts a reference.
+#   forward+seeded needs no profile at all, which makes it the cheapest
+#   end-to-end check this task has.
 generation:
   mode: inverse
   seedless: true
@@ -82,6 +87,17 @@ generation:
   feedback:
     enabled: true
     max_rounds: 1
+
+  # Seeded cells only. Subtrees are sampled from the real ontology: max_depth
+  # truncates them (which is what creates structural variation across seeds) and
+  # min_classes drops the ones too small to be a benchmark. `domains` is the
+  # pool of target domains the model re-verbalises into; it is config rather
+  # than a model choice so that a run is reproducible from results.json alone.
+  seed_pool:
+    max_depth: 4
+    min_classes: 5
+    domains: ["marine biology", "musical instruments", "architecture",
+              "textile manufacturing", "meteorology"]
 
 # ── Evaluated models ────────────────────────────────────────────────────────
 # The model under test receives {domain, classes} and must predict the direct

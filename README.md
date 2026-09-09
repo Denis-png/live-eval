@@ -232,13 +232,14 @@ classifier cannot separate them on "was this written by an LLM" artifacts.
 | **`mode: inverse`** (default) | The target label is drawn independently and **imposed** on a seed of any class, via `get_inverse_class_prompts()[label]`. A spam seed rewritten to HAM is a hard negative — spam-like topic, no spam signals. | The same, over carriers synthesized from the profile instead of real messages. |
 | **`mode: forward`** | The seed's own label is **inherited**: each class rewrites a labeled seed of that class into a new one. Needs `forward_prompts`. | Per-label profile content specs, no real seed. Needs `seedless_class_prompts`. Note this cell draws its label from the balance, so it imposes rather than inherits — see Limitations. |
 
-**`structured` (Taxonomy)** — one sample is a whole artifact, so `seedless` is
-pinned to `true` (seeded is unimplemented) and only `mode` varies:
+**`structured` (Taxonomy)** — one sample is a whole artifact. The `mode` and
+`seedless` axes both vary, yielding four cells. Seeded cells verify against a
+computed gold graph rather than parsing one from model output:
 
-| | `seedless: true` |
-|---|---|
-| **`mode: inverse`** (default) | A structural target is sampled from the real profile and imposed; the feedback loop iterates toward it for a bounded number of rounds. |
-| **`mode: forward`** | Only the domain is supplied. Size, depth and branching all emerge, and there is no feedback loop — the baseline for judging what targeting buys. |
+| | `seedless: false` (seeded) | `seedless: true` |
+|---|---|---|
+| **`mode: forward`** | Inherits the seed subtree's structure. No profile needed. | Only the domain is supplied. Size, depth and branching all emerge. |
+| **`mode: inverse`** (default) | Edits the seed toward a target sampled from the profile. | A structural target is sampled from the real profile and imposed; the feedback loop iterates toward it for a bounded number of rounds. |
 
 ### Setting it
 
