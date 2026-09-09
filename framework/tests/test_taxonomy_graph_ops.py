@@ -213,6 +213,54 @@ class EditOperatorTests(unittest.TestCase):
                 self.assertEqual(classes, _CLASSES)
                 self.assertEqual(axioms, [list(a) for a in _AXIOMS])
 
+    def test_every_operator_returns_a_closed_graph_on_a_dag(self):
+        # The tree fixture cannot reach the multi-parent paths where these
+        # operators actually go wrong.
+        for name, op in EDIT_OPERATORS.items():
+            with self.subTest(operator=name):
+                result = op(_DAG_CLASSES, _DAG_AXIOMS, Random(1))
+                self.assertIsNotNone(result, f"{name} found nothing to do on the DAG")
+                classes, axioms = result
+                names = set(classes)
+                for child, parent in axioms:
+                    self.assertIn(child, names)
+                    self.assertIn(parent, names)
+
+    def test_no_operator_emits_a_duplicate_axiom(self):
+        # reparent could rewrite a row into one that already existed, leaving a
+        # duplicate and dropping the edge it replaced.
+        for name, op in EDIT_OPERATORS.items():
+            for seed in range(25):
+                with self.subTest(operator=name, seed=seed):
+                    result = op(_DAG_CLASSES, _DAG_AXIOMS, Random(seed))
+                    if result is None:
+                        continue
+                    _, axioms = result
+                    pairs = [tuple(a) for a in axioms]
+                    self.assertEqual(len(pairs), len(set(pairs)))
+
+    def test_reparent_never_drops_an_edge_without_replacing_it(self):
+        # Direct regression for the reported failure: on a child with two
+        # parents, reparent must not collapse both rows onto one parent.
+        for seed in range(25):
+            with self.subTest(seed=seed):
+                result = reparent(["P1", "P2", "child"],
+                                  [["child", "P1"], ["child", "P2"]], Random(seed))
+                if result is None:
+                    continue
+                _, axioms = result
+                pairs = {tuple(a) for a in axioms}
+                self.assertEqual(len(pairs), 2, f"edge count changed: {axioms}")
+
+    def test_operators_do_not_mutate_a_dag_input(self):
+        for name, op in EDIT_OPERATORS.items():
+            with self.subTest(operator=name):
+                classes = list(_DAG_CLASSES)
+                axioms = [list(a) for a in _DAG_AXIOMS]
+                op(classes, axioms, Random(2))
+                self.assertEqual(classes, _DAG_CLASSES)
+                self.assertEqual(axioms, [list(a) for a in _DAG_AXIOMS])
+
 
 if __name__ == "__main__":
     unittest.main()

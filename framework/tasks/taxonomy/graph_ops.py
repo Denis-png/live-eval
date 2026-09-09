@@ -107,7 +107,7 @@ def sample_subtrees(classes, axioms, *, max_depth: int = 4,
 
 
 def drop_leaf(classes, axioms, rng):
-    """Remove one leaf class and the edge to its parent. Reduces breadth."""
+    """Remove one leaf class and every edge to its parents. Reduces breadth."""
     parents = {c for c, _ in axioms}
     non_leaf = {p for _, p in axioms}
     leaves = sorted(c for c in classes if c in parents and c not in non_leaf)
@@ -119,18 +119,33 @@ def drop_leaf(classes, axioms, rng):
 
 
 def reparent(classes, axioms, rng):
-    """Move one class under a different parent. Changes depth locally."""
+    """Move one class under a different parent. Changes depth locally.
+
+    Ontologies are DAGs, so a child may already have several parents. A
+    candidate that is ALREADY a parent of the child is excluded: rewriting the
+    matched row into a row that already exists would leave a duplicate axiom and
+    silently drop the distinct edge it replaced.
+    """
+    parents_of: dict[str, list[str]] = {}
+    for child, parent in axioms:
+        parents_of.setdefault(child, []).append(parent)
+    children = _children_index(axioms)          # loop-invariant: build once
     candidates = []
     for child, parent in axioms:
-        descendants = _descendants(child, _children_index(axioms))
+        descendants = _descendants(child, children)
         for new_parent in classes:
-            if new_parent not in (child, parent) and new_parent not in descendants:
-                candidates.append((child, parent, new_parent))
+            if new_parent == child or new_parent in descendants:
+                continue
+            if new_parent in parents_of[child]:
+                continue
+            candidates.append((child, parent, new_parent))
     if not candidates:
         return None
     child, old, new = rng.choice(sorted(candidates))
-    return (list(classes),
-            sorted([[c, (new if (c, p) == (child, old) else p)] for c, p in axioms]))
+    out = {(c, p) for c, p in axioms}
+    out.discard((child, old))
+    out.add((child, new))
+    return list(classes), sorted([c, p] for c, p in out)
 
 
 def collapse_level(classes, axioms, rng):
