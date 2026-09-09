@@ -67,7 +67,7 @@ class InverseRefusalTests(unittest.TestCase):
 class ForwardRefusalTests(unittest.TestCase):
     def test_refusal_is_skipped_in_forward_mode(self):
         gen = FakeGenerator(["I cannot help with generating spam or deceptive messages."])
-        out = gen.generate(
+        out = gen.generate_forward(
             real_samples=_REAL,
             error_types=["phishing_link"],
             prompt_instruction="Rewrite: {sentence}",

@@ -26,18 +26,30 @@ class SpamTask(BaseTask):
     def get_carrier_prompt(self) -> str | None:
         return self._config.get("carrier_prompt")
 
-    def get_forward_prompt(self) -> str | None:
-        return self._config.get("forward_prompt")
+    def get_forward_prompts(self) -> dict[str, str]:
+        return self._config.get("forward_prompts", {})
 
     def get_seedless_class_prompts(self) -> dict[str, str]:
         return self._config.get("seedless_class_prompts", {})
 
-    def get_seed_pool(self, config: dict, real_data: list[dict], mode: str) -> list[dict]:
-        """Forward mode imitates within a class, so it needs labeled seeds of
-        BOTH classes — parse_row keeps HAM only. Inverse keeps today's pool."""
-        if mode != "forward":
-            return real_data
-        return [r for r in self._load_reference_rows(config) if r.get("text")]
+    def get_seed_pool(self, config: dict, real_data: list[dict], mode: str,
+                      *, seed_weights: dict | None = None, rng=None) -> list[dict]:
+        """Labeled seeds of BOTH classes, for forward AND inverse.
+
+        parse_row keeps HAM only, which is why inverse used to produce HAM by
+        paraphrasing another HAM seed: there were no spam seeds to impose a
+        label on. Inverse draws its target independently, so it needs the same
+        both-class reference rows forward already used — reshaped to each
+        policy's own seed_field convention: forward's seed_policy="inherit"
+        reads "text" (unchanged), while inverse's seed_policy="impose" reads
+        "incorrect", matching real_data's post-parse_row shape.
+
+        Spam's control input is the signal distribution it already injects, so
+        `seed_weights`/`rng` are accepted for signature compatibility only."""
+        rows = [r for r in self._load_reference_rows(config) if r.get("text")]
+        if mode == "forward":
+            return rows
+        return [{"incorrect": r["text"], "label": r["label"]} for r in rows]
 
     def get_prompt_instruction(self) -> str:
         return self._config["prompt"]
@@ -45,11 +57,11 @@ class SpamTask(BaseTask):
     def get_judge_prompt(self) -> str | None:
         return self._config.get("judge_prompt")
 
-    def get_inverse_prompt(self) -> str | None:
-        return self._config.get("inverse_prompt")
+    def get_class_labels(self) -> tuple[str, ...]:
+        return ("SPAM", "HAM")
 
-    def get_ham_generation_prompt(self) -> str:
-        return self._config["ham_generation_prompt"]
+    def get_inverse_class_prompts(self) -> dict[str, str]:
+        return self._config.get("inverse_class_prompts", {})
 
     def get_inverse_judge_prompt(self) -> str | None:
         return self._config.get("inverse_judge_prompt")
@@ -104,7 +116,7 @@ class SpamTask(BaseTask):
         supported = set(self.get_error_descriptions().keys())
         return profile_spam_distribution(spam_rows, supported, count_max=count_max)
 
-    def profile_dataset(self, rows: list[dict]) -> dict:
+    def build_fidelity_profile(self, rows: list[dict]) -> dict:
         """Class balance + per-signal fire rate + normalized signal / count
         distributions over the SPAM messages, using the same detectors the
         generator injects (so real and generated are measured identically)."""
@@ -166,7 +178,7 @@ class SpamTask(BaseTask):
             "style_per_label": style_per_label,
         }
 
-    def compare_profiles(self, real: dict, generated: dict) -> dict:
+    def compare_fidelity_profiles(self, real: dict, generated: dict) -> dict:
         """Real→generated deltas + Jensen-Shannon divergences. See fidelity honesty
         note: signals are re-detected by regex, so this measures detector-visible
         distribution match, not ground-truth semantics."""
@@ -210,6 +222,11 @@ class SpamTask(BaseTask):
             "note": "signals re-detected by regex on generated text; measures "
                     "detector-visible distribution match, not semantic spamminess.",
         }
+
+    def get_calibration_keys(self) -> dict[str, str]:
+        # build_fidelity_profile already restricts signals to get_error_descriptions()
+        # keys, so the measured key space matches the target's by construction.
+        return {"type_dist": "signal_type_dist", "count_dist": "signal_count_dist"}
 
     def get_evaluators(self) -> list[str]:
         return self._config["evaluators"]

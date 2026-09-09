@@ -34,13 +34,22 @@ class SpamCellDispatchTests(unittest.TestCase):
     def _policy(self):
         return self.generator.generate_class_conditional.call_args.kwargs["seed_policy"]
 
-    def test_inverse_seeded_uses_cross_class_with_real_data(self):
+    def test_inverse_seeded_uses_impose_with_the_labeled_both_class_pool(self):
+        # Pre-symmetry, inverse seeded straight from real_data — parse_row's
+        # HAM-only output — so imposing SPAM was impossible: there were no
+        # SPAM seeds in the pool. Inverse now goes through get_seed_pool, the
+        # same labeled both-class source forward uses, so it can impose either
+        # label onto either class's seed.
+        rows = [{"text": "hi", "label": "HAM"}, {"text": "WIN", "label": "SPAM"}]
         real = [{"incorrect": "see you at lunch"}]
-        _run_generation(self.generator, self.task, _config("inverse", False), real,
-                        DIST, None, 0.5, profile=None)
-        self.assertEqual(self._policy(), "cross_class")
+        with mock.patch.object(SpamTask, "_load_reference_rows", return_value=rows):
+            _run_generation(self.generator, self.task, _config("inverse", False), real,
+                            DIST, None, 0.5, profile=None)
+        self.assertEqual(self._policy(), "impose")
         kwargs = self.generator.generate_class_conditional.call_args.kwargs
-        self.assertEqual(kwargs["real_seeds"], real)
+        self.assertEqual(kwargs["real_seeds"], [{"incorrect": "hi", "label": "HAM"},
+                                                  {"incorrect": "WIN", "label": "SPAM"}])
+        self.assertEqual(kwargs["seed_field"], "incorrect")
         self.assertFalse(self.generator.generate_carriers.called)
 
     def test_inverse_seedless_feeds_carriers_as_seeds(self):
@@ -49,16 +58,16 @@ class SpamCellDispatchTests(unittest.TestCase):
                         DIST, None, 0.5, profile=PROFILE)
         self.assertTrue(self.generator.generate_carriers.called)
         kwargs = self.generator.generate_class_conditional.call_args.kwargs
-        self.assertEqual(kwargs["seed_policy"], "cross_class")
+        self.assertEqual(kwargs["seed_policy"], "impose")
         self.assertEqual(kwargs["real_seeds"], [{"text": "a synthetic ham message"}])
 
-    def test_forward_seeded_uses_same_class_with_labeled_pool(self):
+    def test_forward_seeded_uses_inherit_with_labeled_pool(self):
         rows = [{"text": "hi", "label": "HAM"}, {"text": "WIN", "label": "SPAM"}]
         with mock.patch.object(SpamTask, "_load_reference_rows", return_value=rows):
             _run_generation(self.generator, self.task, _config("forward", False),
                             [{"incorrect": "x"}], DIST, None, 0.5, profile=None)
         kwargs = self.generator.generate_class_conditional.call_args.kwargs
-        self.assertEqual(kwargs["seed_policy"], "same_class")
+        self.assertEqual(kwargs["seed_policy"], "inherit")
         self.assertEqual(kwargs["real_seeds"], rows)
 
     def test_forward_seedless_uses_none_policy_with_per_label_specs(self):
@@ -101,6 +110,42 @@ class SpamCellDispatchTests(unittest.TestCase):
         self.assertIn("data/spam_ref.csv", message)
         self.assertFalse(self.generator.generate_class_conditional.called)
 
+    def test_inverse_missing_a_labels_prompt_raises_before_any_generator_call(self):
+        """The sixth unsupported-cell guard, and the only one that was
+        uncovered: inverse renders EVERY drawn label through
+        get_inverse_class_prompts(), so a label present in get_class_labels()
+        but absent from that mapping must abort before any API call — not
+        lazily, once rng happens to draw the uncovered label somewhere between
+        the first and the last paid call of the run."""
+        only_spam = {"SPAM": SpamTask().get_inverse_class_prompts()["SPAM"]}
+        rows = [{"text": "hi", "label": "HAM"}, {"text": "WIN", "label": "SPAM"}]
+        with mock.patch.object(SpamTask, "get_inverse_class_prompts",
+                               return_value=only_spam):
+            with mock.patch.object(SpamTask, "_load_reference_rows", return_value=rows):
+                with self.assertRaises(RuntimeError) as ctx:
+                    _run_generation(self.generator, self.task,
+                                    _config("inverse", False),
+                                    [{"incorrect": "see you at lunch"}],
+                                    DIST, None, 0.5, profile=None)
+        message = str(ctx.exception)
+        self.assertIn("spam", message)
+        self.assertIn("HAM", message)                        # names the label
+        self.assertIn("get_inverse_class_prompts", message)  # and the accessor
+        self.assertFalse(self.generator.generate_class_conditional.called)
+
+    def test_inverse_seedless_missing_prompt_raises_before_synthesizing_carriers(self):
+        """Same guard on the seedless half of inverse: carrier synthesis is
+        itself a paid generator call, so the check must precede it too."""
+        only_spam = {"SPAM": SpamTask().get_inverse_class_prompts()["SPAM"]}
+        with mock.patch.object(SpamTask, "get_inverse_class_prompts",
+                               return_value=only_spam):
+            with self.assertRaises(RuntimeError) as ctx:
+                _run_generation(self.generator, self.task, _config("inverse", True),
+                                [], DIST, None, 0.5, profile=PROFILE)
+        self.assertIn("HAM", str(ctx.exception))
+        self.assertFalse(self.generator.generate_carriers.called)
+        self.assertFalse(self.generator.generate_class_conditional.called)
+
     def test_forward_seedless_raises_without_seedless_class_prompts(self):
         """A spam task double that lacks seedless_class_prompts has no per-label
         template to drive the seed_policy="none" cell — must fail fast."""
@@ -118,12 +163,12 @@ class SpamCellDispatchTests(unittest.TestCase):
 
 class ForwardSeededFailFastTests(unittest.TestCase):
     """The last of the five unsupported-cell guards to gain coverage: spam
-    forward+seeded needs a forward_prompt, and must say so before any API call."""
+    forward+seeded needs forward_prompts, and must say so before any API call."""
 
     def test_missing_forward_prompt_names_task_cell_and_accessor(self):
         task = SpamTask()
         generator = mock.Mock()
-        with mock.patch.object(SpamTask, "get_forward_prompt", return_value=None):
+        with mock.patch.object(SpamTask, "get_forward_prompts", return_value={}):
             with self.assertRaises(RuntimeError) as ctx:
                 _run_generation(generator, task, _config("forward", False),
                                 [{"incorrect": "x"}], DIST, None, 0.5, profile=None)
@@ -131,7 +176,7 @@ class ForwardSeededFailFastTests(unittest.TestCase):
         self.assertIn("spam", message)
         self.assertIn("mode=forward", message)
         self.assertIn("seedless=false", message)
-        self.assertIn("forward_prompt", message)
+        self.assertIn("forward_prompts", message)
         self.assertFalse(generator.generate_class_conditional.called)
 
 if __name__ == "__main__":

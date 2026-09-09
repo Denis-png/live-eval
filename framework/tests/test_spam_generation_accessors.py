@@ -13,11 +13,26 @@ class SpamPromptTests(unittest.TestCase):
         self.assertIn("{spec}", prompt)
         self.assertIn("Message:", prompt)
 
-    def test_forward_prompt_has_sentence_and_class_name(self):
-        prompt = self.task.get_forward_prompt()
-        self.assertIn("{sentence}", prompt)
-        self.assertIn("{class_name}", prompt)
-        self.assertIn("Rewritten:", prompt)
+    def test_forward_prompts_cover_both_labels(self):
+        prompts = self.task.get_forward_prompts()
+        self.assertEqual(set(prompts), {"SPAM", "HAM"})
+        for prompt in prompts.values():
+            self.assertIn("{sentence}", prompt)
+            self.assertIn("Rewritten:", prompt)
+
+    def test_only_the_positive_forward_prompt_takes_a_signal_mix(self):
+        # Forward SPAM targets the empirical signal distribution rather than
+        # inheriting whatever its seed carried; HAM has no signals to emphasise.
+        prompts = self.task.get_forward_prompts()
+        self.assertIn("{error_spec}", prompts["SPAM"])
+        self.assertNotIn("{error_spec}", prompts["HAM"])
+
+    def test_superseded_prose_profile_prompts_are_gone(self):
+        # dataset_profiling/profile_inject/profile_ham/spam_to_spam described an
+        # earlier prose-profile strategy that the two-knob model replaced.
+        for key in ("dataset_profiling_prompt", "profile_inject_prompt",
+                    "profile_ham_prompt", "spam_to_spam_prompt"):
+            self.assertNotIn(key, self.task._config)
 
     def test_seedless_class_prompts_cover_both_labels(self):
         prompts = self.task.get_seedless_class_prompts()
@@ -41,10 +56,19 @@ class SpamSeedPoolTests(unittest.TestCase):
             pool = task.get_seed_pool({"dataset": {}}, [{"incorrect": "x"}], "forward")
         self.assertEqual(pool, rows)
 
-    def test_inverse_mode_returns_real_data_unchanged(self):
+    def test_inverse_mode_returns_the_same_labeled_both_class_pool_as_forward(self):
+        # Pre-symmetry, inverse returned real_data unchanged — parse_row's
+        # HAM-only output — so inverse could only ever impose a label onto a
+        # HAM seed. Inverse now draws its target independently of the seed's
+        # own class, so it needs SPAM seeds too: the same both-class rows
+        # forward already used, reshaped to real_data's "incorrect" field.
         task = SpamTask()
+        rows = [{"text": "hi", "label": "HAM"}, {"text": "WIN", "label": "SPAM"}]
         real = [{"incorrect": "x"}]
-        self.assertIs(task.get_seed_pool({"dataset": {}}, real, "inverse"), real)
+        with mock.patch.object(SpamTask, "_load_reference_rows", return_value=rows):
+            pool = task.get_seed_pool({"dataset": {}}, real, "inverse")
+        self.assertEqual(pool, [{"incorrect": "hi", "label": "HAM"},
+                                 {"incorrect": "WIN", "label": "SPAM"}])
 
 
 if __name__ == "__main__":

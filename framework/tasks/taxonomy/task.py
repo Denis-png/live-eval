@@ -160,9 +160,22 @@ class TaxonomyTask(BaseTask):
             "metadata": row.get("metadata") or {},
         }
 
-    def build_structured_generation_prompt(self, profile: dict, rng=None, feedback: dict | None = None) -> str:
-        """Build a taxonomy generation prompt from structural profile targets only."""
+    def build_structured_generation_prompt(
+        self, profile: dict, rng=None, feedback: dict | None = None,
+        mode: str = "inverse",
+    ) -> str:
+        """Build a taxonomy generation prompt.
+
+        `inverse` imposes a structural target sampled from the real profile (and
+        carries feedback from the previous round). `forward` supplies only the
+        domain — every count, depth and branching property emerges, which is what
+        makes a forward-vs-inverse comparison measure what targeting buys.
+        """
         spec = self._generation_spec_from_profile(profile, rng=rng)
+        if mode == "forward":
+            return self._config["structured_forward_prompt"].format(
+                domain=spec.get("domain", ""),
+            )
         return self._config["structured_generation_prompt"].format(
             spec_json=json.dumps(spec, indent=2, sort_keys=True, ensure_ascii=False),
             feedback_section=self._format_feedback_section(feedback),
@@ -268,7 +281,7 @@ class TaxonomyTask(BaseTask):
     def get_real_eval_samples(self, config: dict, real_data: list[dict]) -> list[dict]:
         return [self._eval_sample(row) for row in real_data]
 
-    def profile_dataset(self, rows: list[dict]) -> dict:
+    def build_fidelity_profile(self, rows: list[dict]) -> dict:
         """Profile taxonomy artifacts with the same structural profiler for all sides.
 
         The run-level artifact intentionally strips class-name-bearing debug
@@ -280,7 +293,7 @@ class TaxonomyTask(BaseTask):
 
         return sanitize_taxonomy_profile(profile_taxonomy_rows(rows))
 
-    def compare_profiles(self, real: dict, generated: dict) -> dict:
+    def compare_fidelity_profiles(self, real: dict, generated: dict) -> dict:
         """Real-vs-synthetic structural fidelity for taxonomy profiles."""
         from framework.profiling.taxonomy_fidelity import compare_taxonomy_profiles
 
@@ -302,18 +315,24 @@ class TaxonomyTask(BaseTask):
 
     def build_structural_feedback(
         self,
-        real_profile: dict,
-        synthetic_taxonomy: dict,
+        profile: dict,
+        artifact: dict,
         generation_config: dict | None = None,
     ) -> dict[str, Any]:
-        """Profile one generated taxonomy and derive structural feedback."""
+        """Profile one generated taxonomy and derive structural feedback.
+
+        Parameter names follow BaseTask's contract (`profile`, `artifact`) so
+        this is a true override and a keyword call against the declared
+        signature works; here they are the real taxonomy profile and one
+        generated taxonomy.
+        """
         from framework.profiling.taxonomy_fidelity import (
             build_generation_feedback,
             compare_taxonomy_profiles,
         )
 
-        synthetic_profile = self.profile_dataset([synthetic_taxonomy])
-        comparison = compare_taxonomy_profiles(real_profile, synthetic_profile)
+        synthetic_profile = self.build_fidelity_profile([artifact])
+        comparison = compare_taxonomy_profiles(profile, synthetic_profile)
         per_taxonomy = comparison["comparisons"][0] if comparison["comparisons"] else {}
         reference = comparison["real_profile"]
         synthetic = comparison["synthetic_profiles"][0] if comparison["synthetic_profiles"] else {}

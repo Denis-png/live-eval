@@ -20,6 +20,10 @@ class FakeTask:
     def get_generation_strategy(self): return "corruption"
     # forward-mode hooks
     def get_error_types(self):       return ["article"]
+    # BaseTask's default seed pool: forward+seeded feeds the real rows unchanged
+    # unless a task draws them by calibrated seed weight (GEC).
+    def get_seed_pool(self, config, real_data, mode, *, seed_weights=None, rng=None):
+        return real_data
     def get_prompt_instruction(self): return "Fix: {sentence}"
     def get_judge_prompt(self):      return None
     # inverse-mode hooks

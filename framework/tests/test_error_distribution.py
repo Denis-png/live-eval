@@ -9,6 +9,9 @@ class NoProfileTask:
     def get_task_name(self):
         return "gec"
 
+    def get_generation_strategy(self):
+        return "corruption"
+
     def profile_error_distribution(self, real_data, count_max=5, config=None):
         return None
 

@@ -6,7 +6,7 @@ import sys
 import yaml
 
 try:
-    from framework.pipeline import run_pipeline
+    from framework.pipeline import resolve_mode, run_pipeline
 except ModuleNotFoundError as exc:
     if exc.name != "framework":
         raise
@@ -127,16 +127,14 @@ def validate_config(config: dict) -> None:
         mode = gen.get("mode", "forward")
         task_name = (config.get("task") or {}).get("name")
         if task_name == "taxonomy":
-            if "mode" in gen:
-                problems.append(
-                    "'generation.mode' is not applicable for task 'taxonomy'; omit it"
-                )
             if gen.get("seedless") is False:
                 problems.append(
-                    "'taxonomy' structured generation is profile-driven; "
-                    "'generation.seedless' must be omitted or true"
+                    f"seeded structured generation is not implemented for "
+                    f"'{task_name}'; it needs a real-artifact corpus and a "
+                    "perturbation operator. 'generation.seedless' must be "
+                    "omitted or true"
                 )
-        elif mode not in ("forward", "inverse"):
+        if mode not in ("forward", "inverse"):
             problems.append(f"'generation.mode' must be 'forward' or 'inverse' (got '{mode}')")
         seedless = gen.get("seedless", False)
         if not isinstance(seedless, bool):
@@ -262,7 +260,7 @@ def _display_generation_mode(config: dict) -> str:
     """Human-readable mode label for startup output only."""
     task_name = (config.get("task") or {}).get("name")
     if task_name == "taxonomy":
-        return "n/a (structured generation)"
+        return resolve_mode(config, "structured")
     return config["generation"].get("mode", "n/a (class-conditional generation)")
 
 

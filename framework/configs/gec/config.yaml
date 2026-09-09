@@ -22,15 +22,21 @@ dataset:
 
 # ── Generation (LLM that creates synthetic corrupted sentences) ──
 generation:
-  mode: "inverse"                  # forward | inverse — the full switch; modes need no extra config
-  seedless: true            # true = generate from the profile only, no real seeds
+  mode: "forward"                  # forward | inverse — the full switch; modes need no extra config
+  seedless: false            # true = generate from the profile only, no real seeds
   # profile_path: "framework/data/profiles/gec/<benchmark>_<n>_gec_profile.json"
   #   Only needed to disambiguate when the task dir holds several profiles;
   #   otherwise the single profile in that directory is used.
   provider: "openrouter"           # groq | openai | openrouter | mistral | minimax | anthropic | google
   model: "minimax-m3"
   temperature: 1.0             # CoT 3-step prompt benefits from higher T
-  max_tokens: 1024             # required by Anthropic; ignored by OpenAI-compatible providers
+  max_tokens: 16384            # HARD CAP on the response, honoured by every provider
+                              # (the old comment claiming OpenAI-compatible providers
+                              # ignore it was wrong). minimax-m3 is a reasoning model
+                              # and this 3-step CoT prompt is expensive: measured
+                              # completions ran 1881-7376 tokens, so 1024 truncated
+                              # ~2/3 of calls. A truncated response is now skipped
+                              # loudly (TruncatedResponse), never parsed.
   num_runs: 3                  # repeat N times → outputs mean ± std
   sample_size: 150            # synthetic samples per run (single source of truth;
                               # dataset pool is loaded to match)
@@ -48,7 +54,12 @@ profiling:
   provider: "openrouter"
   model: "minimax-m3"
   temperature: 0
-  max_tokens: 1024
+  # The consolidation call (raw labels -> canonical topics) grows with the
+  # number of DISTINCT labels, so it scales with --topic-sample-size. Measured
+  # at 1105 completion tokens for a 40-text sample: already over the old 1024.
+  # A truncated consolidation is fail-soft but degrades the profile to
+  # unconsolidated raw labels, which is what seedless generation samples from.
+  max_tokens: 8192
   timeout: 300
   max_retries: 2
 
@@ -60,7 +71,11 @@ judge:
   provider: "openrouter"
   model: "minimax-m3"
   temperature: 0
-  max_tokens: 1024
+  # Verdicts are two lines, but minimax-m3 reasons first: measured 122-982
+  # completion tokens over 8 samples, i.e. 1.0x headroom against the old 1024.
+  # Since truncation is now a hard skip, a truncated judge would DROP a good
+  # sample rather than silently defaulting to keep.
+  max_tokens: 4096
   timeout: 300
   max_retries: 1
 

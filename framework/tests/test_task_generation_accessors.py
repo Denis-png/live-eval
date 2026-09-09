@@ -21,7 +21,7 @@ class BaseTaskDefaultsTests(unittest.TestCase):
     def test_generation_accessors_default_to_empty(self):
         self.assertIsNone(self.task.get_carrier_prompt())
         self.assertIsNone(self.task.get_seedless_forward_prompt())
-        self.assertIsNone(self.task.get_forward_prompt())
+        self.assertEqual(self.task.get_forward_prompts(), {})
         self.assertEqual(self.task.get_seedless_class_prompts(), {})
 
     def test_profile_side_defaults_to_correct(self):

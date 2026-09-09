@@ -6,7 +6,7 @@ from unittest import mock
 
 import framework.pipeline as pipeline
 from framework.main import validate_config
-from framework.pipeline import _load_generation_profile
+from framework.pipeline import _load_benchmark_profile
 from framework.tasks.base_task import BaseTask
 
 
@@ -51,7 +51,7 @@ class ValidateSeedlessTests(unittest.TestCase):
 class LoadGenerationProfileTests(unittest.TestCase):
     def test_returns_none_when_not_seedless(self):
         self.assertIsNone(
-            _load_generation_profile(_base_config(seedless=False), FakeTask())
+            _load_benchmark_profile(_base_config(seedless=False), FakeTask())
         )
 
     def test_loads_configured_path(self):
@@ -62,7 +62,7 @@ class LoadGenerationProfileTests(unittest.TestCase):
                            "topics": {"a": {"fraction": 1.0}},
                            "length_distributions": {"correct": {"words": {"bins": {"6-10": 1.0}}}},
                            "style": {"correct": {}}}, f)
-            profile = _load_generation_profile(
+            profile = _load_benchmark_profile(
                 _base_config(seedless=True, profile_path=path), FakeTask()
             )
             self.assertEqual(profile["profile_version"], 2)
@@ -74,7 +74,7 @@ class LoadGenerationProfileTests(unittest.TestCase):
         # local dev, and this test must not depend on that being absent.
         with mock.patch.object(pipeline, "DEFAULT_PROFILE_DIR", "/nonexistent/profiles/dir"):
             with self.assertRaises(RuntimeError) as ctx:
-                _load_generation_profile(_base_config(seedless=True), FakeTask())
+                _load_benchmark_profile(_base_config(seedless=True), FakeTask())
         message = str(ctx.exception)
         # Profiles live per task and are named for the benchmark and sample size,
         # so the error shows the pattern searched, not one invented filename.
@@ -90,7 +90,7 @@ class LoadGenerationProfileTests(unittest.TestCase):
                     json.dump({"profile_version": 2}, f)
             with mock.patch.object(pipeline, "DEFAULT_PROFILE_DIR", d):
                 with self.assertRaises(RuntimeError) as ctx:
-                    _load_generation_profile(_base_config(seedless=True), FakeTask())
+                    _load_benchmark_profile(_base_config(seedless=True), FakeTask())
             message = str(ctx.exception)
             self.assertIn("fce_150_gec_profile.json", message)
             self.assertIn("conll_500_gec_profile.json", message)
@@ -106,7 +106,7 @@ class LoadGenerationProfileTests(unittest.TestCase):
                            "length_distributions": {"correct": {"words": {"bins": {"6-10": 1.0}}}},
                            "style": {"correct": {}}}, f)
             with mock.patch.object(pipeline, "DEFAULT_PROFILE_DIR", d):
-                profile = _load_generation_profile(_base_config(seedless=True), FakeTask())
+                profile = _load_benchmark_profile(_base_config(seedless=True), FakeTask())
             self.assertEqual(profile["profile_version"], 2)
 
     def test_classification_profile_validated_against_per_label_topics(self):
@@ -115,7 +115,7 @@ class LoadGenerationProfileTests(unittest.TestCase):
             with open(path, "w", encoding="utf-8") as f:
                 json.dump({"profile_version": 2, "topics": {"a": {"fraction": 1.0}}}, f)
             with self.assertRaises(RuntimeError) as ctx:
-                _load_generation_profile(
+                _load_benchmark_profile(
                     _base_config(seedless=True, profile_path=path),
                     FakeTask(strategy="class_conditional", name="spam"),
                 )
@@ -132,7 +132,7 @@ class _FakeGenerator:
     def call_api(self, prompt):
         return ""
 
-    def generate(self, **kw):
+    def generate_forward(self, **kw):
         return [{"original": "a", "corrupted": "b b b", "error_type": "article"}
                 for _ in range(kw["sample_size"])]
 
@@ -194,7 +194,7 @@ class ErrorDistLoadedForSeedlessForwardTests(unittest.TestCase):
             with mock.patch.object(pipeline, "load_task", lambda name: _FakeCorruptionTask()), \
                  mock.patch.object(pipeline, "load_generator", lambda c: _FakeGenerator()), \
                  mock.patch.object(pipeline, "load_real_data", lambda cfg, task: []), \
-                 mock.patch.object(pipeline, "_load_generation_profile", lambda cfg, task: _FAKE_PROFILE), \
+                 mock.patch.object(pipeline, "_load_benchmark_profile", lambda cfg, task: _FAKE_PROFILE), \
                  mock.patch.object(pipeline, "load_error_distribution", loader):
                 pipeline.run_pipeline(config)
             self.assertTrue(loader.called)
@@ -237,9 +237,12 @@ class GenerationCellSlugTests(unittest.TestCase):
         self.assertEqual(self._slug("class_conditional", seedless=True),
                          "inverse_seedless")
 
-    def test_structured_has_no_mode_or_seed_axis(self):
-        self.assertEqual(self._slug("structured"), "structured")
-        self.assertEqual(self._slug("structured", mode="forward"), "structured")
+    def test_structured_joins_the_mode_axis(self):
+        # Structured is now on the mode axis like every other strategy, so the
+        # slug includes the mode and is always seedless until seeded structured
+        # generation is implemented.
+        self.assertEqual(self._slug("structured"), "inverse_seedless")
+        self.assertEqual(self._slug("structured", mode="forward"), "forward_seedless")
 
     def test_slug_matches_the_mode_meta_records(self):
         for strategy in ("corruption", "class_conditional"):
@@ -263,7 +266,7 @@ class ProfileNamingTests(unittest.TestCase):
                          "local": {"path": "framework/data/benchmarks/gec/fce.m2",
                                    "format": "m2"}})
         self.assertEqual(pipeline.benchmark_slug(cfg), "fce")
-        self.assertEqual(pipeline.profile_filename(cfg, "gec", 150),
+        self.assertEqual(pipeline.benchmark_profile_filename(cfg, "gec", 150),
                          "fce_150_gec_profile.json")
 
     def test_huggingface_benchmark_uses_the_last_name_component(self):
@@ -271,7 +274,7 @@ class ProfileNamingTests(unittest.TestCase):
                          "huggingface": {"name": "cardiffnlp/tweet_eval",
                                          "split": "test"}})
         self.assertEqual(pipeline.benchmark_slug(cfg), "tweet_eval")
-        self.assertEqual(pipeline.profile_filename(cfg, "sentiment", 3000),
+        self.assertEqual(pipeline.benchmark_profile_filename(cfg, "sentiment", 3000),
                          "tweet_eval_3000_sentiment_profile.json")
 
     def test_slug_is_filesystem_safe(self):
@@ -280,10 +283,10 @@ class ProfileNamingTests(unittest.TestCase):
         self.assertEqual(pipeline.benchmark_slug(cfg), "spam_detection_v2")
 
     def test_profiles_are_grouped_per_task(self):
-        self.assertEqual(pipeline.profile_dir("spam"),
+        self.assertEqual(pipeline.benchmark_profile_dir("spam"),
                          os.path.join(pipeline.DEFAULT_PROFILE_DIR, "spam"))
 
     def test_two_sample_sizes_do_not_collide(self):
         cfg = self._cfg({"source": "local", "local": {"path": "b/fce.m2"}})
-        self.assertNotEqual(pipeline.profile_filename(cfg, "gec", 150),
-                            pipeline.profile_filename(cfg, "gec", 500))
+        self.assertNotEqual(pipeline.benchmark_profile_filename(cfg, "gec", 150),
+                            pipeline.benchmark_profile_filename(cfg, "gec", 500))

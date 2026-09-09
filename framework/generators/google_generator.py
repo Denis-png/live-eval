@@ -2,7 +2,7 @@ import google.generativeai as genai
 from google.api_core import exceptions as gax_exceptions
 from google.api_core.retry import Retry
 
-from .base_generator import BaseGenerator
+from .base_generator import BaseGenerator, TruncatedResponse
 
 
 class GoogleGenerator(BaseGenerator):
@@ -29,11 +29,12 @@ class GoogleGenerator(BaseGenerator):
             else None
         )
         genai.configure(api_key=config["api_key"])
+        self.max_tokens = config.get("max_tokens")
         self.model = genai.GenerativeModel(
             model_name=config["model"],
             generation_config=genai.GenerationConfig(
                 temperature=self.temperature,
-                max_output_tokens=config.get("max_tokens"),
+                max_output_tokens=self.max_tokens,
             ),
         )
 
@@ -46,6 +47,13 @@ class GoogleGenerator(BaseGenerator):
         # (e.g. a safety block or recitation stop) — surface an empty string so
         # the generator's parse-failure handling skips the sample instead of
         # crashing the whole run.
+        if response.candidates and str(
+            getattr(response.candidates[0], "finish_reason", "")
+        ).upper().endswith("MAX_TOKENS"):
+            raise TruncatedResponse(
+                f"response truncated at max_tokens={self.max_tokens} "
+                f"(finish_reason=MAX_TOKENS) — raise generation.max_tokens"
+            )
         if not response.candidates or not response.candidates[0].content.parts:
             return ""
         return response.text

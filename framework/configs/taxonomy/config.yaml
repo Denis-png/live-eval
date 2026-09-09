@@ -1,14 +1,20 @@
 # Taxonomy Induction — benchmark + task selection.
 #
 # This is the config `python -m framework.profile_dataset` and the taxonomy
-# tooling read. It deliberately carries NO `generation:` block and no
-# `mode` / `seedless` knobs, unlike the other tasks:
+# tooling read. It deliberately carries NO `generation:` block by default,
+# unlike the other tasks — but `generation.mode` / `generation.seedless` DO
+# apply here; add a `generation:` block to set them:
 #
-#   Taxonomy uses the `structured` strategy, which builds from the benchmark's
-#   schema alone and has no seed/mode axis. The dispatch does not merely ignore
-#   those knobs — it REJECTS a real `mode` value and rejects `seedless: false`
-#   (see pipeline._run_generation), so copying the other tasks' knobs here would
-#   make every taxonomy run fail.
+#   Taxonomy uses the `structured` strategy — one sample is a whole artifact.
+#   It IS on the mode axis: `inverse` (the default) imposes a structural target
+#   sampled from the real profile and iterates toward it with the feedback loop;
+#   `forward` supplies only the domain and lets every structural property emerge,
+#   which is the baseline for judging what the feedback loop buys. Set it with
+#   `generation.mode: forward`.
+#
+#   `seedless` is effectively pinned to true: seeded structured generation
+#   (perturb a real ontology subtree, keep the perturbation as ground truth) is
+#   coherent but unimplemented, and `seedless: false` says exactly that.
 #
 # There is also no compare.yaml for this task yet: a multi-model comparison
 # needs a complete pipeline config (generation + task_models), and no working

@@ -203,6 +203,11 @@ def profile_gec_edit_types(
     type_counter: Counter = Counter()
     per_pair: list[int] = []
     for row in rows:
+        # Generated rows carry corrupted/original; real rows carry
+        # incorrect/correct. This function measures GENERATED output, so it
+        # prefers that vocabulary — index_seed_edit_types below reads the real
+        # seed pool and deliberately prefers the other order. Same two fields,
+        # two vocabularies; the precedence says which caller each expects.
         incorrect = row.get("corrupted") or row.get("incorrect")
         correct = row.get("original") or row.get("correct")
         if not incorrect or not correct:
@@ -235,3 +240,37 @@ def profile_gec_edit_types(
             if total_edits else 0.0
         ),
     }
+
+
+def index_seed_edit_types(rows: list[dict[str, Any]], *, annotator=None) -> dict:
+    """Map ERRANT edit type -> indices of `rows` carrying it.
+
+    A seed carrying several types is indexed under EACH of them, so the buckets
+    overlap. Drawing is two-stage (type by weight, then a seed uniformly within
+    that type) rather than one weighted draw over seeds, which keeps the type
+    weights meaningful when seeds carry different numbers of edits.
+
+    No API call; ERRANT is loaded lazily and can be injected for tests.
+    """
+    if annotator is None:
+        from framework.evaluators.gec._errant_shared import get_annotator
+        annotator = get_annotator()
+
+    index: dict[str, list[int]] = {}
+    for i, row in enumerate(rows):
+        # Real seed rows from parse_row carry incorrect/correct — prefer those
+        # (see the note in profile_gec_edit_types). The fallback matters: GEC's
+        # get_real_eval_samples emits corrupted/original, and calibration indexes
+        # exactly those rows.
+        incorrect = row.get("incorrect") or row.get("corrupted")
+        correct = row.get("correct") or row.get("original")
+        if not incorrect or not correct:
+            continue
+        try:
+            edits = annotator.annotate(annotator.parse(incorrect),
+                                       annotator.parse(correct))
+        except Exception:
+            continue
+        for edit_type in sorted({e.type for e in edits if e.type and e.type != "noop"}):
+            index.setdefault(edit_type, []).append(i)
+    return index
