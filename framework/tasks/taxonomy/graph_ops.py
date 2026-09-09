@@ -207,3 +207,29 @@ EDIT_OPERATORS = {
     "collapse_level": collapse_level,
     "add_sibling": add_sibling,
 }
+
+
+# ── Verification ────────────────────────────────────────────────────────────
+
+
+def matches_structure(gold_classes, gold_axioms,
+                      other_classes, other_axioms) -> bool:
+    """Does `other` carry exactly `gold`'s structure under new names?
+
+    This is the gate between a model's output and the benchmark. The seeded
+    cells hand the model an ordered, anonymised class list and ask for one new
+    name per class in the same order, so the i-th returned name corresponds to
+    the i-th gold class. Verification is therefore a positional relabel plus an
+    exact edge-set comparison — no isomorphism search, and correct on the DAGs
+    real ontologies actually are.
+
+    Anything that fails here is a skipped sample, never a new reference.
+    """
+    if len(other_classes) != len(gold_classes):
+        return False
+    if len(set(other_classes)) != len(other_classes):
+        return False                    # duplicate names have no correspondence
+    mapping = dict(zip(gold_classes, other_classes))
+    expected = {(mapping[c], mapping[p]) for c, p in gold_axioms}
+    actual = {(c, p) for c, p in other_axioms}
+    return expected == actual

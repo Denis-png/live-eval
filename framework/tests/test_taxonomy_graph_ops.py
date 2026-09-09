@@ -7,8 +7,8 @@ import unittest
 from random import Random
 
 from framework.tasks.taxonomy.graph_ops import (
-    EDIT_OPERATORS, add_sibling, collapse_level, drop_leaf, reparent,
-    sample_subtrees,
+    EDIT_OPERATORS, add_sibling, collapse_level, drop_leaf, matches_structure,
+    reparent, sample_subtrees,
 )
 
 # A -> B -> D, B -> E, A -> C -> F ; depth 2, 6 classes
@@ -240,17 +240,24 @@ class EditOperatorTests(unittest.TestCase):
                     self.assertEqual(len(pairs), len(set(pairs)))
 
     def test_reparent_never_drops_an_edge_without_replacing_it(self):
-        # Direct regression for the reported failure: on a child with two
-        # parents, reparent must not collapse both rows onto one parent.
+        # A child with two parents, plus a third class free to become a new
+        # parent -- so reparenting is genuinely possible and the assertion below
+        # actually runs. The previous fixture had no valid candidate at all, so
+        # every seed hit the None branch and the assertion was dead code.
+        classes = ["P1", "P2", "P3", "child"]
+        axioms = [["child", "P1"], ["child", "P2"]]
+        ran = 0
         for seed in range(25):
             with self.subTest(seed=seed):
-                result = reparent(["P1", "P2", "child"],
-                                  [["child", "P1"], ["child", "P2"]], Random(seed))
+                result = reparent(classes, axioms, Random(seed))
                 if result is None:
                     continue
-                _, axioms = result
-                pairs = {tuple(a) for a in axioms}
-                self.assertEqual(len(pairs), 2, f"edge count changed: {axioms}")
+                ran += 1
+                _, out = result
+                pairs = {tuple(a) for a in out}
+                self.assertEqual(len(pairs), 2, f"edge count changed: {out}")
+                self.assertEqual(len(out), len(pairs), f"duplicate axiom: {out}")
+        self.assertGreater(ran, 0, "no seed produced a reparenting; test is vacuous")
 
     def test_operators_do_not_mutate_a_dag_input(self):
         for name, op in EDIT_OPERATORS.items():
@@ -260,6 +267,59 @@ class EditOperatorTests(unittest.TestCase):
                 op(classes, axioms, Random(2))
                 self.assertEqual(classes, _DAG_CLASSES)
                 self.assertEqual(axioms, [list(a) for a in _DAG_AXIOMS])
+
+
+class MatchesStructureTests(unittest.TestCase):
+    """The gate between a model's output and the benchmark.
+
+    Tested in BOTH directions on purpose: a verifier that only ever returns True
+    passes every accept-test while admitting corrupt artifacts, and that is the
+    exact failure this function exists to prevent.
+    """
+
+    GOLD_C = ["A", "B", "C"]
+    GOLD_A = [["B", "A"], ["C", "A"]]
+
+    def test_a_positional_renaming_matches(self):
+        self.assertTrue(matches_structure(
+            self.GOLD_C, self.GOLD_A,
+            ["X", "Y", "Z"], [["Y", "X"], ["Z", "X"]]))
+
+    def test_a_dropped_edge_does_not_match(self):
+        self.assertFalse(matches_structure(
+            self.GOLD_C, self.GOLD_A, ["X", "Y", "Z"], [["Y", "X"]]))
+
+    def test_a_reattached_edge_does_not_match(self):
+        self.assertFalse(matches_structure(
+            self.GOLD_C, self.GOLD_A,
+            ["X", "Y", "Z"], [["Y", "X"], ["Z", "Y"]]))
+
+    def test_a_different_class_count_does_not_match(self):
+        self.assertFalse(matches_structure(
+            self.GOLD_C, self.GOLD_A,
+            ["X", "Y"], [["Y", "X"]]))
+
+    def test_a_reordered_answer_does_not_match(self):
+        # The prompt asks for one name per anonymised class IN ORDER, so a
+        # reordering is not compliance. Rejecting it keeps the correspondence
+        # unambiguous rather than silently guessing which name meant which class.
+        self.assertFalse(matches_structure(
+            self.GOLD_C, self.GOLD_A,
+            ["Y", "X", "Z"], [["Y", "X"], ["Z", "X"]]))
+
+    def test_it_matches_a_multi_parent_dag(self):
+        # Ontologies preserve multiple inheritance, so the verifier must handle
+        # a class with two parents rather than assuming a tree.
+        gold_c = ["A", "B", "C", "D"]
+        gold_a = [["B", "A"], ["C", "A"], ["D", "B"], ["D", "C"]]
+        self.assertTrue(matches_structure(
+            gold_c, gold_a,
+            ["W", "X", "Y", "Z"], [["X", "W"], ["Y", "W"], ["Z", "X"], ["Z", "Y"]]))
+
+    def test_duplicate_class_names_do_not_match(self):
+        self.assertFalse(matches_structure(
+            self.GOLD_C, self.GOLD_A,
+            ["X", "X", "Z"], [["X", "X"], ["Z", "X"]]))
 
 
 if __name__ == "__main__":
