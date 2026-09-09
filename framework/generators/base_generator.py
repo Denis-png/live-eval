@@ -950,9 +950,11 @@ class BaseGenerator(ABC):
 
         The caller has already computed each gold graph exactly. The model's only
         job is to re-verbalise it, so this loop VERIFIES the response against the
-        gold and, on success, returns the GOLD — not the parsed output. That is
-        the whole point of the seeded cells: a model that drifts loses its sample
-        and can never redefine the reference.
+        gold before keeping anything. What it keeps is the PARSED artifact — the
+        model's names — and that is safe precisely because the verification gate
+        stands in front of it: a record only exists once its structure has been
+        proven to be gold's. Gold contributes provenance, not shape. A model that
+        drifts loses its sample and can never redefine the reference.
 
         No feedback loop and no sample_size: gold is exact, so there is nothing
         to iterate toward, and the count is `len(golds)` by construction. A
@@ -985,11 +987,15 @@ class BaseGenerator(ABC):
                           f"{diagnostic.get('rejection_reason', 'unknown')}", flush=True)
                 else:
                     accepted = True
-                    # verify() has already proven this graph isomorphic to gold,
-                    # so the parsed classes AND axioms ARE gold's structure under
-                    # the model's names — keep them together. Splicing gold's
-                    # axioms onto the model's class list would name classes the
-                    # artifact does not contain. Only provenance comes from gold.
+                    # verify() has already proven this graph carries gold's
+                    # structure — a POSITIONAL relabel plus an exact edge-set
+                    # comparison, not an isomorphism search, since rooted-tree
+                    # canonicalisation can accept two structurally different
+                    # DAGs. So the parsed classes AND axioms ARE gold's structure
+                    # under the model's names — keep them together. Splicing
+                    # gold's axioms onto the model's class list would name
+                    # classes the artifact does not contain. Only provenance
+                    # comes from gold.
                     record = dict(parsed)
                     record["domain"] = gold["domain"]
                     record["source_max_depth"] = gold.get("source_max_depth")
