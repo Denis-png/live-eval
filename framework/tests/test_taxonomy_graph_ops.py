@@ -180,6 +180,24 @@ class EditOperatorTests(unittest.TestCase):
                                          Random(0))
         self.assertLess(_depth_of(classes, axioms), before)
 
+    # M is the ONLY eligible middle here (A and B have no parents, X and Y no
+    # children), so collapse_level's victim is forced and the assertions below
+    # pin behaviour rather than an rng draw. M has TWO parents: every other
+    # fixture in this file gives its middles exactly one, so the "rehome to
+    # EVERY parent" branch never ran and a reversion to last-parent-wins would
+    # have passed the whole suite.
+    MULTI_PARENT_CLASSES = ["A", "B", "M", "X", "Y"]
+    MULTI_PARENT_AXIOMS = [["M", "A"], ["M", "B"], ["X", "M"], ["Y", "M"]]
+
+    def test_collapse_level_rehomes_children_to_every_parent(self):
+        classes, axioms = collapse_level(self.MULTI_PARENT_CLASSES,
+                                         self.MULTI_PARENT_AXIOMS, Random(0))
+        self.assertEqual(sorted(classes), ["A", "B", "X", "Y"])
+        # Both grandparents keep both orphans: dropping either would silently
+        # delete an inheritance edge the real ontology asserts.
+        self.assertEqual(sorted(axioms),
+                         [["X", "A"], ["X", "B"], ["Y", "A"], ["Y", "B"]])
+
     def test_add_sibling_adds_one_class_under_an_existing_parent(self):
         classes, axioms = add_sibling(self.classes, self.axioms, Random(0))
         self.assertEqual(len(classes), len(self.classes) + 1)
