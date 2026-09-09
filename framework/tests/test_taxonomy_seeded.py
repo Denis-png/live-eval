@@ -107,6 +107,36 @@ class PromptAndVerifyTests(unittest.TestCase):
         for name in ("Margherita", "Napoletana", "Gelato"):
             self.assertNotIn(name, prompt)
 
+    def test_the_prompt_states_the_ordering_contract_the_verifier_enforces(self):
+        # matches_structure maps positionally (dict(zip(gold, other))), so an
+        # answer whose class order differs is discarded however faithful its
+        # shape. The prompt's rules never said so: the code asserted the prompt
+        # stated the contract, the docs told the reader it did, and every
+        # round-trip test happened to answer in order, so nothing could see the
+        # gap. Assert the rendered prompt actually carries the rule.
+        task = TaxonomyTask()
+        seed = task.get_seed_pool(_CONFIG, _REAL, "forward", rng=Random(0))[0]
+        gold = task.build_seeded_artifact(seed, "forward", None, _CONFIG, Random(0))
+        prompt = task.build_seeded_generation_prompt(gold)
+        rules = prompt[prompt.index("Rules:"):]
+        self.assertIn("order", rules.lower())
+        self.assertRegex(rules, r"EXACTLY the order")
+
+    def test_an_answer_in_a_different_class_order_is_discarded(self):
+        # Why the rule above has to be in the prompt: this answer is a perfect
+        # structural copy under its own naming, and the verifier still rejects
+        # it, because position is the correspondence.
+        task = TaxonomyTask()
+        gold = {"domain": "d", "classes": ["A", "B", "C"],
+                "subclass_axioms": [["B", "A"], ["C", "A"]]}
+        in_order = {"classes": ["X", "Y", "Z"],
+                    "subclass_axioms": [["Y", "X"], ["Z", "X"]]}
+        # Same shape -- one root, two children -- but the root is listed last.
+        reordered = {"classes": ["Y", "Z", "X"],
+                     "subclass_axioms": [["Y", "X"], ["Z", "X"]]}
+        self.assertTrue(task.verify_structured_match(gold, in_order))
+        self.assertFalse(task.verify_structured_match(gold, reordered))
+
     def test_verify_accepts_a_renaming_and_rejects_a_reshape(self):
         task = TaxonomyTask()
         gold = {"domain": "d", "classes": ["A", "B", "C"],
