@@ -35,7 +35,7 @@ class GecProfileDatasetTests(unittest.TestCase):
             {"text": "b bad", "corrupted": "b bad", "original": "b good"},
             {"text": "c same", "corrupted": "c same", "original": "c same"},
         ]
-        p = self.task.profile_dataset(rows, annotator=self.ann)
+        p = self.task.build_fidelity_profile(rows, annotator=self.ann)
         self.assertEqual(p["n"], 3)
         self.assertEqual(p["n_annotated"], 3)
         self.assertAlmostEqual(p["error_type_dist"]["R:SPELL"], 2 / 3)
@@ -46,27 +46,27 @@ class GecProfileDatasetTests(unittest.TestCase):
     def test_generated_rows_ignore_error_type_field(self):
         # The generator's own error_type claim must not leak into the profile.
         rows = [{"original": "a good", "corrupted": "a bad", "error_type": "U:PREP"}]
-        p = self.task.profile_dataset(rows, annotator=self.ann)
+        p = self.task.build_fidelity_profile(rows, annotator=self.ann)
         self.assertEqual(p["error_type_dist"], {"R:SPELL": 1.0})
 
     def test_supported_fraction_counts_inverse_vocabulary_only(self):
         ann = FakeAnnotator({"x": ["R:SPELL", "R:WEIRD:TYPE"]})
         rows = [{"corrupted": "x", "original": "y"}]
-        p = self.task.profile_dataset(rows, annotator=ann)
+        p = self.task.build_fidelity_profile(rows, annotator=ann)
         self.assertAlmostEqual(p["supported_fraction"], 0.5)
 
     def test_rows_missing_fields_are_skipped_not_fatal(self):
         rows = [{"corrupted": "a bad", "original": "a good"}, {"corrupted": "", "original": "y"}]
-        p = self.task.profile_dataset(rows, annotator=self.ann)
+        p = self.task.build_fidelity_profile(rows, annotator=self.ann)
         self.assertEqual(p["n"], 2)
         self.assertEqual(p["n_annotated"], 1)
 
     def test_compare_profiles_deltas_and_jsd(self):
-        real = self.task.profile_dataset(
+        real = self.task.build_fidelity_profile(
             [{"corrupted": "a bad", "original": "a good"}], annotator=self.ann)
-        gen = self.task.profile_dataset(
+        gen = self.task.build_fidelity_profile(
             [{"corrupted": "b bad", "original": "b good"}], annotator=self.ann)
-        fid = self.task.compare_profiles(real, gen)
+        fid = self.task.compare_fidelity_profiles(real, gen)
         self.assertAlmostEqual(fid["edits_per_pair_delta"], 1.0)
         self.assertAlmostEqual(fid["type_deltas"]["M:DET"], 0.5)
         self.assertAlmostEqual(fid["type_deltas"]["R:SPELL"], -0.5)
@@ -76,8 +76,8 @@ class GecProfileDatasetTests(unittest.TestCase):
 
     def test_identical_profiles_give_zero_jsd(self):
         rows = [{"corrupted": "a bad", "original": "a good"}]
-        p = self.task.profile_dataset(rows, annotator=self.ann)
-        fid = self.task.compare_profiles(p, p)
+        p = self.task.build_fidelity_profile(rows, annotator=self.ann)
+        fid = self.task.compare_fidelity_profiles(p, p)
         self.assertEqual(fid["type_dist_jsd"], 0.0)
         self.assertEqual(fid["edits_per_pair_delta"], 0.0)
 
@@ -89,7 +89,7 @@ class GecFidelityCharacteristicsTests(unittest.TestCase):
 
     def test_profile_dataset_adds_length_hist_and_style(self):
         rows = [{"corrupted": "a bad", "original": "a good"}]
-        profile = self.task.profile_dataset(rows, annotator=self.ann)
+        profile = self.task.build_fidelity_profile(rows, annotator=self.ann)
         self.assertAlmostEqual(sum(profile["word_count_hist"].values()), 1.0, places=3)
         self.assertAlmostEqual(profile["word_count_hist"]["1-5"], 1.0)
         self.assertIn("question_rate", profile["style"])
@@ -97,8 +97,8 @@ class GecFidelityCharacteristicsTests(unittest.TestCase):
 
     def test_compare_profiles_identical_zero_length_jsd(self):
         rows = [{"corrupted": "a bad", "original": "a good"}]
-        profile = self.task.profile_dataset(rows, annotator=self.ann)
-        fidelity = self.task.compare_profiles(profile, profile)
+        profile = self.task.build_fidelity_profile(rows, annotator=self.ann)
+        fidelity = self.task.compare_fidelity_profiles(profile, profile)
         self.assertAlmostEqual(fidelity["length_jsd"], 0.0, places=6)
         for delta in fidelity["style_deltas"].values():
             self.assertAlmostEqual(delta, 0.0, places=6)
@@ -107,7 +107,7 @@ class GecFidelityCharacteristicsTests(unittest.TestCase):
     def test_compare_profiles_disjoint_length_bins(self):
         short = {"word_count_hist": {"1-5": 1.0}, "style": {"question_rate": 0.0}}
         long = {"word_count_hist": {"51+": 1.0}, "style": {"question_rate": 1.0}}
-        fidelity = self.task.compare_profiles(short, long)
+        fidelity = self.task.compare_fidelity_profiles(short, long)
         self.assertAlmostEqual(fidelity["length_jsd"], 1.0, places=6)
         self.assertAlmostEqual(fidelity["style_deltas"]["question_rate"], 1.0)
 

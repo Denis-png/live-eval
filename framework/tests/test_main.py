@@ -102,10 +102,16 @@ class MainErrorHandlingTests(unittest.TestCase):
 
 
 class DisplayGenerationModeTests(unittest.TestCase):
-    def test_taxonomy_mode_display_is_structured(self):
+    def test_taxonomy_mode_display_defaults_to_inverse(self):
         cfg = _full_config()
         cfg["task"] = {"name": "taxonomy"}
-        self.assertEqual(_display_generation_mode(cfg), "n/a (structured generation)")
+        self.assertEqual(_display_generation_mode(cfg), "inverse")
+
+    def test_taxonomy_mode_display_reflects_forward(self):
+        cfg = _full_config()
+        cfg["task"] = {"name": "taxonomy"}
+        cfg["generation"]["mode"] = "forward"
+        self.assertEqual(_display_generation_mode(cfg), "forward")
 
     def test_spam_default_mode_display_stays_class_conditional(self):
         cfg = _full_config()
@@ -223,16 +229,23 @@ class ValidateConfigTests(unittest.TestCase):
                           "local": {"path": "data/taxonomy.jsonl"}}
         validate_config(cfg)
 
-    def test_taxonomy_mode_must_be_omitted(self):
+    def test_taxonomy_mode_forward_is_accepted(self):
         cfg = _full_config()
         cfg["task"] = {"name": "taxonomy"}
         cfg["dataset"] = {"source": "local",
                           "local": {"path": "data/taxonomy.jsonl"}}
         cfg["generation"]["mode"] = "forward"
+        validate_config(cfg)  # must not raise: taxonomy is on the mode axis now
+
+    def test_taxonomy_unknown_mode_rejected(self):
+        cfg = _full_config()
+        cfg["task"] = {"name": "taxonomy"}
+        cfg["dataset"] = {"source": "local",
+                          "local": {"path": "data/taxonomy.jsonl"}}
+        cfg["generation"]["mode"] = "sideways"
         with self.assertRaises(ValueError) as ctx:
             validate_config(cfg)
         self.assertIn("mode", str(ctx.exception))
-        self.assertIn("taxonomy", str(ctx.exception))
 
     def test_taxonomy_seedless_false_rejected(self):
         cfg = _full_config()
@@ -242,7 +255,8 @@ class ValidateConfigTests(unittest.TestCase):
         cfg["generation"]["seedless"] = False
         with self.assertRaises(ValueError) as ctx:
             validate_config(cfg)
-        self.assertIn("profile-driven", str(ctx.exception))
+        self.assertIn("not implemented", str(ctx.exception))
+        self.assertIn("taxonomy", str(ctx.exception))
 
     def test_hf_source_missing_name_names_the_key(self):
         cfg = _full_config()

@@ -84,15 +84,47 @@ class BaseTask(ABC):
         return None
 
     def get_forward_prompts(self) -> dict[str, str]:
-        """{label: prompt} for same-class imitation in classification forward
-        mode. Placeholder {sentence}; the positive class also gets {error_spec}
-        so forward generation can target the empirical signal mix instead of
-        inheriting whatever signals its seed happened to carry."""
+        """{label: prompt} for INHERITING a seed's own class in classification
+        forward mode.
+
+        Placeholder {sentence}. A label whose template also contains
+        {error_spec} receives a sampled signal mix, so forward generation can
+        target the empirical mix instead of inheriting whatever signals its seed
+        happened to carry — the same template rule
+        get_inverse_class_prompts() follows, and the only thing that decides it.
+        There is no "positive class"; a label declares its own needs.
+        """
+        return {}
+
+    def get_class_labels(self) -> tuple[str, ...] | None:
+        """Ordered label set for `class_conditional` generation.
+
+        The strategy is label -> text, so the dispatcher needs to know what the
+        classes are CALLED. Two labels is the common case, not the limit.
+        Returning None means this task is not class-conditional; a
+        class_conditional task that returns None fails fast rather than being
+        generated under someone else's vocabulary.
+        """
+        return None
+
+    def get_inverse_class_prompts(self) -> dict[str, str]:
+        """{label: prompt} for IMPOSING a target class on a seed of any class.
+
+        Placeholder {sentence}. A label whose template also contains
+        {error_spec} receives a sampled signal mix — the template declares its
+        own needs, so no code branches on which label is "positive". Every
+        prompt answers with the same `Message:` tag.
+        """
         return {}
 
     def get_seedless_class_prompts(self) -> dict[str, str]:
-        """{label: prompt} for direct per-class seedless generation.
-        Placeholders: {spec} and, for the positive class, {error_spec}."""
+        """{label: prompt} for direct per-label seedless generation.
+
+        Placeholder {spec} (a rendered content spec, in place of a real seed).
+        A label whose template also contains {error_spec} receives a sampled
+        signal mix — the same template rule the other two prompt families
+        follow, not a rule about which label is "positive".
+        """
         return {}
 
     def get_profile_side(self, mode: str) -> str:
@@ -101,29 +133,41 @@ class BaseTask(ABC):
         profiles are keyed per label."""
         return "correct"
 
-    def get_seed_pool(self, config: dict, real_data: list[dict], mode: str) -> list[dict]:
+    def get_seed_pool(self, config: dict, real_data: list[dict], mode: str,
+                      *, seed_weights: dict | None = None, rng=None) -> list[dict]:
         """Rows used as generation seeds. Defaults to the parsed real data;
         override when a mode needs a differently-shaped pool (e.g. labeled
-        rows of both classes for classification forward mode)."""
+        rows of both classes for classification forward mode).
+
+        `seed_weights` is the calibrated per-edit-type weighting for cells whose
+        only control input is seed choice (GEC forward+seeded); tasks that do
+        not use it ignore both it and `rng`."""
         return real_data
 
     def get_generation_strategy(self) -> str:
         """How the pipeline generates synthetic data for this task:
           "corruption"        — corrupt a source text (forward/inverse); text→text tasks.
-          "class_conditional" — sample a target class, then generate an example of it;
-                                classification tasks. Ignores generation.mode.
+          "class_conditional" — draw a target label, then generate an example of it;
+                                classification tasks. On the mode axis like the
+                                others — inverse IMPOSES the drawn label on a seed
+                                of any class, forward INHERITS the seed's own.
           "structured"        — generate a whole structured benchmark artifact from
-                                a profile/spec; mode is not applicable.
+                                a profile/spec; on the mode axis like the others —
+                                inverse imposes a sampled structural target, forward
+                                lets structure emerge from the domain alone.
         Default "corruption"."""
         return "corruption"
 
     def build_structured_generation_prompt(
-        self, profile: dict, rng=None, feedback: dict | None = None
+        self, profile: dict, rng=None, feedback: dict | None = None,
+        mode: str = "inverse",
     ) -> str:
         """Return one profile-driven structured generation prompt.
 
-        Structured tasks override this. Provider classes remain ontology-agnostic:
-        they only receive the prompt string and return text.
+        `mode` selects where the artifact's structure comes from: `inverse`
+        IMPOSES a target sampled from the profile, `forward` lets it emerge and
+        supplies only the content axis. Structured tasks override this; provider
+        classes remain ontology-agnostic and only receive the prompt string.
         """
         raise NotImplementedError(
             f"{self.get_task_name()} does not support structured generation."
@@ -139,13 +183,63 @@ class BaseTask(ABC):
             f"{self.get_task_name()} does not support structured generation."
         )
 
-    def profile_dataset(self, rows: list[dict]) -> dict | None:
+    def get_feedback_config(self, generation_config: dict | None = None) -> dict:
+        """Per-sample feedback settings for `structured` generation:
+        {"enabled": bool, "max_rounds": int, "tolerances": {...}}.
+
+        A structured artifact is a whole sample with its own measurable shape,
+        so it can be compared against the reference and regenerated on its own —
+        unlike a corruption/classification sample, where fidelity only means
+        something across a distribution. Disabled by default.
+        """
+        return {"enabled": False, "max_rounds": 0}
+
+    def parse_structured_generation_with_diagnostics(self, text: str) -> dict:
+        """Parse one structured response into {"artifact", "diagnostic"}.
+
+        Defaults to wrapping `parse_structured_generation`, so a task only has
+        to implement the plain parser and the dispatcher needs no branch.
+        Override to explain WHY an artifact was rejected.
+        """
+        artifact = self.parse_structured_generation(text)
+        diagnostic: dict = {"valid": artifact is not None}
+        if artifact is None:
+            diagnostic["rejection_reason"] = "invalid_structured_artifact"
+        return {"artifact": artifact, "diagnostic": diagnostic}
+
+    def build_structural_feedback(self, profile: dict, artifact: dict,
+                                  generation_config: dict | None = None) -> dict:
+        """Compare one generated artifact against the reference profile and
+        return {"feedback", "comparison", "synthetic_profile"}.
+
+        Required only when get_feedback_config() enables the loop; the pipeline
+        checks that up front and refuses to start rather than failing mid-round.
+        """
+        raise NotImplementedError(
+            f"{self.get_task_name()} enables the structured feedback loop but "
+            "does not implement build_structural_feedback()."
+        )
+
+    def build_fidelity_profile(self, rows: list[dict]) -> dict | None:
         """Profile a labeled dataset (rows with "text"+"label") for real-vs-generated
         fidelity. Return None to opt out (default). Override in classification tasks."""
         return None
 
-    def compare_profiles(self, real: dict, generated: dict) -> dict | None:
-        """Fidelity comparison between two profile_dataset() outputs. Default None."""
+    def compare_fidelity_profiles(self, real: dict, generated: dict) -> dict | None:
+        """Fidelity comparison between two build_fidelity_profile() outputs. Default None."""
+        return None
+
+    def get_calibration_keys(self) -> dict[str, str] | None:
+        """Map control-input name -> the build_fidelity_profile() key that measures it.
+
+        Lets the calibrator stay as task-agnostic as _sample_categories is: it
+        never learns what a "signal" or an "edit type" means, only which key of
+        this task's profile measures the distribution it is steering. The two
+        tasks name the same concept differently (error_type_dist vs
+        signal_type_dist), and this is what reconciles them.
+
+        Return None (default) to opt out of calibration entirely.
+        """
         return None
 
     def get_real_eval_samples(self, config: dict, real_data: list[dict]) -> list[dict] | None:

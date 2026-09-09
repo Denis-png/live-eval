@@ -25,6 +25,15 @@ class _ClassConditionalTask:
         return "spam"
 
 
+class _StructuredTask:
+    """Fake task with structured generation (mirrors taxonomy)."""
+    def get_generation_strategy(self):
+        return "structured"
+
+    def get_task_name(self):
+        return "taxonomy"
+
+
 def _config(results_path):
     return {
         "dataset": {"name": "d/ds", "split": "train", "sample_size": 50},
@@ -114,12 +123,24 @@ class BuildMetaTests(unittest.TestCase):
 
     def test_class_conditional_task_defaults_to_inverse_without_config_mode_key(self):
         # Omitting generation.mode must keep reproducing today's production
-        # behavior (cross_class over real seeds), so the recorded default is
+        # behavior (impose over real seeds), so the recorded default is
         # "inverse", not the corruption strategy's "forward" default.
         cfg = _config("r.json")
         del cfg["generation"]["mode"]
         meta = _build_meta(cfg, _ClassConditionalTask(), runs_completed=1,
                            effective_samples_per_run=[1], real_baseline=True)
+        self.assertEqual(meta["mode"], "inverse")
+
+    def test_structured_task_defaults_to_inverse_without_config_mode_key(self):
+        # Structured generation samples a target structure from the benchmark's
+        # schema and iterates toward it — an inverse operation by definition.
+        # _build_meta must record "inverse", not None, so downstream analysis
+        # (_strategy_of in scripts/analyze_results.py) groups it correctly.
+        cfg = _config("r.json")
+        del cfg["generation"]["mode"]
+        meta = _build_meta(cfg, _StructuredTask(), runs_completed=1,
+                           effective_samples_per_run=[1], real_baseline=True)
+        self.assertEqual(meta["strategy"], "structured")
         self.assertEqual(meta["mode"], "inverse")
 
 
@@ -170,7 +191,7 @@ class SeedlessMetaTests(unittest.TestCase):
 
     def test_profile_path_resolves_to_the_task_dir_when_seedless_and_unset(self):
         # The shipped configs leave generation.profile_path commented out, so
-        # _build_meta must record the path _load_generation_profile actually
+        # _build_meta must record the path _load_benchmark_profile actually
         # resolved — profiles are gitignored, making this the only surviving
         # record of what generated a seedless benchmark. With no profile on disk
         # the resolver hands back the pattern it searched, which still names the

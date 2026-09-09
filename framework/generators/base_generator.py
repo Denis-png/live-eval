@@ -1,5 +1,6 @@
 import random
 import re
+import sys
 import time
 from abc import ABC, abstractmethod
 from typing import Callable
@@ -17,6 +18,43 @@ _REFUSAL_RE = re.compile(
 
 # Reasoning models (e.g. minimax-m3) wrap chain-of-thought in <think>…</think>.
 _THINK_BLOCK_RE = re.compile(r"(?is)<think>.*?</think>")
+
+# Names what class_conditional's inverse cell DOES, so a calibration artifact
+# measured under one behaviour cannot silently steer another. Bump this string
+# whenever the generated distribution changes shape; "asymmetric" was the
+# pre-symmetry behaviour where the negative class was a paraphrase of its own
+# class rather than an imposition on any seed.
+CLASS_CONDITIONAL_SEMANTICS = "symmetric"
+
+# What `technique` records for a label whose own prompt template asks for no
+# signal mix, keyed by seed policy — the label DID something, and which thing it
+# did is the policy. "imitation" (inherit) and "paraphrase" (none) are the names
+# pre-symmetry archives already carry for the forward and forward+seedless
+# cells; keeping them means records from those two cells stay comparable across
+# this change, which is the regression bar for them. `impose` is the one cell
+# whose behaviour genuinely changed — its non-signal label now STRIPS signals
+# off a seed of any class instead of paraphrasing a seed of its own — so it
+# names itself "rewrite" rather than restoring a "paraphrase" that would now be
+# a lie. `technique` has no production consumer; this is archive comparability.
+_NO_SIGNAL_TECHNIQUE = {
+    "impose": "rewrite",
+    "inherit": "imitation",
+    "none": "paraphrase",
+}
+
+
+class TruncatedResponse(RuntimeError):
+    """The provider stopped because it hit max_tokens — the response is
+    incomplete and must never be parsed.
+
+    A truncated reasoning-model response frequently still contains the answer
+    field names, with a half-written value after the last one (e.g.
+    "Ground truth: I am"). Parsing that yields a sample whose gold reference is
+    a fragment, which is worse than no sample: it silently corrupts the
+    benchmark instead of being skipped. Every generation loop already catches
+    per-sample exceptions and continues, so raising here turns truncation into
+    a loud, counted skip in every loop at once.
+    """
 
 
 def _strip_reasoning(raw: str) -> str:
@@ -143,9 +181,19 @@ def _judgement_passes(raw: str) -> bool:
     return valid and correct
 
 
+def _draw_label(class_balance: dict[str, float], labels, rng) -> str:
+    """Draw one label from the balance vector. Labels absent from the vector
+    carry zero weight; a vector that sums to something other than 1 is used as
+    relative weights, which is what rng.choices already does."""
+    weights = [max(0.0, float(class_balance.get(label, 0.0))) for label in labels]
+    if sum(weights) <= 0:
+        raise ValueError(f"class_balance gives no label any weight: {class_balance!r}")
+    return rng.choices(list(labels), weights=weights, k=1)[0]
+
+
 class BaseGenerator(ABC):
 
-    def generate(
+    def generate_forward(
         self,
         real_samples: list[dict],
         error_types: list[str],
@@ -505,16 +553,14 @@ class BaseGenerator(ABC):
     def generate_class_conditional(
         self,
         *,
-        class_prob: float,
+        class_balance: dict[str, float],
+        labels: tuple[str, ...],
+        inverse_prompts: dict[str, str],
         type_dist: dict[str, float],
         count_dist: dict[int, float],
         error_descriptions: dict[str, str],
-        inject_prompt: str,
-        negative_prompt: str,
-        positive_label: str,
-        negative_label: str,
         sample_size: int,
-        seed_policy: str = "cross_class",
+        seed_policy: str = "impose",
         real_seeds: list[dict] | None = None,
         seed_field: str | None = None,
         forward_prompts: dict[str, str] | None = None,
@@ -529,51 +575,68 @@ class BaseGenerator(ABC):
         """Symmetric class-conditional generation for classification tasks. One
         loop serves all seeding strategies, selected by `seed_policy`:
 
-        - "cross_class" (default, today's behavior): every draw seeds from the
-          same `real_seeds` pool regardless of which class was drawn. Positive →
-          inject the sampled signal mix into the seed via `inject_prompt` (a
-          `Corrupted:` line). Negative → paraphrase the seed via `negative_prompt`
-          (a `Rewritten:` line).
-        - "same_class": the seed is drawn from the subset of `real_seeds` whose
-          `label_field` matches the drawn class, and each class is produced via
+        - "impose" (default, today's behavior): the label is drawn from
+          `class_balance` independently of the seed. Every draw seeds from the
+          same `real_seeds` pool regardless of which class was drawn, and is
+          rendered through `inverse_prompts[label]` (a `Message:` line). A label
+          whose own template also contains `{error_spec}` receives the sampled
+          signal mix; a label whose template does not is rendered without one
+          and recorded as "rewrite".
+        - "inherit": the label is drawn from `class_balance`, then the seed is
+          taken from the subset of `real_seeds` whose `label_field` happens to
+          match the drawn label — under symmetry a drawn label may coincide with
+          the seed's, so this is INHERITING the seed's own class rather than
+          imposing an independent one. Each label is produced via
           `forward_prompts[label]` (a `Rewritten:` line). Raises RuntimeError if
-          that subset is empty. The positive class rewrites its seed emphasising
-          the sampled signal mix, so forward generation targets the empirical
-          distribution instead of inheriting its seed's signals; the negative
-          class is a plain same-class rewrite, recorded as "imitation".
+          that subset is empty. A signal-bearing label's rewrite emphasises the
+          sampled signal mix (so forward generation can target the empirical
+          distribution instead of inheriting whatever its seed happened to
+          carry); a label whose template asks for no signals is a plain
+          same-class rewrite, recorded as "imitation".
         - "none": no real seed at all — content comes from a per-label spec pool
           (`specs_by_label`) rendered through `seedless_prompts[label]` (a
-          `Message:` line). The record's "seed" field is "".
+          `Message:` line). The record's "seed" field is "". A label whose
+          template asks for no signals is recorded as "paraphrase".
 
-        Both classes are LLM-authored, so a classifier cannot separate them on
+        Every class is LLM-authored, so a classifier cannot separate them on
         authorship artifacts. Seeds/specs are cycled if sample_size exceeds their
         count.
 
-        Returns records {"text", "label", "technique", "seed"}."""
+        Returns records {"text", "label", "technique", "source_label", "seed"}.
+        source_label is the seed row's own `label_field` value (None when the
+        seed carried no such field, e.g. seed_policy="none" or an unlabeled
+        pool) — it is the seed's class, which under "impose" may differ from
+        the drawn `label`."""
         rng = rng or random.Random()
         synthetic = []
+        # Per-label attempted/survived counts. Drops are label-asymmetric — a
+        # model refuses phishing text far more than a benign paraphrase, and a
+        # paraphrase trips "identical to seed" far more than an injection — so
+        # the surviving balance drifts from class_balance systematically.
+        # Exposed like last_response_diagnostic for the calibrator to read.
+        attrition = {label: {"attempted": 0, "survived": 0} for label in labels}
+        self.last_class_attrition = attrition
         judge_fn = judge_call or self.call_api
-        if seed_policy in ("cross_class", "same_class") and not real_seeds:
+        if seed_policy in ("impose", "inherit") and not real_seeds:
             return synthetic
-        if seed_policy == "same_class":
-            missing = [lbl for lbl in (positive_label, negative_label)
+        if seed_policy == "inherit":
+            missing = [lbl for lbl in labels
                        if not (forward_prompts or {}).get(lbl)]
             if missing:
                 raise RuntimeError(
-                    f"seed_policy='same_class' needs forward_prompts entries for every "
-                    f"class; missing or empty: {', '.join(missing)}."
+                    f"seed_policy='inherit' needs forward_prompts entries for every "
+                    f"label; missing or empty: {', '.join(missing)}."
                 )
         if seed_policy == "none":
             # Both dicts are indexed by the drawn label inside the loop. Check
-            # them here so a task that supplies only one class fails before the
+            # them here so a task that supplies only one label fails before the
             # first API call instead of KeyError-ing partway through a paid run.
             for name, mapping in (("seedless_prompts", seedless_prompts or {}),
                                   ("specs_by_label", specs_by_label or {})):
-                missing = [lbl for lbl in (positive_label, negative_label)
-                           if not mapping.get(lbl)]
+                missing = [lbl for lbl in labels if not mapping.get(lbl)]
                 if missing:
                     raise RuntimeError(
-                        f"seed_policy='none' needs {name} entries for every class; "
+                        f"seed_policy='none' needs {name} entries for every label; "
                         f"missing or empty: {', '.join(missing)}."
                     )
 
@@ -584,7 +647,7 @@ class BaseGenerator(ABC):
 
         def _missing_seed(i: int, source) -> bool:
             """True (and accounted for) iff `source` is falsy. Shared by the
-            cross_class and same_class branches, which both cycle through a
+            impose and inherit branches, which both cycle through a
             seed pool and must skip identically on a missing seed field."""
             if source:
                 return False
@@ -594,66 +657,65 @@ class BaseGenerator(ABC):
             return True
 
         for i in range(1, sample_size + 1):
-            # cross_class's seed is purely index-based ((i-1) % len(real_seeds)) —
-            # it does not depend on the class drawn below. Resolving it (and
+            # impose's seed is purely index-based ((i-1) % len(real_seeds)) — it
+            # does not depend on the class drawn below. Resolving it (and
             # skipping on a missing field) BEFORE any rng draw keeps this
             # policy's rng-consumption sequence identical to the pre-restructure
             # implementation: a skipped iteration must burn zero rng draws, or
-            # every later draw in the run shifts. same_class can't do this — its
+            # every later draw in the run shifts. inherit can't do this — its
             # seed choice depends on the drawn label — but it's new code with no
             # equivalence requirement to preserve.
-            if seed_policy == "cross_class":
+            seed = None
+            if seed_policy == "impose":
                 seed = real_seeds[(i - 1) % len(real_seeds)]
                 source = seed.get(seed_field)
                 if _missing_seed(i, source):
                     continue
 
-            is_positive = rng.random() < class_prob
-            label = positive_label if is_positive else negative_label
+            label = _draw_label(class_balance, labels, rng)
+            attrition[label]["attempted"] += 1
 
-            # Every policy targets the empirical signal mix for the positive
-            # class — same_class emphasises the sampled signals in its rewrite
-            # rather than inheriting whatever its seed happened to carry, so
-            # forward generation is steerable the way inverse already is. The
-            # negative class never carries signals under any policy.
+            # Template-driven: a label receives a signal mix exactly when its own
+            # prompt asks for one. No branch on which label is "positive".
+            template = (inverse_prompts.get(label) if seed_policy == "impose"
+                        else forward_prompts[label] if seed_policy == "inherit"
+                        else seedless_prompts[label])
+            wants_signals = "{error_spec}" in (template or "")
             keys: list[str] = []
             error_spec = ""
-            if is_positive:
+            if wants_signals:
                 keys = _sample_categories(type_dist, count_dist, rng)
                 error_spec = "; ".join(error_descriptions.get(k, k) for k in keys)
-            if is_positive:
-                technique = ", ".join(keys)
-            else:
-                technique = "imitation" if seed_policy == "same_class" else "paraphrase"
+            technique = (", ".join(keys) if keys
+                         else _NO_SIGNAL_TECHNIQUE.get(seed_policy, "rewrite"))
 
-            if seed_policy == "cross_class":
-                if is_positive:
-                    prompt = inject_prompt.format(sentence=source, error_spec=error_spec)
-                    tag = "Corrupted"
-                else:
-                    prompt = negative_prompt.format(sentence=source)
-                    tag = "Rewritten"
-            elif seed_policy == "same_class":
+            if seed_policy == "impose":
+                if template is None:
+                    raise RuntimeError(
+                        f"no inverse prompt for label {label!r}; "
+                        "get_inverse_class_prompts() must cover every label."
+                    )
+                prompt = (template.format(sentence=source, error_spec=error_spec)
+                          if wants_signals else template.format(sentence=source))
+                tag = "Message"
+            elif seed_policy == "inherit":
                 pool = [row for row in real_seeds if row.get(label_field) == label]
                 if not pool:
                     raise RuntimeError(
-                        f"seed_policy='same_class' needs seeds labeled {label!r}; the pool has none."
+                        f"seed_policy='inherit' needs seeds labeled {label!r}; the pool has none."
                     )
                 seed = pool[(i - 1) % len(pool)]
                 source = seed.get(seed_field)
                 if _missing_seed(i, source):
                     continue
-                template = forward_prompts[label]
                 prompt = (template.format(sentence=source, error_spec=error_spec)
-                          if is_positive else template.format(sentence=source))
+                          if wants_signals else template.format(sentence=source))
                 tag = "Rewritten"
             elif seed_policy == "none":
                 source = None
                 spec = specs_by_label[label][(i - 1) % len(specs_by_label[label])]
-                if is_positive:
-                    prompt = seedless_prompts[label].format(spec=spec, error_spec=error_spec)
-                else:
-                    prompt = seedless_prompts[label].format(spec=spec)
+                prompt = (template.format(spec=spec, error_spec=error_spec)
+                          if wants_signals else template.format(spec=spec))
                 tag = "Message"
             else:
                 raise ValueError(f"unknown seed_policy: {seed_policy!r}")
@@ -699,7 +761,11 @@ class BaseGenerator(ABC):
                           f"to compare against (seed_policy='none').", flush=True)
                     judge_skip_notice_printed = True
 
-                synthetic.append({"text": text, "label": label, "technique": technique, "seed": source or ""})
+                synthetic.append({"text": text, "label": label,
+                                  "technique": technique,
+                                  "source_label": (seed or {}).get(label_field),
+                                  "seed": source or ""})
+                attrition[label]["survived"] += 1
                 suffix = f" + judge {judge_dt:.1f}s" if judge_prompt else ""
                 print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s{suffix} ✓ ({label}: {technique})", flush=True)
                 if request_delay > 0:
@@ -714,6 +780,128 @@ class BaseGenerator(ABC):
             f"Generated {len(synthetic)} synthetic samples (class-conditional) "
             f"(judge dropped: {judge_dropped}, parse failed: {parse_failed}, refused: {refused})."
         )
+        return synthetic
+
+    def generate_structured(
+        self,
+        build_prompt,
+        parse,
+        build_feedback=None,
+        *,
+        sample_size: int,
+        max_parse_attempts: int = 3,
+        max_feedback_rounds: int = 0,
+        request_delay: float = 0.0,
+    ) -> list[dict]:
+        """Generate whole structured artifacts, one per sample, with an optional
+        per-artifact feedback loop.
+
+        Unlike corruption and class_conditional, where a sample is one sentence
+        and fidelity only means something across a distribution, a structured
+        artifact has its own measurable shape — so it can be compared against
+        the reference and regenerated on its own.
+
+        Stays ontology-agnostic like every other loop here: it never sees the
+        task, the profile, or what the artifact means. Callers bind those.
+
+            build_prompt(feedback) -> str       feedback is None on round 0
+            parse(raw)             -> {"artifact": dict | None, "diagnostic": dict}
+            build_feedback(artifact) -> {"feedback", "comparison",
+                                         "synthetic_profile"}, or None to
+                                        disable the loop entirely
+
+        Each returned artifact carries its own `generation_feedback` metadata:
+        the rounds it took, why attempts were rejected, and whether it stopped
+        early inside tolerance.
+        """
+        feedback_enabled = build_feedback is not None
+        rounds_budget = max(0, max_feedback_rounds) if feedback_enabled else 0
+        max_parse_attempts = max(1, max_parse_attempts)
+        synthetic: list[dict] = []
+
+        for _ in range(sample_size):
+            selected = None
+            metadata: dict = {
+                "feedback_enabled": feedback_enabled,
+                "max_feedback_rounds": rounds_budget,
+                "rounds": [],
+                "early_stopped": False,
+                "final_round_selected": None,
+                "final_feedback_informed": False,
+            }
+            feedback = None
+            for round_idx in range(rounds_budget + 1):
+                parsed = None
+                attempts = 0
+                attempt_diagnostics: list[dict] = []
+                while parsed is None and attempts < max_parse_attempts:
+                    attempts += 1
+                    raw = self.call_api(build_prompt(feedback))
+                    parse_result = parse(raw)
+                    parsed = parse_result["artifact"]
+                    diagnostic = {"attempt": attempts, **parse_result["diagnostic"]}
+                    provider_diagnostic = getattr(self, "last_response_diagnostic", None)
+                    if parsed is None and provider_diagnostic:
+                        diagnostic["provider_response"] = provider_diagnostic
+                    attempt_diagnostics.append(diagnostic)
+                    if parsed is None:
+                        reason = diagnostic.get("rejection_reason", "unknown")
+                        print(
+                            "[SKIP] structured generation returned invalid "
+                            f"JSON/artifact ({reason})."
+                        )
+                    if request_delay > 0:
+                        time.sleep(request_delay)
+
+                if parsed is None:
+                    metadata["rounds"].append({
+                        "round": round_idx,
+                        "feedback_informed": feedback is not None,
+                        "parse_attempts": attempts,
+                        "attempts": attempt_diagnostics,
+                        "valid": False,
+                    })
+                    if selected is not None:
+                        metadata["failed_feedback_round_preserved_previous"] = True
+                    break
+
+                selected = parsed
+                metadata.setdefault("attempts", []).extend(attempt_diagnostics)
+                if not feedback_enabled:
+                    metadata["final_round_selected"] = round_idx
+                    break
+                round_info = build_feedback(selected)
+                feedback_result = round_info["feedback"]
+                metadata["rounds"].append({
+                    "round": round_idx,
+                    "feedback_informed": feedback is not None,
+                    "parse_attempts": attempts,
+                    "attempts": attempt_diagnostics,
+                    "valid": True,
+                    "within_tolerance": feedback_result["within_tolerance"],
+                    "feedback": feedback_result,
+                    "comparison": round_info["comparison"],
+                    "synthetic_profile": round_info["synthetic_profile"],
+                })
+                metadata["final_round_selected"] = round_idx
+                metadata["final_feedback_informed"] = feedback is not None
+                if feedback_result["within_tolerance"]:
+                    metadata["early_stopped"] = True
+                    break
+                if round_idx >= rounds_budget:
+                    break
+                feedback = feedback_result
+
+            if selected is not None:
+                selected["generation_feedback"] = metadata
+                synthetic.append(selected)
+
+        if len(synthetic) < sample_size:
+            print(
+                f"[WARN] structured generation produced {len(synthetic)} valid "
+                f"artifacts for {sample_size} requested.",
+                file=sys.stderr,
+            )
         return synthetic
 
     @abstractmethod

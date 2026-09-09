@@ -100,6 +100,24 @@ class GECTask(BaseTask):
             return None
         return {"incorrect": incorrect, "correct": correct}
 
+    def get_seed_pool(self, config: dict, real_data: list[dict], mode: str,
+                      *, seed_weights: dict | None = None, rng=None) -> list[dict]:
+        """Forward+seeded has no injectable error distribution — the seed pool is
+        the distribution. When calibration supplied weights, draw seeds so the
+        generator's lossy "same error type, new topic" channel lands on the
+        benchmark's mix. Without weights this is the unchanged first-N pool."""
+        if mode != "forward" or not seed_weights:
+            return real_data
+        import random
+
+        from framework.calibration.seeds import draw_weighted_seeds
+        from framework.profiling.gec_profiler import index_seed_edit_types
+
+        index = index_seed_edit_types(real_data)
+        size = (config.get("generation") or {}).get("sample_size", len(real_data))
+        return draw_weighted_seeds(real_data, index, seed_weights, size,
+                                   rng or random.Random())
+
     def get_real_eval_samples(self, config, real_data):
         """Real GEC benchmark: score models on the real incorrect inputs against
         the real correct references."""
@@ -118,7 +136,7 @@ class GECTask(BaseTask):
             real_data, supported, count_max=count_max, annotator=annotator
         )
 
-    def profile_dataset(self, rows: list[dict], annotator=None) -> dict:
+    def build_fidelity_profile(self, rows: list[dict], annotator=None) -> dict:
         """Edit-type distribution over (corrupted -> original) pairs, re-annotated
         with ERRANT so real and generated are measured identically (a generated
         row's own error_type claim is never trusted). Plus cheap content
@@ -147,7 +165,7 @@ class GECTask(BaseTask):
         profile["style"] = style_profile(texts)
         return profile
 
-    def compare_profiles(self, real: dict, generated: dict) -> dict:
+    def compare_fidelity_profiles(self, real: dict, generated: dict) -> dict:
         """Real->generated deltas + Jensen-Shannon divergences, mirroring the
         spam fidelity block."""
         from framework.profiling.fidelity import jensen_shannon_divergence
@@ -185,6 +203,12 @@ class GECTask(BaseTask):
                     "pairs; measures ERRANT-visible distribution match, not the "
                     "generator's intended error semantics.",
         }
+
+    def get_calibration_keys(self) -> dict[str, str]:
+        # build_fidelity_profile re-annotates with ERRANT and reports EVERY observed
+        # type; the controller projects that onto the supported vocabulary the
+        # target covers before taking any ratio.
+        return {"type_dist": "error_type_dist", "count_dist": "error_count_dist"}
 
     def get_task_name(self) -> str:
         return "gec"

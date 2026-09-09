@@ -27,7 +27,7 @@ class GenerateFilteringTests(unittest.TestCase):
     def _run(self, responses, sample_size=10):
         gen = FakeGenerator(responses)
         samples = [{"incorrect": f"in {i}", "correct": f"out {i}"} for i in range(len(responses))]
-        out = gen.generate(
+        out = gen.generate_forward(
             real_samples=samples,
             error_types=["article"],
             prompt_instruction="Fix: {sentence}",

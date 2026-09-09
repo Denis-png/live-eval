@@ -1,5 +1,5 @@
 from anthropic import Anthropic
-from .base_generator import BaseGenerator
+from .base_generator import BaseGenerator, TruncatedResponse
 
 
 class AnthropicGenerator(BaseGenerator):
@@ -24,6 +24,11 @@ class AnthropicGenerator(BaseGenerator):
             temperature=self.temperature,
             messages=[{"role": "user", "content": prompt}],
         )
+        if getattr(response, "stop_reason", None) == "max_tokens":
+            raise TruncatedResponse(
+                f"response truncated at max_tokens={self.max_tokens} "
+                f"(stop_reason='max_tokens') — raise generation.max_tokens"
+            )
         # Skip ThinkingBlocks (emitted by reasoning models like MiniMax-M2.7)
         # and concatenate all text blocks in case the response is split.
         return "".join(b.text for b in response.content if b.type == "text")

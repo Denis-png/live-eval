@@ -8,6 +8,7 @@ from datetime import datetime
 
 import numpy as np
 from framework.data_loading import iter_local_rows, resolve_dataset_config
+from framework.generators.base_generator import CLASS_CONDITIONAL_SEMANTICS
 from framework.generators.factory import load_generator
 from framework.tasks.base_task import BaseTask
 
@@ -146,7 +147,85 @@ def load_error_distribution(config: dict, real_data: list[dict], task) -> dict:
             "dataset.reference_size is not set too low (spam), or check "
             "that the dataset yields valid pairs."
         )
-    return empirical
+    return _apply_calibration(config, task, empirical)
+
+
+# Provenance for _build_meta: results.json is the only surviving record of which
+# calibration produced a benchmark, because artifacts are gitignored.
+_LAST_CALIBRATION: dict | None = None
+
+
+def _apply_calibration(config: dict, task, empirical: dict) -> dict:
+    """Prefer a matching calibration artifact over the raw empirical target.
+
+    Falls back to `empirical` when none exists, when the user opted out, or when
+    the stored setpoint no longer matches the benchmark — a stale artifact must
+    never be used silently.
+    """
+    global _LAST_CALIBRATION
+    _LAST_CALIBRATION = None
+
+    from framework.calibration.artifact import (
+        load_calibration,
+        resolve_calibration_path,
+        targets_match,
+    )
+
+    strategy = task.get_generation_strategy()
+    path = resolve_calibration_path(config, task, strategy)
+    if not path:
+        print(f"[NOTE] no calibration artifact for "
+              f"{generation_cell_slug(config, strategy)}; generating from the raw "
+              f"empirical distribution. Build one with: python -m "
+              f"framework.calibrate --config <config.yaml>")
+        return empirical
+
+    # The whole read-validate-select sequence is guarded, not just the file
+    # read: a JSON-valid but structurally corrupt artifact (a non-dict
+    # "target", a non-object top-level payload, a non-numeric distribution
+    # value) must warn and fall back like any other bad artifact, never crash
+    # the run. AttributeError/TypeError/KeyError cover malformed shapes
+    # (e.g. calling .get on a list/str, float() on a non-numeric value);
+    # OSError/ValueError cover unreadable files and invalid JSON.
+    try:
+        payload = load_calibration(path)
+        matched = targets_match(payload.get("target") or {}, empirical)
+        calibrated = payload.get("calibrated") or {}
+        type_dist = calibrated.get("type_dist")
+        count_dist = calibrated.get("count_dist")
+        usable = bool(type_dist) and bool(count_dist)
+        result = {"type_dist": dict(type_dist), "count_dist": dict(count_dist)} if usable else None
+        selected_round = payload.get("selected_round")
+    except (OSError, ValueError, AttributeError, TypeError, KeyError) as e:
+        print(f"[WARN] calibration {path!r} could not be read or is malformed "
+              f"({e}); using the empirical distribution.", file=sys.stderr)
+        return empirical
+
+    if not matched:
+        print(f"[WARN] calibration {path!r} was built against a different "
+              "benchmark setpoint (dataset or sample size changed); using the "
+              "empirical distribution instead.", file=sys.stderr)
+        return empirical
+
+    if strategy == "class_conditional":
+        stored = (payload.get("meta") or {}).get("class_conditional_semantics")
+        if stored != CLASS_CONDITIONAL_SEMANTICS:
+            print(f"[WARN] calibration {path!r} was measured under "
+                  f"{stored or 'asymmetric (pre-marker)'} class-conditional "
+                  f"semantics, but this build generates "
+                  f"{CLASS_CONDITIONAL_SEMANTICS}. Using the empirical "
+                  "distribution; recalibrate to use it.", file=sys.stderr)
+            return empirical
+
+    if not usable:
+        print(f"[WARN] calibration {path!r} has no usable distributions; "
+              "using the empirical distribution.", file=sys.stderr)
+        return empirical
+
+    _LAST_CALIBRATION = {"path": path, "selected_round": selected_round,
+                         "class_prob": calibrated.get("class_prob")}
+    print(f"Calibration: {path} (round {selected_round})")
+    return result
 
 
 DEFAULT_PROFILE_DIR = "framework/data/profiles"
@@ -163,18 +242,18 @@ def benchmark_slug(config: dict) -> str:
     return re.sub(r"[^0-9a-zA-Z]+", "_", str(raw)).strip("_").lower()
 
 
-def profile_filename(config: dict, task_name: str, num_samples: int) -> str:
+def benchmark_profile_filename(config: dict, task_name: str, num_samples: int) -> str:
     """<benchmark>_<sample_size>_<task>_profile.json — the sample size is the
     number of rows actually profiled, so the name states what the file covers."""
     return f"{benchmark_slug(config)}_{num_samples}_{task_name}_profile.json"
 
 
-def profile_dir(task_name: str) -> str:
+def benchmark_profile_dir(task_name: str) -> str:
     """Profiles are grouped per task: framework/data/profiles/<task>/."""
     return os.path.join(DEFAULT_PROFILE_DIR, task_name)
 
 
-def _resolve_profile_path(config: dict, task) -> str:
+def _resolve_benchmark_profile_path(config: dict, task) -> str:
     """The profile path seedless generation actually uses.
 
     `generation.profile_path` wins when set. Otherwise the task's profile
@@ -184,7 +263,7 @@ def _resolve_profile_path(config: dict, task) -> str:
     Exactly one profile resolves silently; several is ambiguous and raises,
     naming them, rather than guessing which benchmark the run meant.
 
-    Single source of truth, shared by `_load_generation_profile` (which loads the
+    Single source of truth, shared by `_load_benchmark_profile` (which loads the
     file) and `_build_meta` (which records the path as provenance). Profiles are
     gitignored, so `_build_meta`'s copy is the only surviving record of what
     generated a seedless benchmark."""
@@ -192,7 +271,7 @@ def _resolve_profile_path(config: dict, task) -> str:
     if gen.get("profile_path"):
         return gen["profile_path"]
     task_name = task.get_task_name()
-    pattern = os.path.join(profile_dir(task_name), f"*_{task_name}_profile.json")
+    pattern = os.path.join(benchmark_profile_dir(task_name), f"*_{task_name}_profile.json")
     matches = sorted(glob.glob(pattern))
     if len(matches) == 1:
         return matches[0]
@@ -201,12 +280,12 @@ def _resolve_profile_path(config: dict, task) -> str:
         return pattern
     raise RuntimeError(
         f"{len(matches)} profiles exist for task '{task_name}' in "
-        f"{profile_dir(task_name)}: " + ", ".join(os.path.basename(m) for m in matches)
+        f"{benchmark_profile_dir(task_name)}: " + ", ".join(os.path.basename(m) for m in matches)
         + ". Set generation.profile_path to choose which benchmark to generate from."
     )
 
 
-def _load_generation_profile(config: dict, task) -> dict | None:
+def _load_benchmark_profile(config: dict, task) -> dict | None:
     """Load the benchmark profile that drives seedless generation.
 
     Returns None when generation.seedless is falsy. Runs before the generation
@@ -215,14 +294,14 @@ def _load_generation_profile(config: dict, task) -> dict | None:
     if task.get_generation_strategy() == "structured":
         if gen.get("seedless") is False:
             return None
-        path = _resolve_profile_path(config, task)
+        path = _resolve_benchmark_profile_path(config, task)
         with open(path, encoding="utf-8") as f:
             return json.load(f)
     if not gen.get("seedless"):
         return None
     from framework.profiling.spec_sampler import load_profile
 
-    path = _resolve_profile_path(config, task)
+    path = _resolve_benchmark_profile_path(config, task)
     topics_key = (
         "topics_per_label"
         if task.get_generation_strategy() == "class_conditional"
@@ -284,11 +363,18 @@ def aggregate(all_run_scores: list[dict]) -> dict:
 # ── Output paths ──────────────────────────────────────────────
 
 def resolve_mode(config: dict, strategy: str) -> str:
-    """The mode that actually runs. `corruption` defaults to "forward",
-    `class_conditional` to "inverse" — shared by the session name, _build_meta
-    and the generation dispatch so all three always agree."""
-    return (config.get("generation") or {}).get(
-        "mode", "inverse" if strategy == "class_conditional" else "forward")
+    """The mode that actually runs — shared by the session name, _build_meta and
+    the generation dispatch so all three always agree.
+
+    `mode` asks where the annotation comes from: `inverse` draws it independently
+    and IMPOSES it on the source; `forward` INHERITS it from the source (the seed,
+    or the artifact just generated). Defaults follow what each strategy does when
+    the config says nothing: `corruption` infers the seed's error (forward), while
+    `class_conditional` draws a label and `structured` draws a target structure
+    (both inverse).
+    """
+    default = "forward" if strategy == "corruption" else "inverse"
+    return (config.get("generation") or {}).get("mode", default)
 
 
 def generation_cell_slug(config: dict, strategy: str) -> str:
@@ -297,11 +383,14 @@ def generation_cell_slug(config: dict, strategy: str) -> str:
     Naming a session after its setup means a directory listing shows what was
     run without opening results.json, and two cells of the same task can never
     collide in one output directory."""
-    if strategy == "structured":
-        # Structured generation builds from the benchmark's schema alone: it has
-        # no seed/mode axis, so naming it "forward_seedless" would be fiction.
-        return "structured"
-    seeding = "seedless" if (config.get("generation") or {}).get("seedless") else "seeded"
+    # Structured IS on the mode axis — it imposes a sampled target structure
+    # (inverse) or lets structure emerge (forward) — and is seedless until
+    # seeded structured generation is implemented.
+    seeding = (
+        "seedless" if strategy == "structured"
+        or (config.get("generation") or {}).get("seedless")
+        else "seeded"
+    )
     return f"{resolve_mode(config, strategy)}_{seeding}"
 
 
@@ -351,8 +440,8 @@ def _build_meta(config: dict, task, runs_completed: int,
     `seedless` mirrors generation.seedless (False when the key is absent).
     `profile_path` is the resolved path of the profile that actually drove
     generation when seedless is true — generation.profile_path if the config
-    set one, else the same default `_load_generation_profile` resolves
-    internally (see `_resolve_profile_path`, shared by both) — and None when
+    set one, else the same default `_load_benchmark_profile` resolves
+    internally (see `_resolve_benchmark_profile_path`, shared by both) — and None when
     seedless is false. Profiles are gitignored, so this is the only record of
     what generated a seedless benchmark; it must NOT be left None in the
     common case where seedless is true and profile_path is left unset (both
@@ -363,10 +452,7 @@ def _build_meta(config: dict, task, runs_completed: int,
     judge_active = bool(judge) and judge.get("enabled", True) is not False
     num_runs = gen["num_runs"]
     strategy = task.get_generation_strategy()
-    if strategy == "structured":
-        mode = None
-    else:
-        mode = resolve_mode(config, strategy)
+    mode = resolve_mode(config, strategy)
     seedless = True if strategy == "structured" else bool(gen.get("seedless"))
     if ds["source"] == "local":
         dataset_meta = {"source": "local", "path": ds["path"],
@@ -381,7 +467,7 @@ def _build_meta(config: dict, task, runs_completed: int,
         "strategy": strategy,
         "mode": mode,
         "seedless": seedless,
-        "profile_path": _resolve_profile_path(config, task) if seedless else None,
+        "profile_path": _resolve_benchmark_profile_path(config, task) if seedless else None,
         "provider": gen["provider"],
         "model": gen["model"],
         "num_runs": num_runs,
@@ -395,6 +481,11 @@ def _build_meta(config: dict, task, runs_completed: int,
         ),
         "real_baseline": real_baseline,
         "class_balance": gen.get("class_balance", "empirical"),
+        "calibration": _LAST_CALIBRATION,
+        "class_conditional_semantics": (
+            CLASS_CONDITIONAL_SEMANTICS
+            if strategy == "class_conditional" else None
+        ),
     }
 
 
@@ -419,12 +510,14 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
     """Dispatch on the task's generation strategy. Corruption → forward/inverse,
     including the seedless forward/inverse cells for GEC (Task 5). class_conditional
     (spam) now dispatches its own four cells on (mode, seedless) — Task 8:
-    inverse+seeded (today's unchanged production behavior) injects/paraphrases
-    real HAM seeds via seed_policy="cross_class"; inverse+seedless does the same
+    inverse+seeded (today's unchanged production behavior) renders every drawn
+    label via seed_policy="impose" over real seeds (the label is drawn from the
+    balance vector independently of the seed); inverse+seedless does the same
     but over carriers synthesized from the profile in place of real seeds;
-    forward+seeded imitates within a class via seed_policy="same_class" over
-    `task.get_seed_pool(..., "forward")`; forward+seedless drops real seeds
-    entirely via seed_policy="none" over per-label profile specs.
+    forward+seeded rewrites within a label via seed_policy="inherit" over
+    `task.get_seed_pool(..., "forward")` (the seed's own label happens to match
+    the drawn one); forward+seedless drops real seeds entirely via
+    seed_policy="none" over per-label profile specs.
 
     `profile` is the pre-loaded seedless generation profile (None when
     generation.seedless is falsy). When `generation.seedless` is true, per-sample
@@ -438,140 +531,98 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
     _profile_driven = False
 
     if strategy == "structured":
-        if gen_cfg.get("mode") not in (None, "structured", "none", "n/a"):
-            raise RuntimeError(
-                f"{task.get_task_name()} uses structured generation; generation.mode "
-                "is not applicable and must be omitted."
-            )
         if gen_cfg.get("seedless") is False:
+            # Not impossible — perturbing a real ontology subtree and keeping the
+            # perturbation as ground truth is coherent. It is unimplemented, and
+            # saying so is what keeps the design open rather than foreclosed.
             raise RuntimeError(
-                f"{task.get_task_name()} structured generation is profile-driven; "
-                "seeded generation is not supported."
+                f"seeded structured generation is not implemented for "
+                f"{task.get_task_name()}; it needs a real-artifact corpus and a "
+                "perturbation operator. Use seedless: true."
             )
         if profile is None:
             raise RuntimeError(
                 f"{task.get_task_name()} structured generation requires a profile."
             )
-        rng = random.Random()
-        synthetic = []
-        max_parse_attempts = max(1, gen_cfg.get("max_parse_attempts", 3))
-        feedback_cfg = task.get_feedback_config(gen_cfg) if hasattr(task, "get_feedback_config") else {}
+        mode = resolve_mode(config, strategy)
+        feedback_cfg = task.get_feedback_config(gen_cfg)
         feedback_enabled = bool(feedback_cfg.get("enabled", False))
-        max_feedback_rounds = (
-            max(0, int(feedback_cfg.get("max_rounds", 0)))
-            if feedback_enabled else 0
-        )
-
-        for _ in range(sample_size):
-            selected = None
-            metadata = {
-                "feedback_enabled": feedback_enabled,
-                "max_feedback_rounds": max_feedback_rounds,
-                "rounds": [],
-                "early_stopped": False,
-                "final_round_selected": None,
-                "final_taxonomy_feedback_informed": False,
-            }
-            feedback = None
-            for round_idx in range(max_feedback_rounds + 1):
-                parsed = None
-                attempts = 0
-                attempt_diagnostics = []
-                while parsed is None and attempts < max_parse_attempts:
-                    attempts += 1
-                    prompt = task.build_structured_generation_prompt(
-                        profile, rng=rng, feedback=feedback
-                    )
-                    raw = generator.call_api(prompt)
-                    if hasattr(task, "parse_structured_generation_with_diagnostics"):
-                        parse_result = task.parse_structured_generation_with_diagnostics(raw)
-                        parsed = parse_result["artifact"]
-                        diagnostic = {"attempt": attempts, **parse_result["diagnostic"]}
-                        provider_diagnostic = getattr(generator, "last_response_diagnostic", None)
-                        if parsed is None and provider_diagnostic:
-                            diagnostic["provider_response"] = provider_diagnostic
-                    else:
-                        parsed = task.parse_structured_generation(raw)
-                        diagnostic = {"attempt": attempts, "valid": parsed is not None}
-                        if parsed is None:
-                            diagnostic["rejection_reason"] = "invalid_structured_artifact"
-                    attempt_diagnostics.append(diagnostic)
-                    if parsed is None:
-                        reason = diagnostic.get("rejection_reason", "unknown")
-                        print(
-                            "[SKIP] structured generation returned invalid "
-                            f"JSON/artifact ({reason})."
-                        )
-
-                if parsed is None:
-                    metadata["rounds"].append({
-                        "round": round_idx,
-                        "feedback_informed": feedback is not None,
-                        "parse_attempts": attempts,
-                        "attempts": attempt_diagnostics,
-                        "valid": False,
-                    })
-                    if selected is not None:
-                        metadata["failed_feedback_round_preserved_previous"] = True
-                        break
-                    break
-
-                selected = parsed
-                metadata.setdefault("attempts", []).extend(attempt_diagnostics)
-                if not feedback_enabled:
-                    metadata["final_round_selected"] = round_idx
-                    break
-                round_info = task.build_structural_feedback(
-                    profile, selected, generation_config=gen_cfg
+        if mode == "forward":
+            # get_feedback_config's default is tuned for inverse (the loop drives
+            # an artifact toward an IMPOSED target), so an inherited default of
+            # enabled=true is not itself a contradiction here — forward simply
+            # never runs the loop. Only an explicit request in THIS run's config
+            # is contradictory, since forward imposes no target for it to chase,
+            # and silently ignoring set config is what this framework refuses.
+            explicit_feedback_request = bool((gen_cfg.get("feedback") or {}).get("enabled"))
+            if explicit_feedback_request:
+                raise RuntimeError(
+                    f"{task.get_task_name()}: generation.mode=forward cannot use the "
+                    "structured feedback loop — the loop targets an imposed structure "
+                    "and forward imposes none. Set mode=inverse or disable feedback."
                 )
-                feedback_result = round_info["feedback"]
-                metadata["rounds"].append({
-                    "round": round_idx,
-                    "feedback_informed": feedback is not None,
-                    "parse_attempts": attempts,
-                    "attempts": attempt_diagnostics,
-                    "valid": True,
-                    "within_tolerance": feedback_result["within_tolerance"],
-                    "feedback": feedback_result,
-                    "comparison": round_info["comparison"],
-                    "synthetic_profile": round_info["synthetic_profile"],
-                })
-                metadata["final_round_selected"] = round_idx
-                metadata["final_taxonomy_feedback_informed"] = feedback is not None
-                if feedback_result["within_tolerance"]:
-                    metadata["early_stopped"] = True
-                    break
-                if round_idx >= max_feedback_rounds:
-                    break
-                feedback = feedback_result
-
-            if selected is not None:
-                selected["generation_feedback"] = metadata
-                synthetic.append(selected)
-        if len(synthetic) < sample_size:
-            print(
-                f"[WARN] structured generation produced {len(synthetic)} valid "
-                f"taxonomies for {sample_size} requested.",
-                file=sys.stderr,
+            feedback_enabled = False
+        # Fail before the first API call, not mid-round: enabling the loop
+        # without a comparator is a config/implementation error, and the
+        # framework's rule is that an unsupported capability says so up front.
+        if feedback_enabled and (
+            type(task).build_structural_feedback
+            is BaseTask.build_structural_feedback
+        ):
+            raise RuntimeError(
+                f"{task.get_task_name()} enables the structured feedback loop "
+                "(get_feedback_config) but does not implement "
+                "build_structural_feedback()."
             )
+        # Delegate the loop itself, like every other strategy. The generator
+        # stays ontology-agnostic: it receives callables, never the task.
+        rng = random.Random()
+        synthetic = generator.generate_structured(
+            build_prompt=lambda feedback: task.build_structured_generation_prompt(
+                profile, rng=rng, feedback=feedback, mode=mode
+            ),
+            parse=task.parse_structured_generation_with_diagnostics,
+            build_feedback=(
+                (lambda artifact: task.build_structural_feedback(
+                    profile, artifact, generation_config=gen_cfg))
+                if feedback_enabled else None
+            ),
+            sample_size=sample_size,
+            max_parse_attempts=gen_cfg.get("max_parse_attempts", 3),
+            max_feedback_rounds=int(feedback_cfg.get("max_rounds", 0)),
+            request_delay=gen_cfg.get("request_delay", 0.0),
+        )
     elif strategy == "class_conditional":
         # No config sets "mode" explicitly today (spam.json's config comment
         # says so) — the default MUST resolve to "inverse" so that omitting
         # the key keeps reproducing today's production behavior unchanged.
         mode = gen_cfg.get("mode", "inverse")
         seedless = bool(gen_cfg.get("seedless"))
-        # Required regardless of seed_policy — generate_class_conditional's
-        # signature has no defaults for these, even though same_class/none
-        # policies use forward_prompts/seedless_prompts instead of inject_prompt.
+        # The strategy is label -> text, so the class names come from the task.
+        # Hardcoding them here would mean every classification task is generated
+        # under the first one's vocabulary.
+        labels = task.get_class_labels()
+        if not labels:
+            raise RuntimeError(
+                f"{task.get_task_name()} declares the class_conditional strategy "
+                "but get_class_labels() returned None — it must return an ordered "
+                "sequence of label names."
+            )
+        inverse_prompts = task.get_inverse_class_prompts()
+        missing = [lbl for lbl in labels if lbl not in inverse_prompts]
+        if mode == "inverse" and missing:
+            raise RuntimeError(
+                f"{task.get_task_name()} is missing inverse prompts for "
+                f"{', '.join(missing)} — get_inverse_class_prompts() must cover "
+                "every label in get_class_labels()."
+            )
         common_kwargs = dict(
-            class_prob=class_prob,
+            class_balance=class_prob,
+            labels=tuple(labels),
+            inverse_prompts=inverse_prompts,
             type_dist=error_dist["type_dist"],
             count_dist=error_dist["count_dist"],
             error_descriptions=task.get_error_descriptions(),
-            inject_prompt=task.get_inverse_prompt(),
-            negative_prompt=task.get_ham_generation_prompt(),
-            positive_label="SPAM",
-            negative_label="HAM",
             sample_size=sample_size,
             judge_prompt=task.get_inverse_judge_prompt() if judge_call else None,
             judge_call=judge_call,
@@ -588,8 +639,20 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                         f"seedless=true (no carrier_prompt)."
                     )
                 rng = random.Random()
+                # The rule is: the LAST label's content profile supplies the
+                # carrier. Under symmetric semantics there is no "class being
+                # transformed away from" — the target label is drawn
+                # independently of the carrier and imposed on it, so any label's
+                # profile would be a defensible source. For spam this resolves
+                # to HAM (labels = ("SPAM", "HAM")), the same carrier the
+                # asymmetric implementation produced, so the cell's behaviour is
+                # unchanged. For a task with three or more labels the choice is
+                # arbitrary and unspecified: nothing in the design says which
+                # class a seedless carrier should be drawn from, and the first
+                # such task should settle it deliberately rather than inherit
+                # this line.
                 specs = [
-                    render_spec(sample_content_spec(profile, rng, label="HAM"))
+                    render_spec(sample_content_spec(profile, rng, label=labels[-1]))
                     for _ in range(sample_size)
                 ]
                 carriers = generator.generate_carriers(
@@ -599,13 +662,15 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                 real_seeds = [{"text": text} for text in carriers]
                 seed_field = "text"
             else:
-                # Post-parse_row contract: the seed text always lives in "incorrect".
-                real_seeds = real_data
+                # get_seed_pool's labeled both-class pool — the same one forward
+                # uses — so inverse can impose a label onto either class's seed,
+                # not just paraphrase within the HAM-only real_data pool.
+                real_seeds = task.get_seed_pool(config, real_data, "inverse")
                 seed_field = "incorrect"
             synthetic = generator.generate_class_conditional(
                 real_seeds=real_seeds,
                 seed_field=seed_field,
-                seed_policy="cross_class",
+                seed_policy="impose",
                 **common_kwargs,
             )
         elif seedless:
@@ -622,7 +687,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                     render_spec(sample_content_spec(profile, rng, label=label))
                     for _ in range(sample_size)
                 ]
-                for label in ("SPAM", "HAM")
+                for label in labels
             }
             synthetic = generator.generate_class_conditional(
                 seed_policy="none",
@@ -638,18 +703,18 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                     f"seedless=false (no forward_prompts)."
                 )
             real_seeds = task.get_seed_pool(config, real_data, "forward")
-            # seed_policy="same_class" needs seeds of BOTH classes (it draws
-            # from the subset matching the label rng picked). Check that BEFORE
-            # any API call: the in-loop guard in generate_class_conditional
-            # catches this too, but only after rng happens to draw the missing
-            # class — anywhere from 1 to `sample_size` paid calls in, discarding
+            # seed_policy="inherit" needs seeds of EVERY label (it draws from
+            # the subset matching the label rng picked). Check that BEFORE any
+            # API call: the in-loop guard in generate_class_conditional catches
+            # this too, but only after rng happens to draw the missing label —
+            # anywhere from 1 to `sample_size` paid calls in, discarding
             # everything generated so far.
             label_field = "label"
             present_labels = {row.get(label_field) for row in real_seeds}
-            for label in (common_kwargs["positive_label"], common_kwargs["negative_label"]):
+            for label in labels:
                 if label not in present_labels:
                     raise RuntimeError(
-                        f"seed_policy='same_class' needs seeds labeled {label!r}, but "
+                        f"seed_policy='inherit' needs seeds labeled {label!r}, but "
                         f"the reference rows from dataset "
                         f"'{_dataset_display_name(config)}' carry no {label!r} class "
                         f"— check the dataset and {task.get_task_name()}'s "
@@ -659,16 +724,20 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                 real_seeds=real_seeds,
                 seed_field="text",
                 label_field=label_field,
-                seed_policy="same_class",
+                seed_policy="inherit",
                 forward_prompts=forward_prompts,
                 **common_kwargs,
             )
     else:
         mode = gen_cfg.get("mode", "forward")
         seedless = bool(gen_cfg.get("seedless"))
+        # Hoisted out of the seedless block: forward+seeded needs it too, for the
+        # calibrated seed draw. Every run draws fresh (no fixed seed) — pinning
+        # it would hand every run in a session the identical seed set and
+        # collapse the run-to-run variance the framework exists to measure.
+        rng = random.Random()
         if seedless:
             from framework.profiling.spec_sampler import render_spec, sample_content_spec
-            rng = random.Random()
             side = task.get_profile_side(mode)
             specs = [
                 render_spec(sample_content_spec(profile, rng, side=side))
@@ -720,8 +789,15 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                 request_delay=gen_cfg.get("request_delay", 0.0),
             )
         else:
-            synthetic = generator.generate(
-                real_samples=real_data, error_types=task.get_error_types(),
+            # forward+seeded: the generator picks its own error type, so the only
+            # control input is WHICH seeds it sees. Without calibrated weights
+            # get_seed_pool returns real_data untouched.
+            seed_weights = (gen_cfg.get("seed_weights")
+                            if isinstance(gen_cfg.get("seed_weights"), dict) else None)
+            synthetic = generator.generate_forward(
+                real_samples=task.get_seed_pool(config, real_data, "forward",
+                                                seed_weights=seed_weights, rng=rng),
+                error_types=task.get_error_types(),
                 prompt_instruction=task.get_prompt_instruction(), sample_size=sample_size,
                 judge_prompt=task.get_judge_prompt() if judge_call else None,
                 judge_call=judge_call, request_delay=gen_cfg.get("request_delay", 0.0),
@@ -739,16 +815,70 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
 
 # ── Post-generation helpers (class balance, real baseline, nesting, profiling) ──
 
-def _resolve_class_prob(config: dict, real_reference) -> float:
-    """P(positive class) for class-conditional generation. `empirical` → the real
-    reference's positive fraction; a float → used directly."""
+def _resolve_class_prob(config: dict, real_reference, task=None) -> dict:
+    """Balance vector over the task's labels. An explicit `generation.class_balance`
+    mapping is a user instruction and always wins, calibration included. A
+    calibrated balance corrects the EMPIRICAL one for differential attrition, so
+    it applies only when `class_balance` is `empirical` (the default)."""
+    labels = tuple(task.get_class_labels() or ()) if task is not None else ()
     cb = (config.get("generation") or {}).get("class_balance", "empirical")
+
+    if isinstance(cb, bool):
+        # bool is a subclass of int in Python, so `class_balance: true` would
+        # otherwise silently pass the numeric branch below as 1.0/1. Reject it
+        # explicitly rather than have a YAML typo silently become P(labels[0])==1.
+        raise RuntimeError(
+            f"generation.class_balance is a boolean ({cb!r}), which is not a "
+            "supported value. Use a float 0..1 (two-label tasks only) or an "
+            "explicit {label: weight} mapping."
+        )
+
     if isinstance(cb, (int, float)):
-        return float(cb)
-    if real_reference:
-        pos = sum(1 for r in real_reference if r.get("label") == "SPAM")
-        return pos / len(real_reference)
-    return 0.5
+        # The binary legacy spelling of the mapping: P(labels[0]) is what
+        # class_balance has always meant for a two-label task (P(SPAM) with
+        # ("SPAM", "HAM")), so a bare number still means exactly that and every
+        # existing two-label config keeps working unchanged. It cannot express
+        # a weight for a third label, so it is only accepted at exactly two.
+        if len(labels) != 2:
+            example = ", ".join(f"{lbl}: <weight>" for lbl in labels)
+            raise RuntimeError(
+                f"generation.class_balance is a bare number ({cb!r}), which is "
+                f"ambiguous across {len(labels)} labels {labels!r} — use an "
+                f"explicit mapping instead, e.g. {{{example}}}."
+            )
+        f = float(cb)
+        if not 0.0 <= f <= 1.0:
+            raise RuntimeError(
+                f"generation.class_balance={f!r} is outside the valid range 0..1."
+            )
+        return {labels[0]: f, labels[1]: 1.0 - f}
+
+    if isinstance(cb, dict):
+        unknown = [k for k in cb if k not in labels]
+        if unknown:
+            raise RuntimeError(
+                f"generation.class_balance names labels the task does not "
+                f"declare: {', '.join(sorted(unknown))}. Known labels: "
+                f"{', '.join(labels)}."
+            )
+        total = sum(max(0.0, float(v)) for v in cb.values())
+        if total <= 0:
+            raise RuntimeError("generation.class_balance gives every label zero weight.")
+        if abs(total - 1.0) > 1e-6:
+            print(f"[NOTE] generation.class_balance sums to {total:.4f}; "
+                  "normalizing — relative weights are what matter.")
+        return {label: max(0.0, float(cb.get(label, 0.0))) / total for label in labels}
+
+    if _LAST_CALIBRATION and isinstance(_LAST_CALIBRATION.get("class_prob"), dict):
+        return dict(_LAST_CALIBRATION["class_prob"])
+
+    if real_reference and labels:
+        counts = {label: sum(1 for r in real_reference if r.get("label") == label)
+                  for label in labels}
+        total = sum(counts.values())
+        if total:
+            return {label: c / total for label, c in counts.items()}
+    return {label: 1.0 / len(labels) for label in labels} if labels else {}
 
 
 def _evaluate_real_baseline(task, config, real_reference, evaluator_fns) -> dict:
@@ -788,18 +918,18 @@ def _nest_results(generated_agg: dict, real_scores: dict,
     return final
 
 
-def _write_profile_artifacts(task, real_reference, all_generated, paths) -> None:
+def _write_fidelity_artifacts(task, real_reference, all_generated, paths) -> None:
     """Persist the real sample + a {real, generated, fidelity} profile when the
-    task supports profiling. No-op for tasks whose profile_dataset returns None."""
+    task supports profiling. No-op for tasks whose build_fidelity_profile returns None."""
     if real_reference is None:
         return
     with open(paths["real_sample"], "w", encoding="utf-8") as f:
         json.dump(real_reference, f, indent=2, ensure_ascii=False)
-    real_profile = task.profile_dataset(real_reference)
+    real_profile = task.build_fidelity_profile(real_reference)
     if real_profile is None:
         return
-    generated_profile = task.profile_dataset(all_generated)
-    fidelity = task.compare_profiles(real_profile, generated_profile)
+    generated_profile = task.build_fidelity_profile(all_generated)
+    fidelity = task.compare_fidelity_profiles(real_profile, generated_profile)
     with open(paths["profile"], "w", encoding="utf-8") as f:
         json.dump({"real": real_profile, "generated": generated_profile,
                    "fidelity": fidelity}, f, indent=2, ensure_ascii=False)
@@ -818,12 +948,78 @@ def _render_plots(config: dict, paths: dict) -> None:
         print(f"[WARN] plotting failed (results are unaffected): {e}", file=sys.stderr)
 
 
-# ── Main pipeline ─────────────────────────────────────────────
+# ── Generation context ────────────────────────────────────────
 
-def run_pipeline(config: dict) -> dict:
-    """Run the GET pipeline N times, evaluate the generated benchmark (mean±std)
-    and — by default — the same models on the real benchmark, profile real-vs-
-    generated fidelity, and write all artifacts under one per-session directory."""
+def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
+                       seedless: bool) -> dict | None:
+    """Calibrated seed weights for cells whose only control input is seed choice.
+
+    GEC forward+seeded never reaches load_error_distribution (the generator picks
+    its own error type, so _should_load_error_distribution is False), so its
+    calibration artifact has to be resolved here instead.
+    """
+    if strategy != "corruption" or mode != "forward" or seedless:
+        return None
+    from framework.calibration.artifact import load_calibration, resolve_calibration_path
+
+    path = resolve_calibration_path(config, task, strategy)
+    if not path:
+        print(f"[NOTE] no calibration artifact for "
+              f"{generation_cell_slug(config, strategy)}; drawing seeds in the "
+              f"unweighted first-N order. Build one with: python -m "
+              f"framework.calibrate --config <config.yaml>")
+        return None
+    # Same guard as _apply_calibration: a JSON-valid but structurally corrupt
+    # artifact must fall back to today's behavior, never crash the run.
+    try:
+        payload = load_calibration(path)
+        weights = (payload.get("calibrated") or {}).get("seed_weights")
+        if not isinstance(weights, dict) or not weights:
+            return None
+        # EVERY value is coerced, deliberately not `any(float(w) > 0 ...)`: that
+        # short-circuits, so {"R:DET": 1.0, "R:PREP": "bad"} would pass the guard
+        # and raise inside draw_weighted_seeds mid-run — the exact crash this
+        # check exists to prevent.
+        values = [float(w) for w in weights.values()]
+        if not any(v > 0 for v in values):
+            return None
+    except (OSError, ValueError, AttributeError, TypeError, KeyError) as e:
+        print(f"[WARN] calibration {path!r} could not be read or is malformed "
+              f"({e}); drawing seeds in the unweighted first-N order.",
+              file=sys.stderr)
+        return None
+
+    # Provenance, same as _apply_calibration records for every other cell:
+    # artifacts are gitignored, so results.json is the only surviving record of
+    # what produced a benchmark. Written only on success and only after
+    # build_generation_context's unconditional reset, so a run without an
+    # artifact still ends at None. class_prob is not applicable here — seed
+    # weights are a corruption-cell control input and carry no class balance.
+    global _LAST_CALIBRATION
+    _LAST_CALIBRATION = {"path": path,
+                         "selected_round": payload.get("selected_round"),
+                         "class_prob": None}
+    print(f"Calibration: {path} (round {payload.get('selected_round')}) — "
+          f"seed weights over {len(weights)} edit types")
+    return weights
+
+
+def build_generation_context(config: dict) -> dict:
+    """Everything needed to generate for `config`, resolved once.
+
+    Shared by `run_pipeline` and `framework.calibrate` so both provably build
+    the same task, seeds, generator, distributions and class balance. Makes no
+    API call: `load_generator` only constructs a client.
+    """
+    # _LAST_CALIBRATION is set by _apply_calibration, which only runs when
+    # _should_load_error_distribution(...) is True below. Strategies/modes that
+    # skip that lookup entirely (structured, or corruption forward+seeded) must
+    # not let _build_meta report a PREVIOUS config's calibration in this same
+    # process (e.g. scripts/compare_models.py loops run_pipeline over configs).
+    # Reset unconditionally here, on top of the reset inside _apply_calibration.
+    global _LAST_CALIBRATION
+    _LAST_CALIBRATION = None
+
     task          = load_task(config["task"]["name"])
     real_data     = load_real_data(config, task)
     generator     = load_generator(config["generation"])
@@ -831,7 +1027,8 @@ def run_pipeline(config: dict) -> dict:
     evaluator_fns = task.get_evaluator_fns()
 
     strategy = task.get_generation_strategy()
-    mode = None if strategy == "structured" else config["generation"].get("mode", "forward")
+    # One source of truth: resolve_mode also feeds the session name and _build_meta.
+    mode = resolve_mode(config, strategy)
     seedless = (
         True if strategy == "structured"
         else bool(config["generation"].get("seedless"))
@@ -840,11 +1037,52 @@ def run_pipeline(config: dict) -> dict:
         load_error_distribution(config, real_data, task)
         if _should_load_error_distribution(strategy, mode, seedless) else None
     )
-    profile = _load_generation_profile(config, task)
+    profile = _load_benchmark_profile(config, task)
+
+    # Published onto the config so _run_generation's forward+seeded branch (which
+    # reads generation.seed_weights) sees them: that cell never calls
+    # _apply_calibration, so this is the only place its artifact can be resolved.
+    seed_weights = _load_seed_weights(config, task, strategy, mode, seedless)
+    if seed_weights:
+        config.setdefault("generation", {})["seed_weights"] = seed_weights
 
     # Real reference feeds class balance, the real baseline, and profiling.
     real_reference = task.get_real_eval_samples(config, real_data)
-    class_prob = _resolve_class_prob(config, real_reference)
+
+    return {
+        "task": task,
+        "real_data": real_data,
+        "generator": generator,
+        "judge_call": judge_call,
+        "evaluator_fns": evaluator_fns,
+        "strategy": strategy,
+        "mode": mode,
+        "seedless": seedless,
+        "error_dist": error_dist,
+        "seed_weights": seed_weights,
+        "profile": profile,
+        "real_reference": real_reference,
+        "class_prob": _resolve_class_prob(config, real_reference, task),
+    }
+
+
+# ── Main pipeline ─────────────────────────────────────────────
+
+def run_pipeline(config: dict) -> dict:
+    """Run the GET pipeline N times, evaluate the generated benchmark (mean±std)
+    and — by default — the same models on the real benchmark, profile real-vs-
+    generated fidelity, and write all artifacts under one per-session directory."""
+    ctx            = build_generation_context(config)
+    task           = ctx["task"]
+    real_data      = ctx["real_data"]
+    generator      = ctx["generator"]
+    judge_call     = ctx["judge_call"]
+    evaluator_fns  = ctx["evaluator_fns"]
+    strategy       = ctx["strategy"]
+    error_dist     = ctx["error_dist"]
+    profile        = ctx["profile"]
+    real_reference = ctx["real_reference"]
+    class_prob     = ctx["class_prob"]
 
     # <timestamp>_<mode>_<seeded|seedless>: timestamp first so a directory
     # listing still sorts chronologically, setup second so it is readable.
@@ -900,7 +1138,7 @@ def run_pipeline(config: dict) -> dict:
         if run_idx + 1 < num_runs:
             print(f"Partial results (run {run_idx + 1}/{num_runs}) saved to {paths['results']}")
 
-    _write_profile_artifacts(task, real_reference, all_generated, paths)
+    _write_fidelity_artifacts(task, real_reference, all_generated, paths)
     _render_plots(config, paths)
     print(f"\nResults saved to {paths['results']}")
     return final
