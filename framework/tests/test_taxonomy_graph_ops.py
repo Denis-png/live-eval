@@ -8,9 +8,15 @@ from random import Random
 
 from framework.tasks.taxonomy.graph_ops import sample_subtrees
 
-# A -> B -> D, B -> E, A -> C -> F ; depth 3, 6 classes
+# A -> B -> D, B -> E, A -> C -> F ; depth 2, 6 classes
 _CLASSES = ["A", "B", "C", "D", "E", "F"]
 _AXIOMS = [["B", "A"], ["C", "A"], ["D", "B"], ["E", "B"], ["F", "C"]]
+
+# F has TWO parents (C and B): ontologies preserve multiple inheritance, so the
+# tree fixture above cannot exercise the paths that actually matter.
+_DAG_CLASSES = ["A", "B", "C", "D", "E", "F"]
+_DAG_AXIOMS = [["B", "A"], ["C", "A"], ["D", "B"], ["E", "B"],
+               ["F", "C"], ["F", "B"]]
 
 
 class SampleSubtreesTests(unittest.TestCase):
@@ -50,15 +56,41 @@ class SampleSubtreesTests(unittest.TestCase):
                 depths.append(d)
             self.assertEqual(sub["max_depth"], max(depths))
 
-    def test_it_is_deterministic_under_a_seeded_rng(self):
-        a = sample_subtrees(_CLASSES, _AXIOMS, min_classes=1, rng=Random(7))
-        b = sample_subtrees(_CLASSES, _AXIOMS, min_classes=1, rng=Random(7))
-        self.assertEqual(a, b)
+    def test_the_pool_is_exhaustive_and_ordered(self):
+        # sample_subtrees enumerates every qualifying root in sorted order; it
+        # does not sample. Replaces a determinism test that could not fail,
+        # because the function has no random branch for a seed to affect.
+        out = sample_subtrees(_CLASSES, _AXIOMS, min_classes=1, rng=Random(7))
+        self.assertEqual([s["root"] for s in out], sorted(s["root"] for s in out))
+        self.assertEqual(len(out), len(_CLASSES))
 
     def test_a_graph_with_no_qualifying_subtree_returns_empty(self):
         # Callers fail fast on this; returning [] rather than raising keeps the
         # pure layer free of framework error vocabulary.
         self.assertEqual(sample_subtrees(_CLASSES, _AXIOMS, min_classes=99), [])
+
+
+class MultiParentTests(unittest.TestCase):
+    def test_no_class_appears_twice(self):
+        for sub in sample_subtrees(_DAG_CLASSES, _DAG_AXIOMS, min_classes=1,
+                                   rng=Random(0)):
+            self.assertEqual(len(sub["classes"]), len(set(sub["classes"])),
+                             f"duplicate class in {sub['root']}: {sub['classes']}")
+
+    def test_recorded_depth_matches_the_longest_path_in_the_returned_axioms(self):
+        from framework.tasks.taxonomy.graph_ops import _depth_of
+        for sub in sample_subtrees(_DAG_CLASSES, _DAG_AXIOMS, min_classes=1,
+                                   rng=Random(0)):
+            self.assertEqual(sub["max_depth"],
+                             _depth_of(sub["classes"], sub["subclass_axioms"]))
+
+    def test_every_subtree_stays_closed_on_a_dag(self):
+        for sub in sample_subtrees(_DAG_CLASSES, _DAG_AXIOMS, min_classes=1,
+                                   rng=Random(0)):
+            names = set(sub["classes"])
+            for child, parent in sub["subclass_axioms"]:
+                self.assertIn(child, names)
+                self.assertIn(parent, names)
 
 
 if __name__ == "__main__":

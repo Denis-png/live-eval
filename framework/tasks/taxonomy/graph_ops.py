@@ -22,17 +22,26 @@ def _children_index(axioms) -> dict[str, list[str]]:
 
 
 def _depth_of(classes, axioms) -> int:
-    """Longest root-to-leaf edge count. 0 for a single class or a forest of them."""
-    parents = {child: parent for child, parent in axioms}
-    best = 0
-    for cls in classes:
-        depth, cur, seen = 0, cls, set()
-        while cur in parents and cur not in seen:
-            seen.add(cur)
-            cur = parents[cur]
-            depth += 1
-        best = max(best, depth)
-    return best
+    """Longest root-to-node edge count. Ontologies are DAGs — a class may have
+    several parents — so this is a longest path over every parent, not a walk up
+    a single chain. Memoised, so it stays O(V+E)."""
+    parents_of: dict[str, list[str]] = {}
+    for child, parent in axioms:
+        parents_of.setdefault(child, []).append(parent)
+    memo: dict[str, int] = {}
+
+    def height(node, stack):
+        if node in memo:
+            return memo[node]
+        if node in stack:            # defensive: a cycle has no finite depth
+            return 0
+        best = 0
+        for parent in parents_of.get(node, []):
+            best = max(best, 1 + height(parent, stack | {node}))
+        memo[node] = best
+        return best
+
+    return max((height(c, frozenset()) for c in classes), default=0)
 
 
 def sample_subtrees(classes, axioms, *, max_depth: int = 4,
@@ -46,6 +55,9 @@ def sample_subtrees(classes, axioms, *, max_depth: int = 4,
     a shallow ontology would have the same depth, seed choice would carry no
     information, and the seeded cells would have no control input at all.
 
+    `rng` is accepted for signature compatibility; enumeration is exhaustive and
+    ordered, so the pool does not depend on it.
+
     Returns [] rather than raising when nothing qualifies — callers own the
     framework's error vocabulary, this layer does not.
     """
@@ -53,12 +65,15 @@ def sample_subtrees(classes, axioms, *, max_depth: int = 4,
     children = _children_index(axioms)
     out = []
     for root in sorted(classes):
-        kept, frontier = [root], [(root, 0)]
+        kept, frontier, seen = [root], [(root, 0)], {root}
         while frontier:
             node, depth = frontier.pop(0)
             if depth >= max_depth:
                 continue
             for kid in children.get(node, []):
+                if kid in seen:
+                    continue
+                seen.add(kid)
                 kept.append(kid)
                 frontier.append((kid, depth + 1))
         if len(kept) < min_classes:
