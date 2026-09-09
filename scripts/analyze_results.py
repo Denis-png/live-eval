@@ -30,6 +30,7 @@ import os
 import textwrap
 from collections import defaultdict
 from datetime import datetime
+from functools import lru_cache
 
 from framework.generators.base_generator import CLASS_CONDITIONAL_SEMANTICS
 from framework.plotting.plots import flatten_mean_std, flatten_point, _visible
@@ -48,11 +49,50 @@ MODEL_COLORS = {
 FALLBACK_COLOR = "#52514e"
 MODE_MARKERS = {"forward": "o", "inverse": "^",
                 "forward+seedless": "D", "inverse+seedless": "v"}
-HEADLINE = {"spam": "f1", "gec": "errant.f0.5"}
+HEADLINE = {
+    "spam": "f1",
+    "gec": "errant.f0.5",
+    "taxonomy": "f1",
+    "sentiment": "macro_f1",     # 3-class: the macro average, not the binary f1
+}
 IDENTITY_METRICS = {
     "spam": ["accuracy", "precision", "recall", "f1"],
     "gec": ["gleu", "errant.f0.5", "errant.precision", "errant.recall", "errant_dist"],
+    # Taxonomy's fourth evaluator, `diagnostics`, returns a dict rather than a
+    # score; it flattens to dotted counter keys that belong in the run record,
+    # not on a 0-1 fidelity diagonal.
+    "taxonomy": ["precision", "recall", "f1"],
+    "sentiment": ["accuracy", "macro_precision", "macro_recall", "macro_f1"],
 }
+
+
+def _headline(task: str) -> str:
+    """The one metric a task is summarised by.
+
+    Indexed directly for years, so an archived session from an unregistered task
+    killed the whole analysis with a bare KeyError naming nothing actionable.
+    Taxonomy and sentiment were both in that state while being actively built.
+    """
+    try:
+        return HEADLINE[task]
+    except KeyError:
+        raise SystemExit(
+            f"analyze_results has no headline metric for task '{task}'. Add it to "
+            f"HEADLINE (and IDENTITY_METRICS) in {__file__}. Known tasks: "
+            f"{', '.join(sorted(HEADLINE))}."
+        ) from None
+
+
+def _identity_metrics(task: str) -> list[str]:
+    """Metrics drawn on the generated-vs-real fidelity diagonal for a task."""
+    try:
+        return IDENTITY_METRICS[task]
+    except KeyError:
+        raise SystemExit(
+            f"analyze_results has no identity metrics for task '{task}'. Add them "
+            f"to IDENTITY_METRICS (and HEADLINE) in {__file__}. Known tasks: "
+            f"{', '.join(sorted(IDENTITY_METRICS))}."
+        ) from None
 
 
 # ── Statistics ────────────────────────────────────────────────
@@ -102,6 +142,47 @@ def kendall_tau_b(x, y):
 
 # ── Strategy grouping ─────────────────────────────────────────
 
+@lru_cache(maxsize=None)
+def _task_strategy(task_name: str | None) -> str | None:
+    """The generation shape a task uses, for sessions archived before
+    `meta["strategy"]` was written. Cached: this is asked once per session and
+    the answer is a property of the code, not of the run."""
+    if not task_name:
+        return None
+    try:
+        from framework.pipeline import load_task
+        return load_task(task_name).get_generation_strategy()
+    except Exception:
+        return None
+
+
+def _cell_and_semantics(strategy: str) -> tuple[str, str]:
+    """Split a grouping label into its generation cell and the semantics it was
+    produced under. `_strategy_of` appends `@<semantics>` only for sessions whose
+    generation behaviour differs from what the code implements today, so an
+    unsuffixed label means current semantics. A row with no strategy recorded
+    yields an empty cell, which pairs with nothing."""
+    cell, _, semantics = (strategy or "").partition("@")
+    return cell, semantics or CLASS_CONDITIONAL_SEMANTICS
+
+
+def _mode_pairs(strategies) -> set[str]:
+    """The semantics buckets holding BOTH a forward and an inverse cell.
+
+    Pairing forward with inverse only means something WITHIN one generation
+    semantics; across them the delta mixes two different behaviours, which is
+    what the @-suffix exists to prevent. Testing literal {"forward","inverse"}
+    membership instead matched nothing once every label in an archive carried a
+    suffix — silently dropping the mode-effect figure for precisely the archives
+    that already exist. Membership, not len(): with seedless variants in the mix
+    a bucket can hold >=2 cells without pairing forward with inverse."""
+    by_semantics = defaultdict(set)
+    for strategy in strategies:
+        cell, semantics = _cell_and_semantics(strategy)
+        by_semantics[semantics].add(cell)
+    return {s for s, cells in by_semantics.items() if {"forward", "inverse"} <= cells}
+
+
 def _strategy_of(meta: dict) -> str:
     """Generation-cell label for grouping: mode plus the seedless flag.
     Derived rather than stored, so sessions written before seedless existed
@@ -120,7 +201,9 @@ def _strategy_of(meta: dict) -> str:
 
     Note: this is NOT `meta["strategy"]` — that key already means the task's
     generation shape ("corruption" / "class_conditional") and is untouched
-    here.
+    here. Sessions archived before that key existed carry no shape at all, so
+    it is recovered from the task itself; keying the semantics guard on the
+    stored value alone let those older sessions slip past it entirely.
 
     A `class_conditional` session ALSO carries the generation semantics its
     samples were produced under (`meta.class_conditional_semantics`; absent
@@ -137,9 +220,10 @@ def _strategy_of(meta: dict) -> str:
     unchanged for everything this code can still produce. Non-class_conditional
     sessions (GEC's `corruption`, taxonomy's `structured`) never carry the field
     and are untouched by this."""
-    mode = meta.get("mode") or ("inverse" if meta.get("strategy") == "class_conditional" else "forward")
+    strategy = meta.get("strategy") or _task_strategy(meta.get("task"))
+    mode = meta.get("mode") or ("inverse" if strategy == "class_conditional" else "forward")
     cell = f"{mode}+seedless" if meta.get("seedless") else mode
-    if meta.get("strategy") != "class_conditional":
+    if strategy != "class_conditional":
         return cell
     semantics = meta.get("class_conditional_semantics") or "asymmetric"
     return cell if semantics == CLASS_CONDITIONAL_SEMANTICS else f"{cell}@{semantics}"
@@ -232,7 +316,7 @@ def plot_identity(rows, task, out_dir):
     metric. Color = generation model, marker = strategy, error bar = run std."""
     from framework.plotting.style import INK_MUTED, SURFACE, apply_axes_style
     plt = _plt()
-    metrics = [m for m in IDENTITY_METRICS[task]
+    metrics = [m for m in _identity_metrics(task)
                if any(r["metric"] == m and r["real"] is not None for r in rows)]
     if not metrics:
         return None
@@ -272,7 +356,7 @@ def plot_model_impact(rows, task, strategy, out_dir):
     from framework.plotting.style import (INK, SERIES_REAL, SURFACE,
                                           apply_axes_style)
     plt = _plt()
-    metric = HEADLINE[task]
+    metric = _headline(task)
     sel = [r for r in rows if r["task"] == task and r["strategy"] == strategy
            and r["metric"] == metric and r["runs"]]
     eval_models = sorted({r["eval_model"] for r in sel})
@@ -321,11 +405,10 @@ def plot_mode_effect(rows, task, out_dir):
     """Paired forward -> inverse slopes per generation model that ran both modes."""
     from framework.plotting.style import SERIES_REAL, SURFACE, apply_axes_style
     plt = _plt()
-    metric = HEADLINE[task]
+    metric = _headline(task)
     sel = [r for r in rows if r["task"] == task and r["metric"] == metric]
     both = sorted({m for m in {r["gen_model"] for r in sel}
-                   if {"forward", "inverse"} <=
-                   {r["strategy"] for r in sel if r["gen_model"] == m}})
+                   if _mode_pairs({r["strategy"] for r in sel if r["gen_model"] == m})})
     if not both:
         return None
     eval_models = sorted({r["eval_model"] for r in sel})
@@ -336,20 +419,25 @@ def plot_mode_effect(rows, task, out_dir):
     for ax, ev in zip(axes, eval_models):
         apply_axes_style(ax)
         for gm in both:
-            pts = {r["strategy"]: r for r in sel
-                   if r["eval_model"] == ev and r["gen_model"] == gm}
-            # Membership, not len(pts) < 2: with seedless variants in the mix,
-            # pts can hold >=2 keys (e.g. "inverse" + "inverse+seedless")
-            # without actually pairing forward with inverse.
-            if not {"forward", "inverse"} <= set(pts):
-                continue
-            xs, ys = [0, 1], [pts["forward"]["gen_mean"], pts["inverse"]["gen_mean"]]
-            ax.errorbar(xs, ys, yerr=[pts["forward"]["gen_std"], pts["inverse"]["gen_std"]],
-                        marker="o", markersize=5, linewidth=2, capsize=2,
-                        color=_color(gm), markeredgecolor="white", markeredgewidth=0.5)
-            real = pts["forward"]["real"]
-            if real is not None:
-                ax.axhline(real, linestyle="--", color=SERIES_REAL, linewidth=1, zorder=1)
+            by_strategy = {r["strategy"]: r for r in sel
+                           if r["eval_model"] == ev and r["gen_model"] == gm}
+            # One slope per semantics bucket, never one ACROSS buckets: a
+            # legacy forward paired with a current inverse would report a mode
+            # delta that is really a semantics delta.
+            for semantics in sorted(_mode_pairs(by_strategy)):
+                pts = {cell: row for cell, row in
+                       ((_cell_and_semantics(k)[0], v) for k, v in by_strategy.items()
+                        if _cell_and_semantics(k)[1] == semantics)}
+                if not {"forward", "inverse"} <= set(pts):
+                    continue
+                xs, ys = [0, 1], [pts["forward"]["gen_mean"], pts["inverse"]["gen_mean"]]
+                ax.errorbar(xs, ys,
+                            yerr=[pts["forward"]["gen_std"], pts["inverse"]["gen_std"]],
+                            marker="o", markersize=5, linewidth=2, capsize=2,
+                            color=_color(gm), markeredgecolor="white", markeredgewidth=0.5)
+                real = pts["forward"]["real"]
+                if real is not None:
+                    ax.axhline(real, linestyle="--", color=SERIES_REAL, linewidth=1, zorder=1)
         ax.set_xticks([0, 1])
         ax.set_xticklabels(["forward", "inverse"], fontsize=9)
         ax.set_xlim(-0.35, 1.35)
@@ -425,7 +513,7 @@ def _save(fig, path):
 def rank_preservation(rows, task, strategy, gen_model):
     """Kendall tau-b between real and generated eval-model orderings on the
     task's headline metric, plus the orderings themselves."""
-    metric = HEADLINE[task]
+    metric = _headline(task)
     sel = [r for r in rows if (r["task"], r["strategy"], r["gen_model"], r["metric"])
            == (task, strategy, gen_model, metric) and r["real"] is not None]
     if len(sel) < 2:
@@ -458,7 +546,7 @@ def build_summary(sessions, rows):
     configs = sorted({(r["task"], r["strategy"], r["gen_model"]) for r in rows})
     for task, strategy, gm in configs:
         key = f"{task}/{strategy}/{gm}"
-        headline = HEADLINE[task]
+        headline = _headline(task)
         sel = [r for r in rows if (r["task"], r["strategy"], r["gen_model"]) ==
                (task, strategy, gm) and r["real"] is not None]
         if sel:
@@ -475,7 +563,7 @@ def build_summary(sessions, rows):
 
     for task in sorted({r["task"] for r in rows}):
         for strategy in sorted({r["strategy"] for r in rows if r["task"] == task}):
-            metric = HEADLINE[task]
+            metric = _headline(task)
             sel = [r for r in rows if (r["task"], r["strategy"], r["metric"]) ==
                    (task, strategy, metric) and r["runs"]]
             per_eval = {}
@@ -497,20 +585,27 @@ def build_summary(sessions, rows):
                 summary["model_impact"][f"{task}/{strategy}"] = per_eval
 
         both = sorted({m for m in {r["gen_model"] for r in rows if r["task"] == task}
-                       if {"forward", "inverse"} <=
-                       {r["strategy"] for r in rows
-                        if r["task"] == task and r["gen_model"] == m}})
+                       if _mode_pairs({r["strategy"] for r in rows
+                                       if r["task"] == task and r["gen_model"] == m})})
         for gm in both:
-            metric = HEADLINE[task]
-            deltas = {}
+            metric = _headline(task)
+            by_semantics = defaultdict(dict)
             for ev in sorted({r["eval_model"] for r in rows if r["task"] == task}):
                 pts = {r["strategy"]: r["gen_mean"] for r in rows
                        if (r["task"], r["gen_model"], r["eval_model"], r["metric"]) ==
                        (task, gm, ev, metric)}
-                if {"forward", "inverse"} <= set(pts):
-                    deltas[_short(ev)] = round(pts["inverse"] - pts["forward"], 4)
-            if deltas:
-                summary["mode_effect"][f"{task}/{gm}"] = {
+                for semantics in _mode_pairs(pts):
+                    cells = {_cell_and_semantics(k)[0]: v for k, v in pts.items()
+                             if _cell_and_semantics(k)[1] == semantics}
+                    by_semantics[semantics][_short(ev)] = round(
+                        cells["inverse"] - cells["forward"], 4)
+            for semantics, deltas in by_semantics.items():
+                if not deltas:
+                    continue
+                # Legacy semantics are named in the key so a reader never mistakes
+                # a pre-symmetry delta for a current one.
+                suffix = "" if semantics == CLASS_CONDITIONAL_SEMANTICS else f"@{semantics}"
+                summary["mode_effect"][f"{task}/{gm}{suffix}"] = {
                     "headline_metric": metric,
                     "inverse_minus_forward": deltas,
                 }
@@ -531,7 +626,7 @@ def write_markdown(summary, sessions, rows, figures, out_path):
 
     lines += ["", "## Headline scores (generated vs real)", ""]
     for task in sorted({r["task"] for r in rows}):
-        metric = HEADLINE[task]
+        metric = _headline(task)
         lines += [f"### {task} — {metric}", "",
                   "| strategy | generation model | evaluated model | generated | real | gap |",
                   "|---|---|---|---|---|---|"]
