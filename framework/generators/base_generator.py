@@ -936,6 +936,73 @@ class BaseGenerator(ABC):
             )
         return synthetic
 
+    def generate_structured_seeded(
+        self,
+        golds,
+        build_prompt,
+        parse,
+        verify,
+        *,
+        max_parse_attempts: int = 3,
+        request_delay: float = 0.0,
+    ) -> list[dict]:
+        """One artifact per pre-computed gold, verified rather than trusted.
+
+        The caller has already computed each gold graph exactly. The model's only
+        job is to re-verbalise it, so this loop VERIFIES the response against the
+        gold and, on success, returns the GOLD — not the parsed output. That is
+        the whole point of the seeded cells: a model that drifts loses its sample
+        and can never redefine the reference.
+
+        No feedback loop and no sample_size: gold is exact, so there is nothing
+        to iterate toward, and the count is `len(golds)` by construction. A
+        failed verification is a parse attempt, not a feedback round.
+
+        Stays ontology-agnostic like generate_structured: callables and data in,
+        never the task itself.
+        """
+        synthetic: list[dict] = []
+        for i, gold in enumerate(golds, 1):
+            attempts, accepted = 0, False
+            diagnostics: list[dict] = []
+            while not accepted and attempts < max_parse_attempts:
+                attempts += 1
+                try:
+                    raw = self.call_api(build_prompt(gold))
+                    result = parse(raw)
+                    parsed = result["artifact"]
+                    diagnostic = {"attempt": attempts, **result["diagnostic"]}
+                except Exception as e:
+                    parsed = None
+                    diagnostic = {"attempt": attempts,
+                                  "rejection_reason": f"{type(e).__name__}: {e}"}
+                if parsed is not None and not verify(gold, parsed):
+                    parsed = None
+                    diagnostic["rejection_reason"] = "structure does not match gold"
+                diagnostics.append(diagnostic)
+                if parsed is None:
+                    print(f"[{i}/{len(golds)}] [SKIP] "
+                          f"{diagnostic.get('rejection_reason', 'unknown')}", flush=True)
+                else:
+                    accepted = True
+                    # verify() has already proven this graph isomorphic to gold,
+                    # so the parsed classes AND axioms ARE gold's structure under
+                    # the model's names — keep them together. Splicing gold's
+                    # axioms onto the model's class list would name classes the
+                    # artifact does not contain. Only provenance comes from gold.
+                    record = dict(parsed)
+                    record["domain"] = gold["domain"]
+                    record["source_max_depth"] = gold.get("source_max_depth")
+                    record["seeded_diagnostics"] = {"attempts": diagnostics}
+                    synthetic.append(record)
+                if request_delay > 0:
+                    time.sleep(request_delay)
+
+        if len(synthetic) < len(golds):
+            print(f"[WARN] seeded structured generation produced {len(synthetic)} "
+                  f"artifacts for {len(golds)} golds.", file=sys.stderr)
+        return synthetic
+
     @abstractmethod
     def call_api(self, prompt: str) -> str:
         """Send a single prompt string, return the response string.
