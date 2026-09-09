@@ -253,16 +253,17 @@ class ValidateConfigTests(unittest.TestCase):
             validate_config(cfg)
         self.assertIn("mode", str(ctx.exception))
 
-    def test_taxonomy_seedless_false_rejected(self):
+    def test_taxonomy_seedless_false_validates(self):
+        # Seeded structured generation reaches the dispatch now (pipeline.
+        # _run_generation routes seedless: false to generate_structured_seeded),
+        # so the CLI-level guard that used to reject it up front is gone —
+        # taxonomy's seeded cells are a supported, not a rejected, config.
         cfg = _full_config()
         cfg["task"] = {"name": "taxonomy"}
         cfg["dataset"] = {"source": "local",
                           "local": {"path": "data/taxonomy.jsonl"}}
         cfg["generation"]["seedless"] = False
-        with self.assertRaises(ValueError) as ctx:
-            validate_config(cfg)
-        self.assertIn("not implemented", str(ctx.exception))
-        self.assertIn("taxonomy", str(ctx.exception))
+        self.assertIsNone(validate_config(cfg))
 
     def test_hf_source_missing_name_names_the_key(self):
         cfg = _full_config()

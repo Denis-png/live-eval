@@ -42,12 +42,16 @@ def _config(task_name, **gen):
 
 class SeededStructuredGuardTests(unittest.TestCase):
     def test_a_second_structured_task_also_rejects_seeded_generation(self):
+        # Seeded structured generation now reaches the dispatch (pipeline._run_
+        # generation), so validate_config no longer rejects seedless: false for
+        # ANY structured task by name or by strategy — that CLI-level guard was
+        # removed along with the pipeline-level one it mirrored. Whether a given
+        # structured task actually supports seeded generation is now a property
+        # of what it implements (get_seed_pool / build_seeded_artifact / etc.),
+        # checked at run time, not at config-validate time.
         cfg = _config("ontology", seedless=False)
         with mock.patch.object(fmain, "load_task", return_value=_SecondStructuredTask()):
-            with self.assertRaises(ValueError) as ctx:
-                fmain.validate_config(cfg)
-        self.assertIn("not implemented", str(ctx.exception))
-        self.assertIn("ontology", str(ctx.exception))
+            self.assertIsNone(fmain.validate_config(cfg))
 
     def test_a_corruption_task_may_be_seeded(self):
         # The guard must not leak onto tasks whose strategy supports seeds.
@@ -55,10 +59,11 @@ class SeededStructuredGuardTests(unittest.TestCase):
         self.assertIsNone(fmain.validate_config(cfg))
 
     def test_taxonomy_itself_still_rejects_seeded_generation(self):
+        # taxonomy is exactly the structured task seeded generation was built
+        # for (Tasks 1-6) — seedless: false is its intended, supported cell now,
+        # not a rejected config.
         cfg = _config("taxonomy", seedless=False)
-        with self.assertRaises(ValueError) as ctx:
-            fmain.validate_config(cfg)
-        self.assertIn("not implemented", str(ctx.exception))
+        self.assertIsNone(fmain.validate_config(cfg))
 
 
 class DisplayModeTests(unittest.TestCase):

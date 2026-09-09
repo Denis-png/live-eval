@@ -383,14 +383,11 @@ def generation_cell_slug(config: dict, strategy: str) -> str:
     Naming a session after its setup means a directory listing shows what was
     run without opening results.json, and two cells of the same task can never
     collide in one output directory."""
-    # Structured IS on the mode axis — it imposes a sampled target structure
-    # (inverse) or lets structure emerge (forward) — and is seedless until
-    # seeded structured generation is implemented.
-    seeding = (
-        "seedless" if strategy == "structured"
-        or (config.get("generation") or {}).get("seedless")
-        else "seeded"
-    )
+    # Structured IS on the mode axis and, since seeded structured generation
+    # landed, is on the seeding axis too. Hardcoding "seedless" here would write
+    # a seeded session into the seedless session's directory name, making the two
+    # cells indistinguishable in the archive and in analyze_results.
+    seeding = "seedless" if (config.get("generation") or {}).get("seedless") else "seeded"
     return f"{resolve_mode(config, strategy)}_{seeding}"
 
 
@@ -531,20 +528,39 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
     _profile_driven = False
 
     if strategy == "structured":
-        if gen_cfg.get("seedless") is False:
-            # Not impossible — perturbing a real ontology subtree and keeping the
-            # perturbation as ground truth is coherent. It is unimplemented, and
-            # saying so is what keeps the design open rather than foreclosed.
-            raise RuntimeError(
-                f"seeded structured generation is not implemented for "
-                f"{task.get_task_name()}; it needs a real-artifact corpus and a "
-                "perturbation operator. Use seedless: true."
+        mode = resolve_mode(config, strategy)
+        seedless = gen_cfg.get("seedless")
+        if seedless is False:
+            if (gen_cfg.get("feedback") or {}).get("enabled"):
+                raise RuntimeError(
+                    f"{task.get_task_name()}: seeded structured generation cannot "
+                    "use the feedback loop — the gold structure is computed exactly "
+                    "and verified, so there is nothing to iterate toward. Disable "
+                    "generation.feedback."
+                )
+            rng = random.Random()
+            pool = task.get_seed_pool(config, real_data, mode, rng=rng)
+            if len(pool) < sample_size:
+                raise RuntimeError(
+                    f"{task.get_task_name()} seed pool holds {len(pool)} subtrees "
+                    f"but {sample_size} samples were requested — get_seed_pool() "
+                    "needs a larger ontology, a deeper "
+                    "generation.seed_pool.max_depth, or a smaller min_classes."
+                )
+            golds = [task.build_seeded_artifact(seed, mode, profile, config, rng)
+                     for seed in rng.sample(pool, sample_size)]
+            return generator.generate_structured_seeded(
+                golds,
+                build_prompt=task.build_seeded_generation_prompt,
+                parse=task.parse_structured_generation_with_diagnostics,
+                verify=task.verify_structured_match,
+                max_parse_attempts=gen_cfg.get("max_parse_attempts", 3),
+                request_delay=gen_cfg.get("request_delay", 0.0),
             )
         if profile is None:
             raise RuntimeError(
                 f"{task.get_task_name()} structured generation requires a profile."
             )
-        mode = resolve_mode(config, strategy)
         feedback_cfg = task.get_feedback_config(gen_cfg)
         feedback_enabled = bool(feedback_cfg.get("enabled", False))
         if mode == "forward":

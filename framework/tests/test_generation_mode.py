@@ -68,12 +68,17 @@ class ContextAgreementTests(unittest.TestCase):
 
 class CellSlugTests(unittest.TestCase):
     def test_structured_slug_is_uniform_with_other_strategies(self):
+        # Structured joined the seeding axis alongside the mode axis once
+        # seeded structured generation landed: omitting generation.seedless now
+        # defaults to "seeded" for structured exactly like every other
+        # strategy (see test_other_strategies_unchanged below), instead of the
+        # old hardcoded-to-seedless special case.
         self.assertEqual(
-            pipeline.generation_cell_slug({}, "structured"), "inverse_seedless")
+            pipeline.generation_cell_slug({}, "structured"), "inverse_seeded")
         self.assertEqual(
             pipeline.generation_cell_slug(
                 {"generation": {"mode": "forward"}}, "structured"),
-            "forward_seedless")
+            "forward_seeded")
 
     def test_other_strategies_unchanged(self):
         self.assertEqual(
@@ -127,10 +132,16 @@ class StructuredRejectionTests(unittest.TestCase):
                 self.assertEqual(len(out), 1)
                 self.assertIn("classes", out[0])
 
-    def test_seeded_structured_reads_as_unimplemented_not_impossible(self):
+    def test_seeded_structured_without_a_seed_pool_fails_clearly(self):
+        # Seedless: false now reaches the real seeded dispatch instead of a
+        # blanket "not implemented" rejection. This stub task has no
+        # get_seed_pool override, so BaseTask's default (echo real_data, which
+        # is [] here) makes the pool-size guard fire first — before ever
+        # reaching build_seeded_artifact's own NotImplementedError, and before
+        # any API call. The error still names the task and states clearly what
+        # is missing, which is the rule this class is actually about.
         with self.assertRaises(RuntimeError) as ctx:
             self._run({"seedless": False})
         message = str(ctx.exception)
-        self.assertIn("not implemented", message)
         self.assertIn("structured_stub", message)
-        self.assertNotIn("not supported", message)
+        self.assertIn("seed pool", message)

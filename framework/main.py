@@ -125,17 +125,6 @@ def validate_config(config: dict) -> None:
         if gen["num_runs"] < 1:
             problems.append(f"'generation.num_runs' must be >= 1 (got {gen['num_runs']})")
         mode = gen.get("mode", "forward")
-        task_name = (config.get("task") or {}).get("name")
-        # Ask the task what shape it generates rather than recognising its name:
-        # a second structured task must inherit this guard, and the dispatch it
-        # mirrors (pipeline._run_generation) already branches on strategy.
-        if _strategy_of_config(config) == "structured" and gen.get("seedless") is False:
-            problems.append(
-                f"seeded structured generation is not implemented for "
-                f"'{task_name}'; it needs a real-artifact corpus and a "
-                "perturbation operator. 'generation.seedless' must be "
-                "omitted or true"
-            )
         if mode not in ("forward", "inverse"):
             problems.append(f"'generation.mode' must be 'forward' or 'inverse' (got '{mode}')")
         seedless = gen.get("seedless", False)
