@@ -113,13 +113,19 @@ class DisplayGenerationModeTests(unittest.TestCase):
         cfg["generation"]["mode"] = "forward"
         self.assertEqual(_display_generation_mode(cfg), "forward")
 
-    def test_spam_default_mode_display_stays_class_conditional(self):
+    def test_spam_default_mode_display_resolves_like_every_other_strategy(self):
+        # Was pinned to "n/a (class-conditional generation)". That predates
+        # class_conditional gaining its four (mode, seedless) cells: spam with no
+        # explicit mode runs INVERSE, and the startup banner saying the mode does
+        # not apply contradicted the run it was announcing.
         cfg = _full_config()
         cfg["task"] = {"name": "spam"}
-        self.assertEqual(
-            _display_generation_mode(cfg),
-            "n/a (class-conditional generation)",
-        )
+        self.assertEqual(_display_generation_mode(cfg), "inverse")
+
+    def test_a_corruption_task_default_mode_display_is_forward(self):
+        cfg = _full_config()
+        cfg["task"] = {"name": "gec"}
+        self.assertEqual(_display_generation_mode(cfg), "forward")
 
 
 class ResolveApiKeysTests(unittest.TestCase):
