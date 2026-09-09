@@ -23,20 +23,24 @@ dataset:
 # Only "forward" mode is meaningful for corruption tasks (text→text, no class
 # conditioning). Judge is disabled — the prompt format is deterministic enough.
 generation:
-  mode: inverse
+  mode: forward
   seedless: true
   provider: "openrouter"
-  model: "deepseek/deepseek-v4-flash"
+  model: "google/gemini-2.5-flash"
   temperature: 0.9
-  max_tokens: 512
+  max_tokens: 1024
   num_runs: 3
   sample_size: 150
-  timeout: 300
+  timeout: 60
   max_retries: 2
-  request_delay: 2
+  request_delay: 1
 
 judge:
-  enabled: false
+  enabled: true
+  provider: "openrouter"
+  model: "google/gemini-2.5-flash"
+  temperature: 0.0
+  max_tokens: 64
 
 evaluation:
   real_baseline: true
