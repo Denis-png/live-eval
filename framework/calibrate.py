@@ -167,9 +167,13 @@ def run_calibration(
     # original `config`, so artifact filenames are unaffected.
     base_config = copy.deepcopy(config)
     base_config.setdefault("generation", {})["calibration_path"] = None
-    ctx = pipeline.build_generation_context(base_config)
-    task, strategy = ctx["task"], ctx["strategy"]
 
+    # Ask whether this task CAN be calibrated before loading anything. The check
+    # used to sit after build_generation_context, so a task that does not support
+    # calibration paid a full dataset load — a HuggingFace download, for a remote
+    # benchmark — to be told something knowable from the task alone.
+    task = pipeline.load_task((config.get("task") or {}).get("name"))
+    strategy = task.get_generation_strategy()
     keys = task.get_calibration_keys()
     if not keys:
         raise RuntimeError(
@@ -177,6 +181,9 @@ def run_calibration(
             f"(get_calibration_keys() returned None). Cell: "
             f"{pipeline.generation_cell_slug(config, strategy)}."
         )
+
+    ctx = pipeline.build_generation_context(base_config)
+    task, strategy = ctx["task"], ctx["strategy"]
     # Corruption forward+seeded injects no distribution at all — the generator
     # identifies the seed's error itself. Its one control input is WHICH seeds it
     # sees, so that cell calibrates seed weights instead (Task 8).

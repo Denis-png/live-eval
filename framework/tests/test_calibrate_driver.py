@@ -679,3 +679,26 @@ class RoundTripCalibrationConsumptionTests(_Bench):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CalibrationSupportGuardTests(unittest.TestCase):
+    """"This task cannot be calibrated" is knowable from the task alone.
+
+    The guard used to run after build_generation_context, so an uncalibratable
+    task paid a full dataset load — a HuggingFace download for a remote
+    benchmark — before being told. The framework's own rule is that an
+    unsupported capability says so before spending anything.
+    """
+
+    def test_an_uncalibratable_task_raises_before_the_dataset_is_touched(self):
+        cfg = {"task": {"name": "taxonomy"},
+               "dataset": {"source": "local",
+                           "local": {"path": "does/not/exist.jsonl", "format": "jsonl"}},
+               "generation": {"provider": "openai", "model": "m", "num_runs": 1,
+                              "sample_size": 5, "seedless": True}}
+        with mock.patch.object(pipeline, "build_generation_context") as ctx:
+            with self.assertRaises(RuntimeError) as err:
+                calibrate.run_calibration(cfg, rounds=1, alpha=0.5, tolerance=0.1)
+        ctx.assert_not_called()
+        self.assertIn("does not support calibration", str(err.exception))
+        self.assertIn("taxonomy", str(err.exception))
