@@ -71,6 +71,29 @@ class CompliantFake(BaseGenerator):
         return "Corrupted: " + " ".join(["hello there friend"] + emitted)
 
 
+class DifferentialAttritionFake(CompliantFake):
+    """CompliantFake, but HAM survives far less often than SPAM.
+
+    class_balance.py's own docstring names the mechanism this stands in for: a
+    model refuses a phishing rewrite far more than it drops a benign
+    paraphrase, so the surviving balance drifts from the requested one. Stage A
+    forces class_prob to all-SPAM, so this never fires there; Stage B draws at
+    the REAL empirical balance, which is exactly where a genuine attrition gap
+    between labels needs to show up for correct_class_balance to have
+    something real to invert — not a mocked return value standing in for it.
+    """
+
+    HAM_SURVIVAL = 0.15
+
+    def call_api(self, prompt: str) -> str:
+        if "LEGITIMATE message" not in prompt:
+            return super().call_api(prompt)
+        self.calls += 1
+        if self.rng.random() < self.HAM_SURVIVAL:
+            return "Message: could we reschedule the call to tomorrow please"
+        return "I'm sorry, I cannot help with that request."
+
+
 def _config(path, sample_size=5):
     return {
         "dataset": {"source": "local", "local": {"path": path, "format": "csv"}},
@@ -263,10 +286,12 @@ class ClosedLoopTests(_Bench):
                          + [len(payload["rounds"])])
 
     def test_spam_forces_class_prob_to_one(self):
-        # Only SPAM rows carry signals; generating HAM during calibration wastes
-        # roughly 7 of every 8 calls at the empirical balance.
+        # Only SPAM's template asks for signals; generating HAM during
+        # calibration wastes roughly 7 of every 8 calls at the empirical
+        # balance. All mass is forced onto the signal-bearing labels — spam
+        # has exactly one, so its weight is 1.0.
         payload = self._run({k: 0.9 for k in _MARKERS}, rounds=1)
-        self.assertEqual(payload["meta"]["forced_class_prob"], 1.0)
+        self.assertEqual(payload["meta"]["forced_class_prob"], {"SPAM": 1.0})
 
     def test_records_informative_samples_per_round(self):
         payload = self._run({k: 0.9 for k in _MARKERS}, rounds=1)
@@ -369,28 +394,29 @@ class SetpointRegressionTests(_Bench):
 
 
 class StageBArtifactTests(_Bench):
-    def test_corrected_class_prob_lands_in_the_written_artifact(self):
+    def test_corrected_class_balance_lands_in_the_written_artifact(self):
         # I4: nothing previously asserted that Stage B's class-balance
         # correction actually reaches calibrated.class_prob on disk -- the
         # name pipeline._resolve_class_prob (via _LAST_CALIBRATION) and a
-        # future run's load_calibration both read.
+        # future run's load_calibration both read. Stage B corrects a full
+        # balance VECTOR (correct_class_balance), not the single positive-class
+        # float the superseded binary helper returned.
         from framework.calibration.artifact import load_calibration
 
         gen = CompliantFake({k: 0.9 for k in _MARKERS})
         cfg = _config(self.path, sample_size=60)
         with mock.patch.object(pipeline, "load_generator", return_value=gen), \
-             mock.patch.object(calibrate, "correct_class_prob", return_value=0.42):
+             mock.patch.object(calibrate, "correct_class_balance",
+                               return_value={"SPAM": 0.42, "HAM": 0.58}):
             payload = calibrate.run_calibration(
                 cfg, rounds=1, alpha=0.5, tolerance=0.001,
                 sample_size=60, output_path=self.out,
             )
-        self.assertEqual(payload["calibrated"]["class_prob"], 0.42)
+        self.assertEqual(payload["calibrated"]["class_prob"],
+                         {"SPAM": 0.42, "HAM": 0.58})
         on_disk = load_calibration(self.out)
-        self.assertEqual(on_disk["calibrated"]["class_prob"], 0.42)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        self.assertEqual(on_disk["calibrated"]["class_prob"],
+                         {"SPAM": 0.42, "HAM": 0.58})
 
 
 class CliKeyResolutionTests(_Bench):
@@ -434,3 +460,222 @@ class CliKeyResolutionTests(_Bench):
                 calibrate.main()
         run.assert_not_called()
         self.assertIn("openai", str(ctx.exception).lower())
+
+
+class BalanceVectorCalibrationTests(unittest.TestCase):
+    def test_informative_count_on_the_real_spam_task(self):
+        # Weak smoke check only: SpamTask's SPAM label is simultaneously
+        # labels[0] (the old positional rule's answer) and the only
+        # signal-bearing label (the new template rule's answer), so this
+        # fixture passes identically under both implementations and cannot
+        # by itself tell them apart -- see
+        # test_informative_count_disagrees_with_the_old_positional_rule
+        # below for the discriminating case.
+        from framework import calibrate
+        from framework.tasks.spam.task import SpamTask
+        rows = [{"text": "a", "label": "SPAM"}, {"text": "b", "label": "HAM"},
+                {"text": "c", "label": "SPAM"}]
+        # SPAM's template asks for {error_spec}; HAM's does not.
+        self.assertEqual(calibrate.informative_count(SpamTask(), rows), 2)
+
+    def test_informative_count_disagrees_with_the_old_positional_rule(self):
+        # SpamTask's case above cannot distinguish "counts labels[0]" (the
+        # old rule) from "counts labels whose own template carries
+        # {error_spec}" (the new rule), because SPAM is both. This stub's
+        # FIRST label is deliberately NOT the signal-bearing one, so the two
+        # rules give different answers on the same rows.
+        from framework import calibrate
+
+        class _DisagreeingLabelOrderTask:
+            """Duck-typed stand-in: only get_generation_strategy,
+            get_class_labels and get_inverse_class_prompts are needed by
+            informative_count's class_conditional branch."""
+
+            def get_generation_strategy(self):
+                return "class_conditional"
+
+            def get_class_labels(self):
+                return ("NEUTRAL", "URGENT", "CALM")
+
+            def get_inverse_class_prompts(self):
+                # Only URGENT's template asks for signals; it is NOT
+                # labels[0].
+                return {"URGENT": "Rewrite the message urgently: {error_spec}."}
+
+        rows = [{"text": "a", "label": "NEUTRAL"}, {"text": "b", "label": "URGENT"},
+                {"text": "c", "label": "URGENT"}, {"text": "d", "label": "CALM"}]
+        # Old positional rule (positive = labels[0] == "NEUTRAL") would have
+        # counted the single NEUTRAL row: 1. The new template-driven rule
+        # counts the two URGENT rows instead, since URGENT is the only label
+        # whose own prompt carries {error_spec}: 2. These disagree, so this
+        # fixture genuinely discriminates between the two implementations.
+        self.assertEqual(
+            calibrate.informative_count(_DisagreeingLabelOrderTask(), rows), 2)
+
+
+class _DifferingFamiliesTask:
+    """Duck-typed class_conditional task whose three prompt families put
+    {error_spec} on DIFFERENT labels.
+
+    Spam cannot discriminate here — all three of its families put {error_spec}
+    on SPAM only — so a stub is the only way to tell "reads the cell's own
+    prompt family" from "always reads the inverse family"."""
+
+    def get_generation_strategy(self):
+        return "class_conditional"
+
+    def get_class_labels(self):
+        return ("A", "B", "C")
+
+    def get_inverse_class_prompts(self):
+        return {"A": "impose A with {error_spec} on {sentence}",
+                "B": "impose B on {sentence}",
+                "C": "impose C on {sentence}"}
+
+    def get_forward_prompts(self):
+        return {"A": "rewrite A from {sentence}",
+                "B": "rewrite B emphasising {error_spec} from {sentence}",
+                "C": "rewrite C from {sentence}"}
+
+    def get_seedless_class_prompts(self):
+        return {"A": "write A from {spec}",
+                "B": "write B from {spec}",
+                "C": "write C from {spec} using {error_spec}"}
+
+
+class CellAwareSignalBearingTests(unittest.TestCase):
+    """The signal-bearing set is a property of the CELL, not of the task.
+
+    Both consumers — the informative sample count and Stage A's forced balance
+    — used to compute it off get_inverse_class_prompts() no matter which cell
+    was being calibrated. `--mode forward` is reachable for class_conditional
+    and renders a different prompt family, so for a task whose families differ
+    in {error_spec} coverage Stage A would force the whole budget onto labels
+    that measure nothing in that cell. One helper now answers it, by cell."""
+
+    CELLS = {
+        ("inverse", False): ["A"],
+        ("inverse", True): ["A"],   # inverse+seedless imposes over carriers
+        ("forward", False): ["B"],
+        ("forward", True): ["C"],
+    }
+
+    def test_every_cell_reads_its_own_prompt_family(self):
+        task = _DifferingFamiliesTask()
+        for (mode, seedless), expected in self.CELLS.items():
+            with self.subTest(mode=mode, seedless=seedless):
+                self.assertEqual(
+                    calibrate.signal_bearing_labels(task, mode=mode, seedless=seedless),
+                    expected)
+
+    def test_default_cell_is_the_class_conditional_default(self):
+        # pipeline._run_generation defaults class_conditional to mode=inverse,
+        # seedless=false; the helper's defaults must name the same cell.
+        self.assertEqual(
+            calibrate.signal_bearing_labels(_DifferingFamiliesTask()), ["A"])
+
+    def test_stage_a_forces_mass_onto_this_cells_bearing_labels(self):
+        task = _DifferingFamiliesTask()
+        for (mode, seedless), expected in self.CELLS.items():
+            with self.subTest(mode=mode, seedless=seedless):
+                self.assertEqual(
+                    calibrate.stage_a_class_balance(task, mode=mode, seedless=seedless),
+                    {expected[0]: 1.0})
+
+    def test_stage_a_splits_evenly_across_several_bearing_labels(self):
+        class _TwoBearing(_DifferingFamiliesTask):
+            def get_inverse_class_prompts(self):
+                return {"A": "a {error_spec} {sentence}",
+                        "B": "b {error_spec} {sentence}",
+                        "C": "c {sentence}"}
+
+        self.assertEqual(calibrate.stage_a_class_balance(_TwoBearing()),
+                         {"A": 0.5, "B": 0.5})
+
+    def test_stage_a_returns_none_when_no_label_bears_signals(self):
+        # Nothing to force onto — the caller keeps its empirical balance.
+        class _NoBearing(_DifferingFamiliesTask):
+            def get_inverse_class_prompts(self):
+                return {lbl: f"{lbl} {{sentence}}" for lbl in ("A", "B", "C")}
+
+        self.assertIsNone(calibrate.stage_a_class_balance(_NoBearing()))
+
+    def test_informative_count_follows_the_cell_too(self):
+        # The two consumers must not be able to disagree: the same rows count
+        # differently per cell, and each cell's count matches its bearing label.
+        task = _DifferingFamiliesTask()
+        rows = [{"label": "A"}, {"label": "A"}, {"label": "B"}, {"label": "C"},
+                {"label": "C"}, {"label": "C"}]
+        expected_counts = {("inverse", False): 2, ("inverse", True): 2,
+                           ("forward", False): 1, ("forward", True): 3}
+        for (mode, seedless), expected in expected_counts.items():
+            with self.subTest(mode=mode, seedless=seedless):
+                self.assertEqual(
+                    calibrate.informative_count(task, rows, mode=mode, seedless=seedless),
+                    expected)
+
+    def test_spam_is_unaffected_because_its_families_agree(self):
+        # The drift is latent for spam: all three families put {error_spec} on
+        # SPAM only, so every cell gives the same answer and the shipped
+        # behaviour is unchanged by making the rule cell-aware.
+        from framework.tasks.spam.task import SpamTask
+        task = SpamTask()
+        for mode, seedless in self.CELLS:
+            with self.subTest(mode=mode, seedless=seedless):
+                self.assertEqual(
+                    calibrate.signal_bearing_labels(task, mode=mode, seedless=seedless),
+                    ["SPAM"])
+
+
+class RoundTripCalibrationConsumptionTests(_Bench):
+    """CONTROLLER ADDENDUM B: every consumption test in
+    test_calibration_consumption.py seeds pipeline._LAST_CALIBRATION by hand,
+    already dict-shaped -- none of them goes through the real write path, so
+    758 passing tests missed that Stage B wrote a float there while
+    _resolve_class_prob had already switched to isinstance(..., dict), which
+    silently discards it. This drives run_calibration end to end against a
+    generator with a REAL differential attrition (not a mocked
+    correct_class_balance return), then loads the artifact it wrote back
+    through the normal run path (pipeline.build_generation_context) and checks
+    that a fresh run's class_prob is the CALIBRATED balance, genuinely
+    different from the raw empirical one.
+    """
+
+    def test_calibrated_balance_reaches_a_fresh_runs_class_prob(self):
+        gen = DifferentialAttritionFake({k: 0.9 for k in _MARKERS})
+        cfg = _config(self.path, sample_size=120)
+        cfg["calibration"] = {"sample_size": 120}
+        with mock.patch.object(pipeline, "load_generator", return_value=gen):
+            payload = calibrate.run_calibration(
+                cfg, rounds=1, alpha=0.5, tolerance=0.001,
+                sample_size=120, output_path=self.out,
+            )
+
+        calibrated_balance = payload["calibrated"].get("class_prob")
+        # Stage B must have found a real, outside-noise-floor gap: HAM's
+        # survival is engineered far below SPAM's, so `None` here means the
+        # fixture stopped exercising the correction, not that it's fine.
+        self.assertIsInstance(calibrated_balance, dict)
+
+        # Load the artifact back through the SAME path a normal run uses to
+        # consume one -- not a hand-seeded _LAST_CALIBRATION -- so this
+        # actually exercises the write -> read loop rather than assuming it.
+        run_cfg = _config(self.path, sample_size=5)
+        run_cfg["generation"]["calibration_path"] = self.out
+        with mock.patch.object(pipeline, "load_generator", return_value=gen):
+            ctx = pipeline.build_generation_context(run_cfg)
+
+        self.assertEqual(ctx["class_prob"], calibrated_balance)
+
+        # And genuinely different from the raw empirical balance (30 SPAM /
+        # 90 total in _ROWS) -- HAM's heavy attrition must have actually
+        # moved the corrected weights, or this test cannot tell "the
+        # calibrated balance reached generation" from "it was ignored and the
+        # empirical fallback happened to be read instead".
+        empirical_spam_share = 30 / 90
+        self.assertNotAlmostEqual(ctx["class_prob"]["SPAM"],
+                                  empirical_spam_share, places=2)
+
+
+if __name__ == "__main__":
+    unittest.main()

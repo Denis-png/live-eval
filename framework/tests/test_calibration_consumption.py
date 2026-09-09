@@ -7,6 +7,7 @@ from unittest import mock
 
 from framework import pipeline
 from framework.calibration.artifact import write_calibration
+from framework.generators.base_generator import CLASS_CONDITIONAL_SEMANTICS
 from framework.tasks.gec.task import GECTask
 from framework.tasks.spam.task import SpamTask
 
@@ -59,7 +60,8 @@ class ConsumptionTests(_Bench):
         first = sorted(calibrated["type_dist"])[0]
         calibrated["type_dist"][first] = calibrated["type_dist"][first] + 0.05
         write_calibration(self.artifact, {
-            "meta": {}, "target": empirical, "calibrated": calibrated,
+            "meta": {"class_conditional_semantics": CLASS_CONDITIONAL_SEMANTICS},
+            "target": empirical, "calibrated": calibrated,
             "selected_round": 1, "rounds": [],
         })
         out = pipeline.load_error_distribution(cfg, self._real_data(cfg), self.task)
@@ -70,7 +72,8 @@ class ConsumptionTests(_Bench):
         empirical = self.task.profile_error_distribution(
             self._real_data(cfg), config=cfg)
         write_calibration(self.artifact, {
-            "meta": {}, "target": empirical, "calibrated": empirical,
+            "meta": {"class_conditional_semantics": CLASS_CONDITIONAL_SEMANTICS},
+            "target": empirical, "calibrated": empirical,
             "selected_round": 0, "rounds": [],
         })
         out = pipeline.load_error_distribution(cfg, self._real_data(cfg), self.task)
@@ -112,7 +115,8 @@ class MetaTests(_Bench):
         empirical = self.task.profile_error_distribution(
             self._real_data(cfg), config=cfg)
         write_calibration(self.artifact, {
-            "meta": {}, "target": empirical, "calibrated": empirical,
+            "meta": {"class_conditional_semantics": CLASS_CONDITIONAL_SEMANTICS},
+            "target": empirical, "calibrated": empirical,
             "selected_round": 2, "rounds": [],
         })
         with redirect_stdout(io.StringIO()):
@@ -175,7 +179,8 @@ class ProvenanceIsolationTests(unittest.TestCase):
         empirical = spam_task.profile_error_distribution(spam_real, config=spam_cfg)
         artifact = os.path.join(self.dir.name, "spam_cal.json")
         write_calibration(artifact, {
-            "meta": {}, "target": empirical, "calibrated": empirical,
+            "meta": {"class_conditional_semantics": CLASS_CONDITIONAL_SEMANTICS},
+            "target": empirical, "calibrated": empirical,
             "selected_round": 3, "rounds": [],
         })
         spam_cfg["generation"]["calibration_path"] = artifact
@@ -249,9 +254,9 @@ class MalformedArtifactTests(_Bench):
 
 
 class ClassProbPrecedenceTests(unittest.TestCase):
-    """I2/I4: Component 5's consumption half. A calibrated class_prob must
+    """I2/I4: Component 5's consumption half. A calibrated balance must
     correct the EMPIRICAL balance for differential attrition, but an explicit
-    float in generation.class_balance is a user instruction and always wins —
+    MAPPING in generation.class_balance is a user instruction and always wins —
     calibration included. Nothing previously exercised _resolve_class_prob
     pulling a calibrated value out of _LAST_CALIBRATION at all."""
 
@@ -260,21 +265,120 @@ class ClassProbPrecedenceTests(unittest.TestCase):
 
     def test_empirical_class_balance_uses_the_calibrated_value(self):
         pipeline._LAST_CALIBRATION = {"path": "x", "selected_round": 1,
-                                      "class_prob": 0.77}
+                                      "class_prob": {"SPAM": 0.77, "HAM": 0.23}}
         cfg = {"generation": {"class_balance": "empirical"}}
-        self.assertEqual(pipeline._resolve_class_prob(cfg, []), 0.77)
+        self.assertEqual(
+            pipeline._resolve_class_prob(cfg, [], SpamTask()),
+            {"SPAM": 0.77, "HAM": 0.23})
 
-    def test_explicit_class_balance_float_wins_over_a_calibrated_value(self):
+    def test_explicit_class_balance_mapping_wins_over_a_calibrated_value(self):
         pipeline._LAST_CALIBRATION = {"path": "x", "selected_round": 1,
-                                      "class_prob": 0.77}
-        cfg = {"generation": {"class_balance": 0.25}}
-        self.assertEqual(pipeline._resolve_class_prob(cfg, []), 0.25)
+                                      "class_prob": {"SPAM": 0.77, "HAM": 0.23}}
+        cfg = {"generation": {"class_balance": {"SPAM": 0.25, "HAM": 0.75}}}
+        self.assertEqual(
+            pipeline._resolve_class_prob(cfg, [], SpamTask()),
+            {"SPAM": 0.25, "HAM": 0.75})
 
     def test_no_calibration_falls_back_to_the_real_reference_fraction(self):
         cfg = {"generation": {"class_balance": "empirical"}}
         real_reference = [{"label": "SPAM"}, {"label": "HAM"},
                           {"label": "HAM"}, {"label": "HAM"}]
-        # The task is what says which label is positive; this used to fall back
+        # The task is what says which labels exist; this used to fall back
         # to a hardcoded "SPAM", which is the coupling that was removed.
         self.assertEqual(
-            pipeline._resolve_class_prob(cfg, real_reference, SpamTask()), 0.25)
+            pipeline._resolve_class_prob(cfg, real_reference, SpamTask()),
+            {"SPAM": 0.25, "HAM": 0.75})
+
+    def test_unknown_label_in_the_mapping_raises_before_any_api_call(self):
+        # A typo must not silently generate nothing of that class: the mapping
+        # would normalise around the labels it DOES know and the misspelt one
+        # would just never be drawn, producing a whole paid run at the wrong
+        # balance with no diagnostic. _resolve_class_prob runs during context
+        # build, before any generator call.
+        cfg = {"generation": {"class_balance": {"SPAM": 0.3, "HAMM": 0.7}}}
+        with self.assertRaises(RuntimeError) as ctx:
+            pipeline._resolve_class_prob(cfg, [], SpamTask())
+        message = str(ctx.exception)
+        self.assertIn("HAMM", message)          # names the offender
+        self.assertIn("SPAM", message)          # and the labels that do exist
+        self.assertIn("HAM", message)
+
+    def test_unknown_label_raises_even_alongside_only_known_ones(self):
+        # The check is "every key is declared", not "at least one key is".
+        cfg = {"generation": {"class_balance": {"SPAM": 0.3, "HAM": 0.6,
+                                                "PHISHING": 0.1}}}
+        with self.assertRaises(RuntimeError) as ctx:
+            pipeline._resolve_class_prob(cfg, [], SpamTask())
+        self.assertIn("PHISHING", str(ctx.exception))
+
+    def test_a_partial_mapping_of_known_labels_is_still_accepted(self):
+        # Naming a subset is not an error — the unnamed label simply gets zero
+        # weight. Only names the task does not declare abort.
+        result = pipeline._resolve_class_prob(
+            {"generation": {"class_balance": {"SPAM": 1.0}}}, [], SpamTask())
+        self.assertAlmostEqual(result["SPAM"], 1.0)
+        self.assertAlmostEqual(result["HAM"], 0.0)
+
+
+class _ThreeLabelTask:
+    """Duck-typed stand-in for a task with more than two labels — only
+    get_class_labels() is needed by _resolve_class_prob's numeric branch."""
+    def get_class_labels(self):
+        return ("NEGATIVE", "NEUTRAL", "POSITIVE")
+
+    def get_task_name(self):
+        return "sentiment-fixture"
+
+
+class ClassBalanceFloatTests(unittest.TestCase):
+    """A bare `generation.class_balance` float is the binary legacy spelling of
+    the mapping: P(labels[0]) is what it has always meant for a two-label task
+    (P(SPAM) with ("SPAM", "HAM")), so every existing two-label config must
+    keep working unchanged rather than silently falling through to the
+    empirical/calibrated fallback (I1: a documented config value must never
+    silently do nothing)."""
+
+    def tearDown(self):
+        pipeline._LAST_CALIBRATION = None
+
+    def test_two_labels_float_is_honoured_as_the_first_labels_share(self):
+        pipeline._LAST_CALIBRATION = {"path": "x", "selected_round": 1,
+                                      "class_prob": {"SPAM": 0.05, "HAM": 0.95}}
+        cfg = {"generation": {"class_balance": 0.9}}
+        result = pipeline._resolve_class_prob(cfg, [], SpamTask())
+        self.assertEqual(set(result), {"SPAM", "HAM"})
+        self.assertAlmostEqual(result["SPAM"], 0.9)
+        self.assertAlmostEqual(result["HAM"], 0.1)
+        # Must differ from what empirical/calibrated would give here, or this
+        # test cannot tell "the float was honoured" from "it was ignored".
+        self.assertNotAlmostEqual(result["SPAM"], 0.05)
+
+    def test_more_than_two_labels_float_raises_naming_the_mapping_form(self):
+        cfg = {"generation": {"class_balance": 0.9}}
+        with self.assertRaises(RuntimeError) as ctx:
+            pipeline._resolve_class_prob(cfg, [], _ThreeLabelTask())
+        message = str(ctx.exception)
+        self.assertIn("ambiguous", message)
+        # Names the mapping form to use instead, with the task's own labels.
+        self.assertIn("NEGATIVE", message)
+        self.assertIn("NEUTRAL", message)
+        self.assertIn("POSITIVE", message)
+
+    def test_float_outside_zero_to_one_raises(self):
+        cfg = {"generation": {"class_balance": 1.5}}
+        with self.assertRaises(RuntimeError) as ctx:
+            pipeline._resolve_class_prob(cfg, [], SpamTask())
+        self.assertIn("0..1", str(ctx.exception))
+
+        cfg_negative = {"generation": {"class_balance": -0.1}}
+        with self.assertRaises(RuntimeError):
+            pipeline._resolve_class_prob(cfg_negative, [], SpamTask())
+
+    def test_bool_is_rejected_not_silently_treated_as_a_probability(self):
+        # bool is a subclass of int in Python, so `class_balance: true` would
+        # otherwise silently pass the numeric branch as 1.0 — reject it
+        # explicitly instead.
+        cfg = {"generation": {"class_balance": True}}
+        with self.assertRaises(RuntimeError) as ctx:
+            pipeline._resolve_class_prob(cfg, [], SpamTask())
+        self.assertIn("boolean", str(ctx.exception))

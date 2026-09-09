@@ -113,8 +113,16 @@ so it can be inspected later.
                          **every** task, corruption or class-conditional — see
                          "Generation Strategies" below:
                          `mode` (`forward` | `inverse`) and `seedless`
-                         (`true` | `false`, default `false`). Spam also reads
-                         `class_balance` (`empirical` | float = P(SPAM)).
+                         (`true` | `false`, default `false`).
+   - `class_balance`   — `empirical` (default: the real dataset's per-label
+                         distribution), an explicit mapping, e.g. `{SPAM: 0.3, HAM: 0.7}`,
+                         or a bare float, which is the two-label spelling of that mapping
+                         (`0.3` means `{first label: 0.3, second: 0.7}`) and raises for a
+                         task with three or more labels, where it cannot say what it means.
+                         An explicit value is a user instruction and beats a calibrated
+                         balance; calibration refines `empirical` only. Mapping values are
+                         normalized, so relative weights are what matter. Naming a label
+                         the task does not declare aborts before any API call.
    - `evaluation.real_baseline` — also score the task models on the real benchmark
                          (default `true`; see "Real baseline & fidelity").
    - `task.name`       — `gec` or `spam`
@@ -211,16 +219,18 @@ declares prompts for (see "Fail-fast" below).
 | **`mode: forward`** | `generate()` rewrites a real seed sentence into a corrupted variant; the generator picks the error type itself. | `generate_seedless_pairs()`: no real seed — a profile-sampled content spec drives the LLM to invent an original/corrupted pair directly. Needs `seedless_forward_prompt`. |
 | **`mode: inverse`** | `generate_inverse()` corrupts the real benchmark's known-clean `correct` field according to an **empirical error distribution** (ERRANT-profiled) so the injected error mix matches the benchmark. | A carrier (clean sentence) is synthesized from a profile content spec via `generate_carriers()` (needs `carrier_prompt`), then fed through the same `generate_inverse()` in place of a real seed — the empirical error distribution still drives the injected errors. |
 
-**`class_conditional` (Spam)** — classification is inherently label → text: sample a
-target class from the balance (`class_balance`, default the real dataset's empirical
-`P(SPAM)`), then synthesize an example of that class. Because **both classes are
-LLM-authored** in every cell, a classifier can't separate them on "was this written by
-an LLM" artifacts.
+**`class_conditional`** — classification is inherently label → text: draw a target
+label from the balance (`class_balance`, default the real dataset's empirical
+distribution), then synthesize an example of it. **Any number of labels**, not
+just two. A label receives an injected signal mix iff its own prompt template
+contains `{error_spec}`, so a task with no injectable features simply writes
+prompts without it. Because every class is LLM-authored in every cell, a
+classifier cannot separate them on "was this written by an LLM" artifacts.
 
 | | `seedless: false` (seeded) | `seedless: true` |
 |---|---|---|
-| **`mode: inverse`** (default) | `seed_policy="cross_class"`: SPAM = inject an empirically-profiled mix of spam **signals** (link, money, ALL-CAPS, urgency, keywords) into a real HAM seed; HAM = paraphrase a real HAM seed. | Same cross-class flow, but the HAM seed is a carrier synthesized from the profile via `generate_carriers()` (needs `carrier_prompt`) instead of a real message. |
-| **`mode: forward`** | `seed_policy="same_class"`: each class imitates within itself — rewrites a real labeled seed of that class (SPAM or HAM) into a new message of the same kind. Needs `forward_prompt`. | `seed_policy="none"`: per-label profile-sampled content specs, no real seed at all. Needs `seedless_class_prompts`. |
+| **`mode: inverse`** (default) | The target label is drawn independently and **imposed** on a seed of any class, via `get_inverse_class_prompts()[label]`. A spam seed rewritten to HAM is a hard negative — spam-like topic, no spam signals. | The same, over carriers synthesized from the profile instead of real messages. |
+| **`mode: forward`** | The seed's own label is **inherited**: each class rewrites a labeled seed of that class into a new one. Needs `forward_prompts`. | Per-label profile content specs, no real seed. Needs `seedless_class_prompts`. Note this cell draws its label from the balance, so it imposes rather than inherits — see Limitations. |
 
 **`structured` (Taxonomy)** — one sample is a whole artifact, so `seedless` is
 pinned to `true` (seeded is unimplemented) and only `mode` varies:
@@ -288,8 +298,8 @@ scope for calibration entirely, so it never prints one either way. Pin an artifa
 `generation.calibration_path`, or set that key to `null` to opt out.
 
 A calibrated `class_prob` only ever corrects the **`empirical`** balance for differential
-attrition: an explicit float in `generation.class_balance` is a user instruction and always
-wins, calibration included.
+attrition: an explicit float or mapping in `generation.class_balance` is a user instruction
+and always wins, calibration included.
 
 Calibration is a **separate phase** on purpose. Steering runs *inside* a scored session
 would make them non-i.i.d. and turn `results.json`'s `mean ± std` — the core GET
@@ -333,7 +343,7 @@ that was asked for).
 
 #### Limitations
 
-Two bounds worth knowing before setting a tolerance:
+Two bounds worth knowing before setting a tolerance, plus one unrelated to tolerance at all:
 
 - **A concentrated signal mix may be unreachable.** `_sample_categories` draws without
   replacement, so one category's achievable share saturates near
@@ -345,6 +355,12 @@ Two bounds worth knowing before setting a tolerance:
   category stays sample-able) while the measurement is raw, so even a perfectly compliant
   generator scores slightly above 0. Set `tolerance` with that floor in mind rather than
   chasing 0.
+- **`mode` partly degenerates for `class_conditional` + `seedless`.** With no seed
+  there is nothing to inherit, so `forward + seedless` draws its label from the
+  balance — imposition, by the definition above. What actually separates the two
+  seedless cells is one-step generation (write a SPAM message from a spec) versus
+  two-step (synthesize a carrier, then impose a label on it). Both cells work and
+  are reachable; the axis simply carries less meaning there.
 
 ## Real baseline & fidelity
 
@@ -465,11 +481,12 @@ the first model runs.
    | `seedless` cells | `get_carrier_prompt` / `get_seedless_forward_prompt` + a `--topics` profile |
    | real-vs-generated fidelity | `profile_dataset`, `compare_profiles`, `get_real_eval_samples` |
    | calibration | `get_calibration_keys` |
-   | the `class_conditional` shape | `get_generation_strategy`, `get_class_labels`, `get_negative_generation_prompt`, `get_forward_prompts`, `get_seedless_class_prompts`, `get_seed_pool` |
+   | the `class_conditional` shape | `get_generation_strategy`, `get_class_labels`, `get_inverse_class_prompts`, `get_forward_prompts`, `get_seedless_class_prompts`, `get_seed_pool` |
 
-   `get_class_labels()` returns `(positive, negative)` — the dispatcher takes
-   the class names from the task, so a classification task is never generated
-   under another task's vocabulary.
+   `get_class_labels()` returns the task's ordered label set — any number of
+   labels, not just two — so the dispatcher takes the class names from the
+   task, and a classification task is never generated under another task's
+   vocabulary.
 2. Create `framework/configs/<task>/<task>.json` with error types, prompts,
    evaluators list, and per-model inference params.
 3. Register the task in `framework/pipeline.py::load_task()`.

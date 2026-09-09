@@ -84,34 +84,47 @@ class BaseTask(ABC):
         return None
 
     def get_forward_prompts(self) -> dict[str, str]:
-        """{label: prompt} for same-class imitation in classification forward
-        mode. Placeholder {sentence}; the positive class also gets {error_spec}
-        so forward generation can target the empirical signal mix instead of
-        inheriting whatever signals its seed happened to carry."""
+        """{label: prompt} for INHERITING a seed's own class in classification
+        forward mode.
+
+        Placeholder {sentence}. A label whose template also contains
+        {error_spec} receives a sampled signal mix, so forward generation can
+        target the empirical mix instead of inheriting whatever signals its seed
+        happened to carry — the same template rule
+        get_inverse_class_prompts() follows, and the only thing that decides it.
+        There is no "positive class"; a label declares its own needs.
+        """
         return {}
 
-    def get_class_labels(self) -> tuple[str, str] | None:
-        """(positive, negative) label names for `class_conditional` generation.
+    def get_class_labels(self) -> tuple[str, ...] | None:
+        """Ordered label set for `class_conditional` generation.
 
         The strategy is label -> text, so the dispatcher needs to know what the
-        two classes are CALLED. Returning None means this task is not
-        class-conditional; a class_conditional task that returns None fails fast
-        rather than being generated under someone else's vocabulary.
+        classes are CALLED. Two labels is the common case, not the limit.
+        Returning None means this task is not class-conditional; a
+        class_conditional task that returns None fails fast rather than being
+        generated under someone else's vocabulary.
         """
         return None
 
-    def get_negative_generation_prompt(self) -> str | None:
-        """Prompt that produces an example of the NEGATIVE class from a seed.
+    def get_inverse_class_prompts(self) -> dict[str, str]:
+        """{label: prompt} for IMPOSING a target class on a seed of any class.
 
-        Placeholder {sentence}. The positive class is produced by
-        get_inverse_prompt (inject) or get_forward_prompts (imitate); this is
-        its counterpart, and every class_conditional task needs it.
+        Placeholder {sentence}. A label whose template also contains
+        {error_spec} receives a sampled signal mix — the template declares its
+        own needs, so no code branches on which label is "positive". Every
+        prompt answers with the same `Message:` tag.
         """
-        return None
+        return {}
 
     def get_seedless_class_prompts(self) -> dict[str, str]:
-        """{label: prompt} for direct per-class seedless generation.
-        Placeholders: {spec} and, for the positive class, {error_spec}."""
+        """{label: prompt} for direct per-label seedless generation.
+
+        Placeholder {spec} (a rendered content spec, in place of a real seed).
+        A label whose template also contains {error_spec} receives a sampled
+        signal mix — the same template rule the other two prompt families
+        follow, not a rule about which label is "positive".
+        """
         return {}
 
     def get_profile_side(self, mode: str) -> str:
@@ -134,8 +147,10 @@ class BaseTask(ABC):
     def get_generation_strategy(self) -> str:
         """How the pipeline generates synthetic data for this task:
           "corruption"        — corrupt a source text (forward/inverse); text→text tasks.
-          "class_conditional" — sample a target class, then generate an example of it;
-                                classification tasks. Ignores generation.mode.
+          "class_conditional" — draw a target label, then generate an example of it;
+                                classification tasks. On the mode axis like the
+                                others — inverse IMPOSES the drawn label on a seed
+                                of any class, forward INHERITS the seed's own.
           "structured"        — generate a whole structured benchmark artifact from
                                 a profile/spec; on the mode axis like the others —
                                 inverse imposes a sampled structural target, forward

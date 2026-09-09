@@ -21,7 +21,7 @@ from framework.calibration.artifact import (
     default_calibration_path,
     write_calibration,
 )
-from framework.calibration.class_balance import correct_class_prob
+from framework.calibration.class_balance import correct_class_balance
 from framework.calibration.controller import (
     converged,
     jsd_report,
@@ -29,6 +29,7 @@ from framework.calibration.controller import (
     stalled,
     update_request,
 )
+from framework.generators.base_generator import CLASS_CONDITIONAL_SEMANTICS
 
 DEFAULT_ROUNDS = 3
 DEFAULT_ALPHA = 0.5
@@ -62,18 +63,72 @@ def calibration_settings(config: dict, args=None) -> dict:
     return settings
 
 
-def informative_count(task, rows: list[dict], profile: dict | None = None) -> int:
+def signal_bearing_labels(task, *, mode: str = "inverse",
+                          seedless: bool = False) -> list[str]:
+    """Labels that carry an injected signal mix in the cell `(mode, seedless)`.
+
+    Template-driven, never positional: a label bears signals iff ITS OWN prompt
+    template contains `{error_spec}`. WHICH template that is depends on the cell
+    being calibrated, and the three prompt families need not agree on their
+    `{error_spec}` coverage:
+
+      inverse, seeded or seedless  ->  get_inverse_class_prompts()
+      forward + seeded             ->  get_forward_prompts()
+      forward + seedless           ->  get_seedless_class_prompts()
+
+    (Both inverse cells impose a drawn label on a seed — a real one, or a
+    synthesized carrier — so both render the inverse family.)
+
+    This is the single place that rule lives. Its two callers — the informative
+    sample count and Stage A's forced balance — used to compute it separately
+    off `get_inverse_class_prompts()` whatever the cell was, which agreed with
+    each other only by luck and forced budget onto labels that measure nothing
+    whenever `--mode forward` was used on a task whose families differ.
+
+    Defaults name the class_conditional default cell, the same one
+    `pipeline._run_generation` falls back to when a config sets no `mode`.
+    """
+    if mode == "forward":
+        prompts = (task.get_seedless_class_prompts() if seedless
+                   else task.get_forward_prompts())
+    else:
+        prompts = task.get_inverse_class_prompts()
+    return [lbl for lbl in (task.get_class_labels() or ())
+            if "{error_spec}" in ((prompts or {}).get(lbl) or "")]
+
+
+def stage_a_class_balance(task, *, mode: str = "inverse",
+                          seedless: bool = False) -> dict[str, float] | None:
+    """Stage A's forced balance: all mass, split evenly, on the labels that
+    actually carry signals in this cell.
+
+    Only those labels measure anything, so calibrating at the empirical balance
+    would spend most of the budget on samples the measurement ignores. Returns
+    None when no label in this cell bears signals (nothing to force onto), which
+    leaves the caller's empirical balance in place.
+
+    Reading the cell matters: `--mode forward` renders a different prompt family
+    than inverse, and forcing budget onto the inverse family's bearing labels
+    would put it on labels that measure nothing in the cell being calibrated.
+    """
+    bearing = signal_bearing_labels(task, mode=mode, seedless=seedless)
+    return {lbl: 1.0 / len(bearing) for lbl in bearing} if bearing else None
+
+
+def informative_count(task, rows: list[dict], profile: dict | None = None,
+                      *, mode: str = "inverse", seedless: bool = False) -> int:
     """Samples the measurement is actually estimated from, which is not the
-    round's sample size: positive-class rows for classification (the
-    negative class carries no signals);
+    round's sample size: for classification, rows whose label bears signals in
+    the cell being calibrated (a label whose template carries no {error_spec}
+    contributes no measurable signal, regardless of how many labels the task
+    has);
     for corruption, the surviving pairs ERRANT actually annotated —
     `profile_gec_edit_types`'s own `n_annotated`, read off the SAME profiling
     pass `_measure` already made rather than re-annotating every pair a second
     time just to count them."""
     if task.get_generation_strategy() == "class_conditional":
-        labels = task.get_class_labels()
-        positive = labels[0] if labels else None
-        return sum(1 for r in rows if r.get("label") == positive)
+        bearing = set(signal_bearing_labels(task, mode=mode, seedless=seedless))
+        return sum(1 for r in rows if r.get("label") in bearing)
     return (profile or {}).get("n_annotated", 0)
 
 
@@ -161,10 +216,17 @@ def run_calibration(
     # same settings the CLI path (main()) already applies.
     settings_size = sample_size or calibration_settings(config)["sample_size"]
 
-    # Only the positive class carries signals, so calibrating at the empirical
-    # balance would waste most of the budget. is_positive only GATES the
-    # _sample_categories call, so positives-only is measurement-equivalent.
-    forced_class_prob = 1.0 if strategy == "class_conditional" else None
+    # Only labels whose prompt asks for signals carry them, so calibrating at the
+    # empirical balance would spend most of the budget on samples that measure
+    # nothing. Force all mass onto the signal-bearing labels — the draw only
+    # GATES which template renders, it does not change _sample_categories.
+    # Which labels those are is a property of THIS cell's prompt family, so it
+    # is asked for by cell (and answered in exactly one place, shared with the
+    # informative count below).
+    forced_class_prob = None
+    if strategy == "class_conditional":
+        forced_class_prob = stage_a_class_balance(
+            task, mode=ctx["mode"], seedless=ctx["seedless"])
     class_prob = forced_class_prob if forced_class_prob is not None else ctx["class_prob"]
 
     run_config = copy.deepcopy(base_config)
@@ -184,6 +246,9 @@ def run_calibration(
             "alpha": alpha, "tolerance": tolerance, "rounds": rounds,
             "forced_class_prob": forced_class_prob,
             "timestamp": f"{datetime.now():%Y-%m-%dT%H:%M:%S}",
+            "class_conditional_semantics": (
+                CLASS_CONDITIONAL_SEMANTICS if strategy == "class_conditional" else None
+            ),
         },
         "target": target,
         "calibrated": dict(target),
@@ -208,7 +273,8 @@ def run_calibration(
         profile = _measure(task, synthetic)
         measured_all = {name: (profile.get(key) or {}) for name, key in measure_keys.items()}
         measured = {name: measured_all[name] for name in keys}
-        n_informative = informative_count(task, synthetic, profile)
+        n_informative = informative_count(task, synthetic, profile,
+                                          mode=ctx["mode"], seedless=ctx["seedless"])
         if n_informative < MIN_INFORMATIVE:
             print(f"[WARN] round {round_idx} measured on {n_informative} informative "
                   f"samples (< {MIN_INFORMATIVE}); the update may chase noise.",
@@ -273,18 +339,16 @@ def run_calibration(
             ctx["judge_call"], ctx["class_prob"], profile=ctx["profile"],
         )
         attrition = getattr(ctx["generator"], "last_class_attrition", None) or {}
-        positive_label, negative_label = task.get_class_labels()
-        corrected = correct_class_prob(ctx["class_prob"], attrition,
-                                       n=len(stage_b),
-                                       positive_label=positive_label,
-                                       negative_label=negative_label)
+        corrected = correct_class_balance(ctx["class_prob"], attrition,
+                                          n=len(stage_b))
         payload["meta"]["class_attrition"] = attrition
         if corrected is None:
-            print("Class balance inside the noise floor; class_prob unchanged "
-                  f"at {ctx['class_prob']:.4f}.")
+            print("Class balance inside the noise floor; unchanged at "
+                  + ", ".join(f"{k}={v:.4f}" for k, v in sorted(ctx["class_prob"].items())))
         else:
-            print(f"Class balance corrected: {ctx['class_prob']:.4f} -> "
-                  f"{corrected:.4f}")
+            print("Class balance corrected: "
+                  + ", ".join(f"{k} {ctx['class_prob'][k]:.4f}->{corrected[k]:.4f}"
+                              for k in sorted(corrected)))
             payload["calibrated"]["class_prob"] = corrected
         write_calibration(path, payload)
 

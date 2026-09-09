@@ -24,11 +24,11 @@ class _Toxicity(BaseTask):
     def get_generation_strategy(self):
         return "class_conditional"
 
-    def get_negative_generation_prompt(self):
-        return "Rewrite civilly: {sentence}"
-
-    def get_inverse_prompt(self):
-        return "Make TOXIC using {error_spec} from: {sentence}"
+    def get_inverse_class_prompts(self):
+        return {
+            "TOXIC": "Make TOXIC using {error_spec} from: {sentence}",
+            "CIVIL": "Rewrite civilly: {sentence}",
+        }
 
     def get_error_descriptions(self):
         return {"slur": "include a slur"}
@@ -52,15 +52,13 @@ class _Fake(BaseGenerator):
 
     def call_api(self, prompt):
         self.calls.append(prompt)
-        return "Corrupted: this is a generated line"
+        return "Message: this is a generated line"
 
 
 class ContractTests(unittest.TestCase):
-    def test_base_task_declares_both_hooks(self):
-        # The old code called get_ham_generation_prompt(), which BaseTask never
-        # declared — the contract lied about what a class_conditional task needs.
+    def test_base_task_declares_the_class_conditional_hooks(self):
         self.assertTrue(hasattr(BaseTask, "get_class_labels"))
-        self.assertTrue(hasattr(BaseTask, "get_negative_generation_prompt"))
+        self.assertTrue(hasattr(BaseTask, "get_inverse_class_prompts"))
 
     def test_non_classification_tasks_declare_no_labels(self):
         from framework.tasks.gec.task import GECTask
@@ -69,12 +67,9 @@ class ContractTests(unittest.TestCase):
     def test_spam_declares_its_labels(self):
         self.assertEqual(SpamTask().get_class_labels(), ("SPAM", "HAM"))
 
-    def test_spam_negative_prompt_survives_the_rename(self):
-        self.assertTrue(SpamTask().get_negative_generation_prompt())
-
 
 class DispatchTests(unittest.TestCase):
-    def _run(self, task, class_prob):
+    def _run(self, task, class_balance):
         gen = _Fake(4)
         cfg = {"generation": {"sample_size": 4, "mode": "inverse", "seedless": False},
                "task": {"name": task.get_task_name()}}
@@ -82,16 +77,16 @@ class DispatchTests(unittest.TestCase):
             gen, task, cfg,
             [{"incorrect": f"a civil sentence number {i}"} for i in range(4)],
             {"type_dist": {"slur": 1.0}, "count_dist": {1: 1.0}},
-            None, class_prob,
+            None, class_balance,
         )
 
     def test_generation_uses_the_tasks_own_labels(self):
-        out = self._run(_Toxicity(), class_prob=1.0)
+        out = self._run(_Toxicity(), class_balance={"TOXIC": 1.0, "CIVIL": 0.0})
         self.assertTrue(out)
         self.assertEqual({r["label"] for r in out}, {"TOXIC"})
 
     def test_negative_class_uses_the_tasks_own_labels(self):
-        out = self._run(_Toxicity(), class_prob=0.0)
+        out = self._run(_Toxicity(), class_balance={"TOXIC": 0.0, "CIVIL": 1.0})
         self.assertTrue(out)
         self.assertEqual({r["label"] for r in out}, {"CIVIL"})
 
@@ -100,21 +95,23 @@ class DispatchTests(unittest.TestCase):
             def get_class_labels(self): return None
 
         with self.assertRaises(RuntimeError) as ctx:
-            self._run(_Unlabelled(), class_prob=1.0)
+            self._run(_Unlabelled(), class_balance={"TOXIC": 1.0, "CIVIL": 0.0})
         self.assertIn("get_class_labels", str(ctx.exception))
 
 
 class BalanceTests(unittest.TestCase):
-    def test_empirical_balance_counts_the_tasks_positive_label(self):
+    def test_empirical_balance_counts_every_one_of_the_tasks_labels(self):
         rows = [{"label": "TOXIC"}, {"label": "CIVIL"}, {"label": "TOXIC"},
                 {"label": "CIVIL"}]
-        self.assertAlmostEqual(
-            pipeline._resolve_class_prob({}, rows, _Toxicity()), 0.5)
+        result = pipeline._resolve_class_prob({}, rows, _Toxicity())
+        self.assertAlmostEqual(result["TOXIC"], 0.5)
+        self.assertAlmostEqual(result["CIVIL"], 0.5)
 
     def test_spam_balance_is_unchanged(self):
         rows = [{"label": "SPAM"}] + [{"label": "HAM"}] * 3
-        self.assertAlmostEqual(
-            pipeline._resolve_class_prob({}, rows, SpamTask()), 0.25)
+        result = pipeline._resolve_class_prob({}, rows, SpamTask())
+        self.assertAlmostEqual(result["SPAM"], 0.25)
+        self.assertAlmostEqual(result["HAM"], 0.75)
 
 
 class InformativeCountTests(unittest.TestCase):
@@ -122,3 +119,52 @@ class InformativeCountTests(unittest.TestCase):
         from framework import calibrate
         rows = [{"label": "TOXIC"}, {"label": "CIVIL"}, {"label": "TOXIC"}]
         self.assertEqual(calibrate.informative_count(_Toxicity(), rows), 2)
+
+
+class LabelSetTests(unittest.TestCase):
+    def test_spam_labels_are_an_ordered_sequence(self):
+        labels = SpamTask().get_class_labels()
+        self.assertEqual(tuple(labels), ("SPAM", "HAM"))
+        self.assertGreaterEqual(len(labels), 2)
+
+    def test_non_classification_tasks_still_declare_none(self):
+        from framework.tasks.gec.task import GECTask
+        self.assertIsNone(GECTask().get_class_labels())
+
+
+class InverseClassPromptTests(unittest.TestCase):
+    def test_base_declares_the_accessor(self):
+        from framework.tasks.base_task import BaseTask
+        self.assertTrue(hasattr(BaseTask, "get_inverse_class_prompts"))
+
+    def test_spam_supplies_one_prompt_per_label(self):
+        task = SpamTask()
+        prompts = task.get_inverse_class_prompts()
+        self.assertEqual(set(prompts), set(task.get_class_labels()))
+        for label, template in prompts.items():
+            self.assertIn("{sentence}", template, f"{label} takes a seed")
+
+    def test_only_the_signal_bearing_label_asks_for_an_error_spec(self):
+        # The template rule: SPAM's prompt declares it wants signals, HAM's does
+        # not. No code decides this, and no accessor declares it.
+        prompts = SpamTask().get_inverse_class_prompts()
+        self.assertIn("{error_spec}", prompts["SPAM"])
+        self.assertNotIn("{error_spec}", prompts["HAM"])
+
+    def test_prompts_do_not_assume_the_seed_is_legitimate(self):
+        # Symmetric inverse feeds either class into either prompt, so neither
+        # may label its input "Legitimate message".
+        for label, template in SpamTask().get_inverse_class_prompts().items():
+            self.assertNotIn("Legitimate message:", template,
+                             f"{label} still assumes a HAM seed")
+
+    def test_the_negative_prompt_strips_rather_than_merely_abstains(self):
+        # Receiving a SPAM seed, the HAM prompt must remove signals, not just
+        # decline to add them. This is what produces the hard negatives.
+        ham = SpamTask().get_inverse_class_prompts()["HAM"].lower()
+        self.assertTrue("remove" in ham or "strip" in ham,
+                        "HAM prompt must instruct removal of spam signals")
+
+    def test_all_inverse_prompts_answer_with_the_same_tag(self):
+        for template in SpamTask().get_inverse_class_prompts().values():
+            self.assertIn("Message: <", template)

@@ -8,6 +8,7 @@ from datetime import datetime
 
 import numpy as np
 from framework.data_loading import iter_local_rows, resolve_dataset_config
+from framework.generators.base_generator import CLASS_CONDITIONAL_SEMANTICS
 from framework.generators.factory import load_generator
 from framework.tasks.base_task import BaseTask
 
@@ -205,6 +206,16 @@ def _apply_calibration(config: dict, task, empirical: dict) -> dict:
               "benchmark setpoint (dataset or sample size changed); using the "
               "empirical distribution instead.", file=sys.stderr)
         return empirical
+
+    if strategy == "class_conditional":
+        stored = (payload.get("meta") or {}).get("class_conditional_semantics")
+        if stored != CLASS_CONDITIONAL_SEMANTICS:
+            print(f"[WARN] calibration {path!r} was measured under "
+                  f"{stored or 'asymmetric (pre-marker)'} class-conditional "
+                  f"semantics, but this build generates "
+                  f"{CLASS_CONDITIONAL_SEMANTICS}. Using the empirical "
+                  "distribution; recalibrate to use it.", file=sys.stderr)
+            return empirical
 
     if not usable:
         print(f"[WARN] calibration {path!r} has no usable distributions; "
@@ -471,6 +482,10 @@ def _build_meta(config: dict, task, runs_completed: int,
         "real_baseline": real_baseline,
         "class_balance": gen.get("class_balance", "empirical"),
         "calibration": _LAST_CALIBRATION,
+        "class_conditional_semantics": (
+            CLASS_CONDITIONAL_SEMANTICS
+            if strategy == "class_conditional" else None
+        ),
     }
 
 
@@ -495,12 +510,14 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
     """Dispatch on the task's generation strategy. Corruption → forward/inverse,
     including the seedless forward/inverse cells for GEC (Task 5). class_conditional
     (spam) now dispatches its own four cells on (mode, seedless) — Task 8:
-    inverse+seeded (today's unchanged production behavior) injects/paraphrases
-    real HAM seeds via seed_policy="cross_class"; inverse+seedless does the same
+    inverse+seeded (today's unchanged production behavior) renders every drawn
+    label via seed_policy="impose" over real seeds (the label is drawn from the
+    balance vector independently of the seed); inverse+seedless does the same
     but over carriers synthesized from the profile in place of real seeds;
-    forward+seeded imitates within a class via seed_policy="same_class" over
-    `task.get_seed_pool(..., "forward")`; forward+seedless drops real seeds
-    entirely via seed_policy="none" over per-label profile specs.
+    forward+seeded rewrites within a label via seed_policy="inherit" over
+    `task.get_seed_pool(..., "forward")` (the seed's own label happens to match
+    the drawn one); forward+seedless drops real seeds entirely via
+    seed_policy="none" over per-label profile specs.
 
     `profile` is the pre-loaded seedless generation profile (None when
     generation.seedless is falsy). When `generation.seedless` is true, per-sample
@@ -588,28 +605,24 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
         if not labels:
             raise RuntimeError(
                 f"{task.get_task_name()} declares the class_conditional strategy "
-                "but get_class_labels() returned None — it must return "
-                "(positive_label, negative_label)."
+                "but get_class_labels() returned None — it must return an ordered "
+                "sequence of label names."
             )
-        positive_label, negative_label = labels
-        negative_prompt = task.get_negative_generation_prompt()
-        if not negative_prompt:
+        inverse_prompts = task.get_inverse_class_prompts()
+        missing = [lbl for lbl in labels if lbl not in inverse_prompts]
+        if mode == "inverse" and missing:
             raise RuntimeError(
-                f"{task.get_task_name()} does not support class_conditional "
-                "generation (no negative_generation_prompt)."
+                f"{task.get_task_name()} is missing inverse prompts for "
+                f"{', '.join(missing)} — get_inverse_class_prompts() must cover "
+                "every label in get_class_labels()."
             )
-        # Required regardless of seed_policy — generate_class_conditional's
-        # signature has no defaults for these, even though same_class/none
-        # policies use forward_prompts/seedless_prompts instead of inject_prompt.
         common_kwargs = dict(
-            class_prob=class_prob,
+            class_balance=class_prob,
+            labels=tuple(labels),
+            inverse_prompts=inverse_prompts,
             type_dist=error_dist["type_dist"],
             count_dist=error_dist["count_dist"],
             error_descriptions=task.get_error_descriptions(),
-            inject_prompt=task.get_inverse_prompt(),
-            negative_prompt=negative_prompt,
-            positive_label=positive_label,
-            negative_label=negative_label,
             sample_size=sample_size,
             judge_prompt=task.get_inverse_judge_prompt() if judge_call else None,
             judge_call=judge_call,
@@ -626,8 +639,20 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                         f"seedless=true (no carrier_prompt)."
                     )
                 rng = random.Random()
+                # The rule is: the LAST label's content profile supplies the
+                # carrier. Under symmetric semantics there is no "class being
+                # transformed away from" — the target label is drawn
+                # independently of the carrier and imposed on it, so any label's
+                # profile would be a defensible source. For spam this resolves
+                # to HAM (labels = ("SPAM", "HAM")), the same carrier the
+                # asymmetric implementation produced, so the cell's behaviour is
+                # unchanged. For a task with three or more labels the choice is
+                # arbitrary and unspecified: nothing in the design says which
+                # class a seedless carrier should be drawn from, and the first
+                # such task should settle it deliberately rather than inherit
+                # this line.
                 specs = [
-                    render_spec(sample_content_spec(profile, rng, label=negative_label))
+                    render_spec(sample_content_spec(profile, rng, label=labels[-1]))
                     for _ in range(sample_size)
                 ]
                 carriers = generator.generate_carriers(
@@ -637,13 +662,15 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                 real_seeds = [{"text": text} for text in carriers]
                 seed_field = "text"
             else:
-                # Post-parse_row contract: the seed text always lives in "incorrect".
-                real_seeds = real_data
+                # get_seed_pool's labeled both-class pool — the same one forward
+                # uses — so inverse can impose a label onto either class's seed,
+                # not just paraphrase within the HAM-only real_data pool.
+                real_seeds = task.get_seed_pool(config, real_data, "inverse")
                 seed_field = "incorrect"
             synthetic = generator.generate_class_conditional(
                 real_seeds=real_seeds,
                 seed_field=seed_field,
-                seed_policy="cross_class",
+                seed_policy="impose",
                 **common_kwargs,
             )
         elif seedless:
@@ -660,7 +687,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                     render_spec(sample_content_spec(profile, rng, label=label))
                     for _ in range(sample_size)
                 ]
-                for label in (positive_label, negative_label)
+                for label in labels
             }
             synthetic = generator.generate_class_conditional(
                 seed_policy="none",
@@ -676,18 +703,18 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                     f"seedless=false (no forward_prompts)."
                 )
             real_seeds = task.get_seed_pool(config, real_data, "forward")
-            # seed_policy="same_class" needs seeds of BOTH classes (it draws
-            # from the subset matching the label rng picked). Check that BEFORE
-            # any API call: the in-loop guard in generate_class_conditional
-            # catches this too, but only after rng happens to draw the missing
-            # class — anywhere from 1 to `sample_size` paid calls in, discarding
+            # seed_policy="inherit" needs seeds of EVERY label (it draws from
+            # the subset matching the label rng picked). Check that BEFORE any
+            # API call: the in-loop guard in generate_class_conditional catches
+            # this too, but only after rng happens to draw the missing label —
+            # anywhere from 1 to `sample_size` paid calls in, discarding
             # everything generated so far.
             label_field = "label"
             present_labels = {row.get(label_field) for row in real_seeds}
-            for label in (common_kwargs["positive_label"], common_kwargs["negative_label"]):
+            for label in labels:
                 if label not in present_labels:
                     raise RuntimeError(
-                        f"seed_policy='same_class' needs seeds labeled {label!r}, but "
+                        f"seed_policy='inherit' needs seeds labeled {label!r}, but "
                         f"the reference rows from dataset "
                         f"'{_dataset_display_name(config)}' carry no {label!r} class "
                         f"— check the dataset and {task.get_task_name()}'s "
@@ -697,7 +724,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                 real_seeds=real_seeds,
                 seed_field="text",
                 label_field=label_field,
-                seed_policy="same_class",
+                seed_policy="inherit",
                 forward_prompts=forward_prompts,
                 **common_kwargs,
             )
@@ -788,29 +815,70 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
 
 # ── Post-generation helpers (class balance, real baseline, nesting, profiling) ──
 
-def _resolve_class_prob(config: dict, real_reference, task=None) -> float:
-    """P(positive class) for class-conditional generation.
-
-    An explicit float in `generation.class_balance` is a user instruction and
-    always wins, calibration included. A calibrated `class_prob` corrects the
-    EMPIRICAL balance for differential attrition, so it only applies when
-    `class_balance` is `empirical` (the default) — never overriding a balance
-    the user asked for by name. With no calibration, `empirical` falls back to
-    the real reference's positive fraction."""
+def _resolve_class_prob(config: dict, real_reference, task=None) -> dict:
+    """Balance vector over the task's labels. An explicit `generation.class_balance`
+    mapping is a user instruction and always wins, calibration included. A
+    calibrated balance corrects the EMPIRICAL one for differential attrition, so
+    it applies only when `class_balance` is `empirical` (the default)."""
+    labels = tuple(task.get_class_labels() or ()) if task is not None else ()
     cb = (config.get("generation") or {}).get("class_balance", "empirical")
+
+    if isinstance(cb, bool):
+        # bool is a subclass of int in Python, so `class_balance: true` would
+        # otherwise silently pass the numeric branch below as 1.0/1. Reject it
+        # explicitly rather than have a YAML typo silently become P(labels[0])==1.
+        raise RuntimeError(
+            f"generation.class_balance is a boolean ({cb!r}), which is not a "
+            "supported value. Use a float 0..1 (two-label tasks only) or an "
+            "explicit {label: weight} mapping."
+        )
+
     if isinstance(cb, (int, float)):
-        return float(cb)
-    if _LAST_CALIBRATION and isinstance(_LAST_CALIBRATION.get("class_prob"), float):
-        return _LAST_CALIBRATION["class_prob"]
-    labels = task.get_class_labels() if task is not None else None
+        # The binary legacy spelling of the mapping: P(labels[0]) is what
+        # class_balance has always meant for a two-label task (P(SPAM) with
+        # ("SPAM", "HAM")), so a bare number still means exactly that and every
+        # existing two-label config keeps working unchanged. It cannot express
+        # a weight for a third label, so it is only accepted at exactly two.
+        if len(labels) != 2:
+            example = ", ".join(f"{lbl}: <weight>" for lbl in labels)
+            raise RuntimeError(
+                f"generation.class_balance is a bare number ({cb!r}), which is "
+                f"ambiguous across {len(labels)} labels {labels!r} — use an "
+                f"explicit mapping instead, e.g. {{{example}}}."
+            )
+        f = float(cb)
+        if not 0.0 <= f <= 1.0:
+            raise RuntimeError(
+                f"generation.class_balance={f!r} is outside the valid range 0..1."
+            )
+        return {labels[0]: f, labels[1]: 1.0 - f}
+
+    if isinstance(cb, dict):
+        unknown = [k for k in cb if k not in labels]
+        if unknown:
+            raise RuntimeError(
+                f"generation.class_balance names labels the task does not "
+                f"declare: {', '.join(sorted(unknown))}. Known labels: "
+                f"{', '.join(labels)}."
+            )
+        total = sum(max(0.0, float(v)) for v in cb.values())
+        if total <= 0:
+            raise RuntimeError("generation.class_balance gives every label zero weight.")
+        if abs(total - 1.0) > 1e-6:
+            print(f"[NOTE] generation.class_balance sums to {total:.4f}; "
+                  "normalizing — relative weights are what matter.")
+        return {label: max(0.0, float(cb.get(label, 0.0))) / total for label in labels}
+
+    if _LAST_CALIBRATION and isinstance(_LAST_CALIBRATION.get("class_prob"), dict):
+        return dict(_LAST_CALIBRATION["class_prob"])
+
     if real_reference and labels:
-        positive = labels[0]
-        pos = sum(1 for r in real_reference if r.get("label") == positive)
-        return pos / len(real_reference)
-    # No task, or a task with no class axis: there is no positive label to
-    # count, so an empirical fraction is not defined. Guessing one task's
-    # label here is how the vocabulary leaked in the first place.
-    return 0.5
+        counts = {label: sum(1 for r in real_reference if r.get("label") == label)
+                  for label in labels}
+        total = sum(counts.values())
+        if total:
+            return {label: c / total for label, c in counts.items()}
+    return {label: 1.0 / len(labels) for label in labels} if labels else {}
 
 
 def _evaluate_real_baseline(task, config, real_reference, evaluator_fns) -> dict:
