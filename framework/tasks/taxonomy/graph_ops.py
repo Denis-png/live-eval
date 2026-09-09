@@ -96,3 +96,99 @@ def sample_subtrees(classes, axioms, *, max_depth: int = 4,
             "max_depth": _depth_of(kept, sub_axioms),
         })
     return out
+
+
+# ── Edit operators ──────────────────────────────────────────────────────────
+# Four operators, chosen to move the two axes the taxonomy profiler measures —
+# depth and branching — in both directions. Each returns a NEW (classes,
+# axioms) pair, or None when the graph offers nothing to edit; the caller then
+# tries another operator rather than emitting a broken graph. Never mutates its
+# input: the seed pool is reused across samples.
+
+
+def drop_leaf(classes, axioms, rng):
+    """Remove one leaf class and the edge to its parent. Reduces breadth."""
+    parents = {c for c, _ in axioms}
+    non_leaf = {p for _, p in axioms}
+    leaves = sorted(c for c in classes if c in parents and c not in non_leaf)
+    if not leaves:
+        return None
+    victim = rng.choice(leaves)
+    return ([c for c in classes if c != victim],
+            [[c, p] for c, p in axioms if c != victim and p != victim])
+
+
+def reparent(classes, axioms, rng):
+    """Move one class under a different parent. Changes depth locally."""
+    candidates = []
+    for child, parent in axioms:
+        descendants = _descendants(child, _children_index(axioms))
+        for new_parent in classes:
+            if new_parent not in (child, parent) and new_parent not in descendants:
+                candidates.append((child, parent, new_parent))
+    if not candidates:
+        return None
+    child, old, new = rng.choice(sorted(candidates))
+    return (list(classes),
+            sorted([[c, (new if (c, p) == (child, old) else p)] for c, p in axioms]))
+
+
+def collapse_level(classes, axioms, rng):
+    """Splice out an intermediate class, attaching its children to its parents.
+
+    Ontologies are DAGs: a class may have several parents (the corpus prep
+    preserves multiple inheritance). The victim's children are therefore rehomed
+    to EVERY parent it had, not to one arbitrarily-chosen last-seen parent.
+    """
+    parents_of: dict[str, list[str]] = {}
+    for child, parent in axioms:
+        parents_of.setdefault(child, []).append(parent)
+    children = _children_index(axioms)
+    middles = sorted(c for c in classes if parents_of.get(c) and children.get(c))
+    if not middles:
+        return None
+    victim = rng.choice(middles)
+    grandparents = parents_of[victim]
+    kept = [c for c in classes if c != victim]
+    out = {(c, p) for c, p in axioms if c != victim and p != victim}
+    for orphan in children[victim]:
+        for gp in grandparents:
+            if orphan != gp:
+                out.add((orphan, gp))
+    return kept, sorted([c, p] for c, p in out)
+
+
+def add_sibling(classes, axioms, rng):
+    """Add one new class beside an existing one. Increases breadth."""
+    hosts = sorted({p for _, p in axioms}) or sorted(classes)
+    if not hosts:
+        return None
+    host = rng.choice(hosts)
+    name = f"{host}Variant"
+    n = 1
+    while name in classes:
+        n += 1
+        name = f"{host}Variant{n}"
+    return sorted(list(classes) + [name]), sorted([list(a) for a in axioms] + [[name, host]])
+
+
+def _descendants(node, children) -> set[str]:
+    """Every class beneath `node`. reparent consults this so an edit can never
+    make a class its own ancestor — the parser rejects cycles, so a cyclic gold
+    would fail its own verification on every attempt."""
+    seen, frontier = set(), [node]
+    while frontier:
+        cur = frontier.pop()
+        for kid in children.get(cur, []):
+            if kid not in seen:
+                seen.add(kid)
+                frontier.append(kid)
+    return seen
+
+
+EDIT_OPERATORS = {
+    "drop_leaf": drop_leaf,
+    "reparent": reparent,
+    "collapse_level": collapse_level,
+    "add_sibling": add_sibling,
+}

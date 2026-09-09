@@ -6,7 +6,10 @@ from model output, so their correctness is the correctness of the benchmark.
 import unittest
 from random import Random
 
-from framework.tasks.taxonomy.graph_ops import sample_subtrees
+from framework.tasks.taxonomy.graph_ops import (
+    EDIT_OPERATORS, add_sibling, collapse_level, drop_leaf, reparent,
+    sample_subtrees,
+)
 
 # A -> B -> D, B -> E, A -> C -> F ; depth 2, 6 classes
 _CLASSES = ["A", "B", "C", "D", "E", "F"]
@@ -122,6 +125,93 @@ class MultiParentTests(unittest.TestCase):
         root_r = [s for s in subs if s["root"] == "R"]
         self.assertTrue(root_r, "expected an R-rooted subtree")
         self.assertEqual(root_r[0]["max_depth"], 3)
+
+
+class EditOperatorTests(unittest.TestCase):
+    """Each operator is exact and independently checkable against a hand-built
+    graph. These functions produce the benchmark's gold, so 'roughly right' is
+    not a category that exists here."""
+
+    def setUp(self):
+        self.classes = list(_CLASSES)
+        self.axioms = [list(a) for a in _AXIOMS]
+
+    def test_drop_leaf_removes_exactly_one_leaf_and_its_edge(self):
+        classes, axioms = drop_leaf(self.classes, self.axioms, Random(0))
+        self.assertEqual(len(classes), len(self.classes) - 1)
+        gone = set(self.classes) - set(classes)
+        self.assertEqual(len(gone), 1)
+        removed = gone.pop()
+        self.assertIn(removed, {"D", "E", "F"})     # only leaves are eligible
+        self.assertNotIn(removed, [c for c, _ in axioms])
+        self.assertNotIn(removed, [p for _, p in axioms])
+
+    def test_reparent_keeps_every_class_and_edge_count(self):
+        classes, axioms = reparent(self.classes, self.axioms, Random(0))
+        self.assertEqual(sorted(classes), sorted(self.classes))
+        self.assertEqual(len(axioms), len(self.axioms))
+        self.assertNotEqual(sorted(axioms), sorted(self.axioms))
+
+    # collapse_level gets its own CHAIN fixture. On the shared graph its two
+    # eligible middles (B and C) both leave max depth at 2, so "collapsing
+    # reduces depth" is simply false there — and which middle gets picked
+    # depends on an rng draw the test does not control.
+    CHAIN_CLASSES = ["A", "B", "C", "D"]
+    CHAIN_AXIOMS = [["B", "A"], ["C", "B"], ["D", "C"]]
+
+    def test_collapse_level_removes_one_middle_and_rehomes_its_children(self):
+        # Asserted generically: either middle is a legal choice, so naming the
+        # victim would pin an rng draw instead of the behaviour.
+        classes, axioms = collapse_level(self.CHAIN_CLASSES, self.CHAIN_AXIOMS,
+                                         Random(0))
+        gone = set(self.CHAIN_CLASSES) - set(classes)
+        self.assertEqual(len(gone), 1)
+        victim = gone.pop()
+        self.assertIn(victim, {"B", "C"})            # only middles are eligible
+        old_parent = {c: p for c, p in self.CHAIN_AXIOMS}[victim]
+        orphans = [c for c, p in self.CHAIN_AXIOMS if p == victim]
+        for orphan in orphans:
+            self.assertIn([orphan, old_parent], axioms)
+
+    def test_collapse_level_reduces_depth(self):
+        from framework.tasks.taxonomy.graph_ops import _depth_of
+        before = _depth_of(self.CHAIN_CLASSES, self.CHAIN_AXIOMS)
+        classes, axioms = collapse_level(self.CHAIN_CLASSES, self.CHAIN_AXIOMS,
+                                         Random(0))
+        self.assertLess(_depth_of(classes, axioms), before)
+
+    def test_add_sibling_adds_one_class_under_an_existing_parent(self):
+        classes, axioms = add_sibling(self.classes, self.axioms, Random(0))
+        self.assertEqual(len(classes), len(self.classes) + 1)
+        added = (set(classes) - set(self.classes)).pop()
+        parents = [p for c, p in axioms if c == added]
+        self.assertEqual(len(parents), 1)
+        self.assertIn(parents[0], self.classes)
+
+    def test_every_operator_returns_a_closed_graph(self):
+        for name, op in EDIT_OPERATORS.items():
+            with self.subTest(operator=name):
+                classes, axioms = op(self.classes, self.axioms, Random(1))
+                names = set(classes)
+                for child, parent in axioms:
+                    self.assertIn(child, names)
+                    self.assertIn(parent, names)
+
+    def test_an_operator_with_nothing_to_do_returns_none(self):
+        # A two-class graph has no intermediate to collapse. Returning None lets
+        # the caller try another operator instead of emitting a broken graph.
+        self.assertIsNone(collapse_level(["A", "B"], [["B", "A"]], Random(0)))
+
+    def test_operators_do_not_mutate_their_input(self):
+        # The seed pool is reused across samples; an in-place edit would
+        # silently corrupt every later draw from the same subtree.
+        for name, op in EDIT_OPERATORS.items():
+            with self.subTest(operator=name):
+                classes = list(_CLASSES)
+                axioms = [list(a) for a in _AXIOMS]
+                op(classes, axioms, Random(2))
+                self.assertEqual(classes, _CLASSES)
+                self.assertEqual(axioms, [list(a) for a in _AXIOMS])
 
 
 if __name__ == "__main__":
