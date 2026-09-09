@@ -22,6 +22,9 @@ from framework.evaluators.taxonomy.metrics import (
     normalize_relation_set,
 )
 from framework.tasks.base_task import BaseTask
+from framework.tasks.taxonomy.graph_ops import (
+    EDIT_OPERATORS, matches_structure, sample_subtrees,
+)
 
 _CONFIG_PATH = os.path.join(
     os.path.dirname(__file__), "..", "..", "configs", "taxonomy", "taxonomy.json"
@@ -273,6 +276,105 @@ class TaxonomyTask(BaseTask):
             "multiple_parent_fraction",
         ]
         return {key: source.get(key) for key in keys if key in source}
+
+    def get_seed_pool(self, config: dict, real_data: list[dict], mode: str,
+                      *, seed_weights: dict | None = None, rng=None) -> list[dict]:
+        """Subtrees of the real ontology, indexed by their own max depth.
+
+        One ontology has to supply the whole pool, so it is sampled rather than
+        used whole. `seed_weights` is accepted for signature compatibility and
+        ignored: reweighting the draw is a calibration concern, and taxonomy has
+        no calibration keys yet.
+        """
+        opts = ((config.get("generation") or {}).get("seed_pool") or {})
+        pool: list[dict] = []
+        for row in real_data:
+            pool.extend(sample_subtrees(
+                row.get("classes") or [], row.get("subclass_axioms") or [],
+                max_depth=int(opts.get("max_depth", 4)),
+                min_classes=int(opts.get("min_classes", 5)),
+                rng=rng,
+            ))
+        return pool
+
+    def _target_domain(self, config_domains, rng) -> str:
+        return rng.choice(list(config_domains)) if config_domains else "general knowledge"
+
+    def build_seeded_artifact(self, seed: dict, mode: str,
+                              profile: dict | None, config: dict, rng) -> dict:
+        classes = list(seed["classes"])
+        axioms = [list(a) for a in seed["subclass_axioms"]]
+
+        if mode == "inverse":
+            if not profile:
+                raise RuntimeError(
+                    f"{self.get_task_name()} inverse+seeded generation requires a "
+                    "profile: the structural target it imposes is sampled from one."
+                )
+            # The spec is what inverse IMPOSES. It is sampled from the real
+            # profile by the same accessor the seedless inverse cell uses, so
+            # both inverse cells target the same distribution.
+            self._generation_spec_from_profile(profile, rng=rng)   # validates the profile
+            # Try operators in a shuffled order until one applies; an operator
+            # returns None when the graph offers it nothing to do. Exactly ONE
+            # edit is applied — that is all it takes to make inverse structurally
+            # differ from forward, which is what this cell has to demonstrate.
+            # Editing toward an exact target depth is targeting, and targeting is
+            # a calibration concern, not this spec's.
+            names = sorted(EDIT_OPERATORS)
+            rng.shuffle(names)
+            for name in names:
+                edited = EDIT_OPERATORS[name](classes, axioms, rng)
+                if edited is not None:
+                    classes, axioms = edited
+                    break
+            if (sorted(classes), sorted(axioms)) == (
+                    sorted(seed["classes"]), sorted(seed["subclass_axioms"])):
+                raise RuntimeError(
+                    f"{self.get_task_name()}: no edit operator could alter this "
+                    f"seed (root {seed.get('root')!r}, {len(seed['classes'])} "
+                    "classes). Raise generation.seed_pool.min_classes."
+                )
+
+        # Run config wins over taxonomy.json's default list, the same
+        # precedence get_feedback_config already uses. One config block,
+        # generation.seed_pool, owns every seeded setting.
+        run_opts = ((config.get("generation") or {}).get("seed_pool") or {})
+        domains = (run_opts.get("domains")
+                   or (self._config.get("seed_pool") or {}).get("domains")
+                   or ["general knowledge"])
+        return {
+            "domain": self._target_domain(domains, rng),
+            "classes": classes,
+            "subclass_axioms": axioms,
+            "source_max_depth": seed.get("max_depth"),
+        }
+
+    def build_seeded_generation_prompt(self, gold: dict) -> str:
+        """Anonymise every class before showing the structure.
+
+        The model must reproduce the SHAPE, not translate the names. Sending the
+        real identifiers would both leak the source ontology into the benchmark
+        and invite the model to recall it rather than build from the structure.
+        """
+        import json
+
+        order = {name: f"C{i}" for i, name in enumerate(sorted(gold["classes"]))}
+        structure = {
+            "classes": [order[c] for c in sorted(gold["classes"])],
+            "subclass_axioms": sorted([order[c], order[p]]
+                                      for c, p in gold["subclass_axioms"]),
+        }
+        template = self._config["seeded_generation_prompt"]
+        return template.format(
+            domain=gold["domain"],
+            structure_json=json.dumps(structure, ensure_ascii=False, indent=2),
+        )
+
+    def verify_structured_match(self, gold: dict, parsed: dict) -> bool:
+        return matches_structure(gold["classes"], gold["subclass_axioms"],
+                                 parsed.get("classes") or [],
+                                 parsed.get("subclass_axioms") or [])
 
     def get_eval_samples(self, synthetic: list[dict]) -> list[dict]:
         """Build eval rows whose model input excludes gold subclass axioms."""
