@@ -1,5 +1,7 @@
 """Seeded structured cells reach the generator, and are named distinctly."""
 import io
+import json
+import re
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
@@ -27,13 +29,29 @@ def _config(mode, seedless, **gen):
 
 
 class _Gen(BaseGenerator):
+    """A compliant model: one new name per anonymised class, in the order given,
+    structure untouched.
+
+    A fake returning a FIXED response cannot answer a prompt whose class count
+    varies with the seed drawn, so it would only ever prove the code path is
+    reachable. Answering properly makes these tests exercise the whole wiring --
+    seed pool, gold construction, prompt rendering, parse and verification.
+    """
+
     def __init__(self):
         self.calls = 0
 
     def call_api(self, prompt):
         self.calls += 1
-        return ('{"domain": "marine biology", "classes": ["X", "Y", "Z"], '
-                '"subclass_axioms": [["Y", "X"], ["Z", "X"]]}')
+        block = re.search(r'\{\s*"classes":\s*\[.*?\]\s*\}', prompt, re.S).group(0)
+        struct = json.loads(block)
+        names = {c: f"Species{i}" for i, c in enumerate(struct["classes"])}
+        return json.dumps({
+            "domain": "marine biology",
+            "classes": [names[c] for c in struct["classes"]],
+            "subclass_axioms": [[names[c], names[p]]
+                                for c, p in struct["subclass_axioms"]],
+        })
 
 
 def _run(cfg, profile=_PROFILE):
@@ -68,10 +86,36 @@ class DispatchTests(unittest.TestCase):
         gen, out = _run(_config("forward", False), profile=None)
         self.assertTrue(out)
         self.assertGreater(gen.calls, 0)
+        # The artifacts carry the MODEL's names, not the source ontology's --
+        # re-verbalisation is what keeps the seed ontology out of the benchmark.
+        for art in out:
+            self.assertTrue(all(c.startswith("Species") for c in art["classes"]))
+            for child, parent in art["subclass_axioms"]:
+                self.assertIn(child, art["classes"])
+                self.assertIn(parent, art["classes"])
 
     def test_inverse_seeded_generates(self):
         gen, out = _run(_config("inverse", False))
         self.assertTrue(out)
+        for art in out:
+            self.assertIn("source_max_depth", art)
+
+    def test_a_model_that_changes_the_structure_produces_nothing(self):
+        # The gate, end to end: gold is computed, so a drifting model loses its
+        # sample instead of redefining the reference.
+        class _Drifting(_Gen):
+            def call_api(self, prompt):
+                payload = json.loads(super().call_api(prompt))
+                payload["subclass_axioms"] = payload["subclass_axioms"][:-1]
+                return json.dumps(payload)
+
+        gen = _Drifting()
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            out = pipeline._run_generation(gen, TaxonomyTask(),
+                                           _config("forward", False), _REAL,
+                                           None, None, None, profile=None)
+        self.assertEqual(out, [])
+        self.assertGreater(gen.calls, 0)
 
     def test_inverse_seeded_without_a_profile_fails_before_any_api_call(self):
         gen = _Gen()
