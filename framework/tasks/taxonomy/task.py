@@ -356,12 +356,17 @@ class TaxonomyTask(BaseTask):
         The model must reproduce the SHAPE, not translate the names. Sending the
         real identifiers would both leak the source ontology into the benchmark
         and invite the model to recall it rather than build from the structure.
+
+        The anonymised order IS gold["classes"]'s order, because
+        matches_structure maps positionally -- sorting here would silently
+        reject every honest answer whenever gold's classes were not already
+        sorted.
         """
         import json
 
-        order = {name: f"C{i}" for i, name in enumerate(sorted(gold["classes"]))}
+        order = {name: f"C{i}" for i, name in enumerate(gold["classes"])}
         structure = {
-            "classes": [order[c] for c in sorted(gold["classes"])],
+            "classes": [order[c] for c in gold["classes"]],
             "subclass_axioms": sorted([order[c], order[p]]
                                       for c, p in gold["subclass_axioms"]),
         }

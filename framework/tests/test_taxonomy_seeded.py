@@ -119,5 +119,52 @@ class PromptAndVerifyTests(unittest.TestCase):
         self.assertFalse(task.verify_structured_match(gold, reshaped))
 
 
+class RoundTripTests(unittest.TestCase):
+    """A model that answers the prompt perfectly must be ACCEPTED.
+
+    The prompt anonymises classes and the verifier maps positionally, so those
+    two orderings have to agree. Nothing tested them together before, and they
+    disagreed: a perfect answer was rejected whenever gold's classes were not
+    already sorted. The failure mode is silent -- zero artifacts, no error from
+    this code.
+    """
+
+    def _answer(self, prompt):
+        import json
+        struct = json.loads(prompt[prompt.index('{\n  "classes"'):].split("\n\nReturn")[0])
+        mapping = {c: f"M{i}" for i, c in enumerate(struct["classes"])}
+        return {"classes": [mapping[c] for c in struct["classes"]],
+                "subclass_axioms": [[mapping[c], mapping[p]]
+                                    for c, p in struct["subclass_axioms"]]}
+
+    def test_a_perfect_answer_is_accepted(self):
+        task = TaxonomyTask()
+        seed = task.get_seed_pool(_CONFIG, _REAL, "forward", rng=Random(0))[0]
+        gold = task.build_seeded_artifact(seed, "forward", None, _CONFIG, Random(0))
+        prompt = task.build_seeded_generation_prompt(gold)
+        self.assertTrue(task.verify_structured_match(gold, self._answer(prompt)))
+
+    def test_a_perfect_answer_is_accepted_when_gold_is_unsorted(self):
+        # The regression itself. Real seeds arrive sorted today, so only an
+        # explicitly unsorted gold exercises the disagreement.
+        task = TaxonomyTask()
+        gold = {"domain": "d",
+                "classes": ["Food", "Pizza", "Apple"],
+                "subclass_axioms": [["Pizza", "Food"], ["Apple", "Food"]],
+                "source_max_depth": 1}
+        prompt = task.build_seeded_generation_prompt(gold)
+        self.assertTrue(task.verify_structured_match(gold, self._answer(prompt)))
+
+    def test_a_wrong_answer_is_still_rejected(self):
+        # Guards the obvious over-correction: making everything match.
+        task = TaxonomyTask()
+        seed = task.get_seed_pool(_CONFIG, _REAL, "forward", rng=Random(0))[0]
+        gold = task.build_seeded_artifact(seed, "forward", None, _CONFIG, Random(0))
+        prompt = task.build_seeded_generation_prompt(gold)
+        answer = self._answer(prompt)
+        answer["subclass_axioms"] = answer["subclass_axioms"][:-1]   # drop an edge
+        self.assertFalse(task.verify_structured_match(gold, answer))
+
+
 if __name__ == "__main__":
     unittest.main()
