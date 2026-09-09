@@ -836,10 +836,24 @@ class BaseGenerator(ABC):
                 attempt_diagnostics: list[dict] = []
                 while parsed is None and attempts < max_parse_attempts:
                     attempts += 1
-                    raw = self.call_api(build_prompt(feedback))
-                    parse_result = parse(raw)
-                    parsed = parse_result["artifact"]
-                    diagnostic = {"attempt": attempts, **parse_result["diagnostic"]}
+                    failure = None
+                    try:
+                        raw = self.call_api(build_prompt(feedback))
+                        parse_result = parse(raw)
+                        parsed = parse_result["artifact"]
+                        diagnostic = {"attempt": attempts, **parse_result["diagnostic"]}
+                    except Exception as e:
+                        # Every other generation loop turns a per-sample failure into
+                        # a counted skip. This one used to let it propagate, which
+                        # aborted the whole run and discarded every artifact already
+                        # built — and TruncatedResponse makes that the COMMON case,
+                        # not a rare one: a reasoning model that spends its budget on
+                        # chain-of-thought truncates on every long artifact. That is
+                        # the failure docs/taxonomy_induction.md records as the
+                        # blocker on taxonomy's last end-to-end smoke run.
+                        parsed = None
+                        failure = f"{type(e).__name__}: {e}"
+                        diagnostic = {"attempt": attempts, "rejection_reason": failure}
                     provider_diagnostic = getattr(self, "last_response_diagnostic", None)
                     if parsed is None and provider_diagnostic:
                         diagnostic["provider_response"] = provider_diagnostic
@@ -847,8 +861,9 @@ class BaseGenerator(ABC):
                     if parsed is None:
                         reason = diagnostic.get("rejection_reason", "unknown")
                         print(
-                            "[SKIP] structured generation returned invalid "
-                            f"JSON/artifact ({reason})."
+                            "[SKIP] structured generation "
+                            + (f"failed ({reason})." if failure
+                               else f"returned invalid JSON/artifact ({reason}).")
                         )
                     if request_delay > 0:
                         time.sleep(request_delay)
@@ -870,7 +885,24 @@ class BaseGenerator(ABC):
                 if not feedback_enabled:
                     metadata["final_round_selected"] = round_idx
                     break
-                round_info = build_feedback(selected)
+                try:
+                    round_info = build_feedback(selected)
+                except Exception as e:
+                    # The artifact is already parsed, valid and paid for; feedback
+                    # only tries to improve it. Losing the run over a failure in the
+                    # refinement step would discard work that already succeeded.
+                    print(f"[WARN] feedback round {round_idx} failed, keeping the "
+                          f"artifact as generated: {e}", file=sys.stderr, flush=True)
+                    metadata["rounds"].append({
+                        "round": round_idx,
+                        "feedback_informed": feedback is not None,
+                        "parse_attempts": attempts,
+                        "attempts": attempt_diagnostics,
+                        "valid": True,
+                        "feedback_error": f"{type(e).__name__}: {e}",
+                    })
+                    metadata["final_round_selected"] = round_idx
+                    break
                 feedback_result = round_info["feedback"]
                 metadata["rounds"].append({
                     "round": round_idx,
