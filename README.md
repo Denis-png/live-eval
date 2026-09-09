@@ -277,7 +277,7 @@ profile path is `framework/data/profiles/<task>_profile.json`; override per-run 
 |------|----------|------------|
 | GEC  | `corruption` | forward / inverse × seeded / seedless (see table above) |
 | Spam | `class_conditional` | inverse / forward × seeded / seedless; class balance from `class_balance` |
-| Taxonomy | `structured` | profile-driven, seedless structured taxonomy generation; see [docs/taxonomy_induction.md](docs/taxonomy_induction.md) |
+| Taxonomy | `structured` | forward / inverse × seeded / seedless; seeded cells verify generated structure against computed gold; see [docs/taxonomy_induction.md](docs/taxonomy_induction.md) |
 
 ### Calibration (optional, improves fidelity)
 

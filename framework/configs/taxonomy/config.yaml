@@ -56,8 +56,10 @@ task:
 #   sampled, its gold structure is computed exactly (forward keeps the subtree's
 #   own shape; inverse edits it toward a target sampled from the profile), and
 #   the model is asked only to re-verbalise that structure into a new domain.
-#   Output is verified against the gold by isomorphism and discarded on
-#   mismatch, so a bad generation costs a sample and never corrupts a reference.
+#   Output is verified against the gold by an exact positional structure match
+#   (the model is asked for one new name per anonymised class, in order) and
+#   discarded on mismatch, so a bad generation costs a sample and never
+#   corrupts a reference.
 #   forward+seeded needs no profile at all, which makes it the cheapest
 #   end-to-end check this task has.
 generation:

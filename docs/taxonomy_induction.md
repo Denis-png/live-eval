@@ -72,16 +72,22 @@ Taxonomy uses:
 strategy = structured
 ```
 
-Generation is profile-driven and seedless by design. One generated sample is
-one complete synthetic taxonomy, not one class or one edge.
+One generated sample is one complete synthetic taxonomy, not one class or one edge.
 
-Taxonomy generation does not use:
+Taxonomy generation has two modes:
 
-- corruption or error-type semantics
-- real benchmark class names as seeds
-- real benchmark subclass edges as seeds
+- **Seedless** (default): profile-driven generation producing completely synthetic
+  taxonomies. The model receives a structural target sampled from the real profile
+  (inverse mode) or only a domain (forward mode).
+- **Seeded**: the model receives a real benchmark subtree anonymised as `C0, C1, ...`
+  and must re-verbalise it into a new domain. Gold structure is computed exactly
+  (inherited for forward, edited toward a target for inverse) and verified by
+  positional match.
 
-Structural targets are approximate targets, not exact constraints.
+In both modes, generation does not use corruption or error-type semantics. The
+seedless cells do not use real benchmark class names or edges as seeds (generation
+is driven by structural profiles). Structural targets in seedless inverse are
+approximate targets, not exact constraints; seeded inverse uses exact computed targets.
 
 ## Structured Output
 
@@ -273,8 +279,16 @@ its gold structure directly:
 
 The model then receives that structure with every class anonymised as `C0, C1,
 ...` and a target domain, and must return one new class identifier per
-anonymised class with every relation preserved. The response is checked for
-isomorphism against the gold; a mismatch is a counted skip.
+anonymised class with every relation preserved. The response is checked against
+the gold by an exact positional match — the i-th returned name is taken to be
+the i-th anonymised class, and the relabelled edge set must equal gold's
+exactly. A mismatch is a counted skip.
+
+Positional rather than isomorphic on purpose: ontologies are DAGs, and a
+rooted-tree canonicalisation can accept two structurally different graphs, which
+is the one failure this gate exists to prevent. It is also the stronger check —
+it verifies the model preserved THE structure it was handed, not that it
+produced some graph shaped like it.
 
 Ground truth is therefore never parsed from model output. That is deliberate: a
 drifting model loses its sample rather than redefining the reference. It also
