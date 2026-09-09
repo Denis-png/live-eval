@@ -72,25 +72,56 @@ class SampleSubtreesTests(unittest.TestCase):
 
 class MultiParentTests(unittest.TestCase):
     def test_no_class_appears_twice(self):
-        for sub in sample_subtrees(_DAG_CLASSES, _DAG_AXIOMS, min_classes=1,
-                                   rng=Random(0)):
+        subs = sample_subtrees(_DAG_CLASSES, _DAG_AXIOMS, min_classes=1,
+                               rng=Random(0))
+        self.assertTrue(subs)
+        for sub in subs:
             self.assertEqual(len(sub["classes"]), len(set(sub["classes"])),
                              f"duplicate class in {sub['root']}: {sub['classes']}")
 
-    def test_recorded_depth_matches_the_longest_path_in_the_returned_axioms(self):
-        from framework.tasks.taxonomy.graph_ops import _depth_of
-        for sub in sample_subtrees(_DAG_CLASSES, _DAG_AXIOMS, min_classes=1,
-                                   rng=Random(0)):
+    def test_recorded_depth_matches_an_independently_computed_longest_path(self):
+        # Brute force, deliberately NOT _depth_of: checking a memoised DP against
+        # itself can only catch a wiring slip, never a wrong algorithm.
+        def longest(classes, axioms):
+            parents = {}
+            for child, parent in axioms:
+                parents.setdefault(child, []).append(parent)
+
+            def walk(node, seen):
+                if node in seen:
+                    return 0
+                return max((1 + walk(p, seen | {node})
+                            for p in parents.get(node, [])), default=0)
+
+            return max((walk(c, frozenset()) for c in classes), default=0)
+
+        subs = sample_subtrees(_DAG_CLASSES, _DAG_AXIOMS, min_classes=1, rng=Random(0))
+        self.assertTrue(subs)
+        for sub in subs:
             self.assertEqual(sub["max_depth"],
-                             _depth_of(sub["classes"], sub["subclass_axioms"]))
+                             longest(sub["classes"], sub["subclass_axioms"]))
 
     def test_every_subtree_stays_closed_on_a_dag(self):
-        for sub in sample_subtrees(_DAG_CLASSES, _DAG_AXIOMS, min_classes=1,
-                                   rng=Random(0)):
+        subs = sample_subtrees(_DAG_CLASSES, _DAG_AXIOMS, min_classes=1,
+                               rng=Random(0))
+        self.assertTrue(subs)
+        for sub in subs:
             names = set(sub["classes"])
             for child, parent in sub["subclass_axioms"]:
                 self.assertIn(child, names)
                 self.assertIn(parent, names)
+
+    def test_induced_depth_may_exceed_the_discovery_radius_on_a_dag(self):
+        # Documented, deliberate: max_depth bounds DISCOVERY, and the induced
+        # subgraph keeps every axiom between kept classes. X is discovered at
+        # depth 1 via R, but P2->X survives because P2 is kept independently.
+        classes = ["R", "P1", "P2", "X"]
+        axioms = [["P1", "R"], ["P2", "P1"], ["X", "P2"], ["X", "R"]]
+        subs = sample_subtrees(classes, axioms, max_depth=2, min_classes=1,
+                               rng=Random(0))
+        root_r = [s for s in subs if s["root"] == "R"]
+        self.assertTrue(root_r, "expected an R-rooted subtree")
+        self.assertEqual(root_r[0]["max_depth"], 3)
 
 
 if __name__ == "__main__":

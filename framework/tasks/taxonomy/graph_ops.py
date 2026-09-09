@@ -55,6 +55,15 @@ def sample_subtrees(classes, axioms, *, max_depth: int = 4,
     a shallow ontology would have the same depth, seed choice would carry no
     information, and the seeded cells would have no control input at all.
 
+    `max_depth` bounds how far the traversal DISCOVERS from the root, not the
+    depth of the graph it returns. The result is an INDUCED subgraph — every
+    axiom between kept classes is retained — so on a DAG a class discovered via
+    a short path may also sit on a longer one, and the returned "max_depth"
+    field (the true depth of the returned axioms) can exceed this parameter.
+    Dropping those edges to force the bound would make the seed stop being a
+    subgraph of the real ontology, which is the worse failure: these seeds exist
+    to perturb a REAL artifact.
+
     `rng` is accepted for signature compatibility; enumeration is exhaustive and
     ordered, so the pool does not depend on it.
 
