@@ -30,7 +30,10 @@ generation:
   provider: "openrouter"
   model: "deepseek/deepseek-v4-flash"
   temperature: 0.9
-  max_tokens: 512
+  max_tokens: 4096            # HARD CAP on the response, honoured by every provider.
+                             # A tweet rewrite is short, but a reasoning model spends
+                             # its budget on <think> before emitting any of it: at 512
+                             # it returns finish_reason=length and the sample is lost.
   num_runs: 3
   sample_size: 150
   timeout: 300
