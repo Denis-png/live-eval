@@ -380,7 +380,41 @@ class TaxonomyTask(BaseTask):
         return [self._eval_sample(row) for row in synthetic]
 
     def get_real_eval_samples(self, config: dict, real_data: list[dict]) -> list[dict]:
-        return [self._eval_sample(row) for row in real_data]
+        """The real side of the comparison, drawn the way this cell's synthetic
+        side is drawn.
+
+        The reference used to be the whole ontology, as one item, for every
+        cell. Seeded cells evaluate on subtrees of it, and F1 on a small graph
+        is far easier than on a large one, so a seeded benchmark looked easier
+        than the real one purely because of size -- with n=1 on the real side.
+        The same reference feeds the structural fidelity profile, so the size
+        confound hit that comparison too.
+
+        Seeded: the real subtrees of the SAME seed pool generation draws from,
+        with their real names and domain. forward+seeded is those subtrees
+        renamed, so the two sides differ only in vocabulary. The pool is used
+        exactly as it is -- never edited -- because the real side is real data.
+
+        Seedless: the whole ontology, which is what seedless generation targets.
+        """
+        # Imported here, not at module level: a task must not load the pipeline
+        # merely to be imported, and get_model defers its imports the same way.
+        from framework.pipeline import resolve_mode, resolve_seedless
+
+        strategy = self.get_generation_strategy()
+        if resolve_seedless(config, strategy):
+            return [self._eval_sample(row) for row in real_data]
+        mode = resolve_mode(config, strategy)
+        samples: list[dict] = []
+        for row in real_data:                    # per row, so each keeps its domain
+            for subtree in self.get_seed_pool(config, [row], mode):
+                samples.append(self._eval_sample({
+                    "ontology_id": row.get("ontology_id"),
+                    "domain": row["domain"],
+                    "classes": subtree["classes"],
+                    "subclass_axioms": subtree["subclass_axioms"],
+                }))
+        return samples
 
     def build_fidelity_profile(self, rows: list[dict]) -> dict:
         """Profile taxonomy artifacts with the same structural profiler for all sides.
