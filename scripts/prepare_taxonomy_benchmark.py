@@ -1,8 +1,9 @@
 """Prepare normalized taxonomy JSONL records from OWL/RDF ontologies.
 
 This utility keeps ontology parsing outside the framework's generic runtime
-loader. It extracts named classes and direct named rdfs:subClassOf axioms,
-ignoring anonymous restriction nodes for this MVP.
+loader. It extracts named classes, direct named rdfs:subClassOf axioms, and
+the parents named by owl:equivalentClass intersection definitions, ignoring
+anonymous restriction nodes.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from typing import Any
 from urllib.parse import unquote
 
 from rdflib import Graph, URIRef
+from rdflib.collection import Collection
 from rdflib.namespace import OWL, RDF, RDFS
 
 _NON_NAME_CHARS = re.compile(r"[^A-Za-z0-9_]+")
@@ -84,6 +86,78 @@ def _direct_named_subclass_axioms(graph: Graph, ids: dict[URIRef, str]) -> set[t
     return axioms
 
 
+def _definitional_parents(graph: Graph, ids: dict[URIRef, str]) -> set[tuple[str, str]]:
+    """Parents a class's own definition states: A ≡ B ⊓ X entails A ⊑ B.
+
+    Ontologies routinely define classes rather than subclass them --
+    `VegetarianPizza ≡ Pizza ⊓ ¬∃hasTopping.MeatTopping` -- and reading only
+    rdfs:subClassOf leaves such a class with no parent at all, so a model that
+    correctly predicts VegetarianPizza -> Pizza is scored as wrong.
+
+    Only the NAMED members of an owl:intersectionOf are taken. Excluded:
+      * anonymous members (restrictions, complements): not named classes;
+      * owl:unionOf: the reverse direction -- A ≡ B ⊔ C means B ⊑ A;
+      * owl:oneOf: an enumeration of individuals, with no named superclass;
+      * named ≡ named: A ⊑ B and B ⊑ A, a two-cycle.
+    owl:equivalentClass is symmetric, so the named class may sit on either side.
+    """
+    edges: set[tuple[str, str]] = set()
+    for left, _, right in graph.triples((None, OWL.equivalentClass, None)):
+        for named, expr in ((left, right), (right, left)):
+            if not isinstance(named, URIRef) or named not in ids:
+                continue
+            if isinstance(expr, URIRef):
+                continue                                  # named ≡ named
+            head = graph.value(expr, OWL.intersectionOf)
+            if head is None:
+                continue                                  # union, oneOf, complement
+            for member in Collection(graph, head):
+                if isinstance(member, URIRef) and member in ids:
+                    child, parent = ids[named], ids[member]
+                    if child != parent:
+                        edges.add((child, parent))
+    return edges
+
+
+def _merge_without_cycles(
+    base: set[tuple[str, str]], extra: set[tuple[str, str]]
+) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    """Add each edge of `extra` to `base` unless it would close a cycle.
+
+    Returns (kept, skipped). An edge already in `base` is neither: it was
+    asserted, so it is not a recovered definitional edge. A cyclic record would
+    be rejected downstream, so an edge that would close one is skipped and
+    reported instead.
+    """
+    parents_of: dict[str, set[str]] = {}
+    for child, parent in base:
+        parents_of.setdefault(child, set()).add(parent)
+
+    def climbs_to(start: str, target: str) -> bool:
+        seen, stack = set(), [start]
+        while stack:
+            node = stack.pop()
+            if node == target:
+                return True
+            if node in seen:
+                continue
+            seen.add(node)
+            stack.extend(parents_of.get(node, ()))
+        return False
+
+    kept: set[tuple[str, str]] = set()
+    skipped: set[tuple[str, str]] = set()
+    for child, parent in sorted(extra):
+        if (child, parent) in base:
+            continue
+        if climbs_to(parent, child):       # parent already sits below child
+            skipped.add((child, parent))
+            continue
+        kept.add((child, parent))
+        parents_of.setdefault(child, set()).add(parent)
+    return kept, skipped
+
+
 def taxonomy_record_from_graph(
     graph: Graph,
     ontology_id: str,
@@ -91,15 +165,21 @@ def taxonomy_record_from_graph(
 ) -> dict[str, Any]:
     """Convert an RDF graph to one normalized taxonomy benchmark record.
 
-    The output preserves multiple inheritance and includes only asserted direct
-    named subclass axioms. It does not infer transitive subclass relations.
+    The output preserves multiple inheritance. Its subclass axioms are the
+    asserted direct named rdfs:subClassOf edges PLUS the parents a class's own
+    owl:equivalentClass definition names (see _definitional_parents), which are
+    listed separately in metadata so the gold's provenance stays visible. It
+    does not infer transitive subclass relations.
     """
     class_uris = _named_class_uris(graph)
     if not class_uris:
         raise ValueError("No usable named classes found in ontology.")
 
     ids = _class_ids(class_uris)
-    axioms = _direct_named_subclass_axioms(graph, ids)
+    asserted = _direct_named_subclass_axioms(graph, ids)
+    definitional, skipped = _merge_without_cycles(
+        asserted, _definitional_parents(graph, ids))
+    axioms = asserted | definitional
     classes = sorted(ids.values())
     class_uri_map = {
         class_id: str(uri)
@@ -113,6 +193,8 @@ def taxonomy_record_from_graph(
         "subclass_axioms": [[child, parent] for child, parent in sorted(axioms)],
         "metadata": {
             "class_uri_map": class_uri_map,
+            "definitional_axioms": [[c, p] for c, p in sorted(definitional)],
+            "skipped_definitional_axioms": [[c, p] for c, p in sorted(skipped)],
         },
     }
 
