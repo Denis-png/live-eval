@@ -338,6 +338,14 @@ from the archive -- each item in `real_sample.json` carries its `pool_index`, an
 each generated record carries the `source_pool_index` of the subtree it
 re-verbalises -- but per-run paired scoring is not implemented.
 
+The pool's subtrees overlap: they are one ontology reweighted, not independent
+taxonomies. On the current Pizza benchmark the 10 subtrees cover all 98 distinct
+gold edges as 327 edge instances -- 92 of the 98 edges sit in more than one
+subtree, 51 of them in four. So "n = 10" overstates independence. It does not
+bias the comparison, since the synthetic side is drawn from the same subtrees
+and shares the nesting, but it does shrink the effective n: ten overlapping
+subtrees carry less independent evidence than ten separate taxonomies would.
+
 Micro-averaged scores are the headline. `diagnostics` also carries
 `macro_precision`, `macro_recall` and `macro_f1` -- each taxonomy's own score,
 averaged -- so a report can check whether its conclusions depend on weighting
