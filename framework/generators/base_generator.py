@@ -1,3 +1,4 @@
+import json
 import random
 import re
 import sys
@@ -62,6 +63,51 @@ def _strip_reasoning(raw: str) -> str:
     (the model opened a reasoning block, never closed it, and glued the answer on)
     is left intact — the tag parser recovers the answer from it."""
     return _THINK_BLOCK_RE.sub("", raw or "").strip()
+
+
+def extract_json_object(text) -> tuple[dict | None, str | None]:
+    """Pull a model's JSON answer out of a response that may carry reasoning.
+
+    Returns (object, None), or (None, reason) with reason one of
+    "non_string_response", "empty_response", "malformed_json".
+
+    A reasoning model does not return bare JSON. It may wrap its chain of thought
+    in <think>...</think>, or open <think> and never close it, running straight
+    into a fenced answer. Both taxonomy parsers -- generation AND evaluation --
+    once called json.loads on the whole response and so discarded every correct
+    answer such a model gave. They share this one extractor now, so they cannot
+    drift apart again.
+
+    Closed reasoning blocks are stripped, then the LAST complete top-level JSON
+    object is taken: the final answer follows the reasoning, and reasoning often
+    contains a draft that must not become the answer. Nothing is invented.
+    """
+    if not isinstance(text, str):
+        return None, "non_string_response"
+    stripped = _strip_reasoning(text)
+    if not stripped:
+        return None, "empty_response"
+    try:
+        payload = json.loads(stripped)
+        if isinstance(payload, dict):
+            return payload, None
+    except json.JSONDecodeError:
+        pass
+    # Walk top-level objects left to right, jumping past each one decoded, so a
+    # dict NESTED inside an answer is never mistaken for the answer itself.
+    decoder = json.JSONDecoder()
+    last = None
+    i = stripped.find("{")
+    while i != -1:
+        try:
+            obj, end = decoder.raw_decode(stripped, i)
+        except json.JSONDecodeError:
+            i = stripped.find("{", i + 1)
+            continue
+        if isinstance(obj, dict):
+            last = obj
+        i = stripped.find("{", end)
+    return (last, None) if last is not None else (None, "malformed_json")
 
 
 def _is_reasoning_dump(text: str) -> bool:

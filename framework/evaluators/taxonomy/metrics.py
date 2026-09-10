@@ -7,8 +7,9 @@ reasoner-based equivalence.
 
 from __future__ import annotations
 
-import json
 from typing import Any, Iterable
+
+from framework.generators.base_generator import extract_json_object
 
 Relation = tuple[str, str]
 
@@ -59,10 +60,11 @@ def parse_prediction_relations(
     raw_relations: list[Any] = []
 
     if isinstance(prediction, str):
-        try:
-            payload = json.loads(prediction)
-        except json.JSONDecodeError:
-            payload = None
+        # A reasoning model opens <think>, often never closes it, and ends on a
+        # fenced answer; json.loads on the whole response discarded every correct
+        # prediction such a model made, scoring it 0.0. Shared with generation.
+        payload, reason = extract_json_object(prediction)
+        if payload is None:
             malformed = True
     elif isinstance(prediction, dict):
         payload = prediction

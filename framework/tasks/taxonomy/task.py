@@ -21,7 +21,7 @@ from framework.evaluators.taxonomy.metrics import (
     normalize_relation_set,
 )
 from framework.tasks.base_task import BaseTask
-from framework.generators.base_generator import _strip_reasoning
+from framework.generators.base_generator import extract_json_object
 from framework.tasks.taxonomy.graph_ops import (
     EDIT_OPERATORS, matches_structure, sample_subtrees,
 )
@@ -60,44 +60,10 @@ def _raw_preview(text: Any) -> str | None:
 def _extract_json_object(text: str) -> tuple[dict[str, Any] | None, str | None]:
     """Parse the model's JSON answer out of a response that may carry reasoning.
 
-    A reasoning model does not return bare JSON. It may wrap its chain of thought
-    in <think>...</think>, or open <think> and NEVER close it, running the
-    reasoning straight into a fenced answer. The first live taxonomy run rejected
-    every sample for exactly that reason: json.loads on the whole response failed
-    even though a correct answer sat at the end of it.
-
-    So closed reasoning blocks are stripped with the same helper the sentence
-    parsers use, and the LAST complete top-level JSON object in what remains is
-    taken. Last, because the final answer follows the reasoning, and reasoning
-    often contains a draft that must never become the artifact. Nothing is
-    invented: a response with no parseable object is still malformed_json.
+    Delegates to the extractor the evaluation parser also uses, so generation and
+    evaluation read a reasoning model's output identically.
     """
-    if not isinstance(text, str):
-        return None, "non_string_response"
-    stripped = _strip_reasoning(text)
-    if not stripped:
-        return None, "empty_response"
-    try:
-        payload = json.loads(stripped)
-        if isinstance(payload, dict):
-            return payload, None
-    except json.JSONDecodeError:
-        pass
-    # Walk top-level objects left to right, jumping past each one decoded, so a
-    # dict NESTED inside an answer is never mistaken for the answer itself.
-    decoder = json.JSONDecoder()
-    last = None
-    i = stripped.find("{")
-    while i != -1:
-        try:
-            obj, end = decoder.raw_decode(stripped, i)
-        except json.JSONDecodeError:
-            i = stripped.find("{", i + 1)
-            continue
-        if isinstance(obj, dict):
-            last = obj
-        i = stripped.find("{", end)
-    return (last, None) if last is not None else (None, "malformed_json")
+    return extract_json_object(text)
 
 
 def _has_cycle(classes: set[str], edges: set[tuple[str, str]]) -> bool:
