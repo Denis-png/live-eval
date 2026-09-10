@@ -1,3 +1,5 @@
+from framework.evaluators.prf import precision_recall_f
+
 from ._errant_shared import annotate_results
 
 
@@ -27,10 +29,7 @@ def compute_errant(results: list[dict]) -> dict:
         fp += len(pred_set - ref_set)
         fn += len(ref_set  - pred_set)
 
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-    recall    = tp / (tp + fn) if (tp + fn) > 0 else 0
-    f05 = (1.25 * precision * recall) / (0.25 * precision + recall) \
-          if (precision + recall) > 0 else 0
+    precision, recall, f05 = precision_recall_f(tp, fp, fn, beta=0.5)
 
     return {
         "precision": round(precision, 4),
