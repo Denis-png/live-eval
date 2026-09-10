@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from typing import Any
 
 from framework.evaluators.taxonomy.relations import parse_prediction_relations
@@ -77,12 +78,24 @@ class TaxonomyLLMModel(BaseModel):
             parsed = parse_prediction_relations(raw_output, payload["classes"])
             return self._prediction_payload(raw_output, parsed)
         except Exception as exc:
+            # A truncation, timeout or API error is a HARNESS failure: the model
+            # never gave an answer. It used to be recorded as `malformed` -- the
+            # same flag as a model that answered with garbage -- and so a model
+            # that ran out of tokens silently scored 0.000 with no visible cause.
+            # It is caught (one bad item must not stop every other model being
+            # evaluated) but marked `failed`, counted separately, and announced.
+            print(f"[WARN] taxonomy model {self.model_name!r} produced no answer "
+                  f"({type(exc).__name__}: {exc}); scored as an empty prediction "
+                  "and counted in failed_prediction_count.",
+                  file=sys.stderr, flush=True)
             return {
                 "subclass_axioms": [],
                 "raw_output": "",
                 "diagnostics": {
-                    "malformed": True,
+                    "failed": True,
+                    "malformed": False,
                     "error": str(exc),
+                    "error_type": type(exc).__name__,
                     "invalid_relation_count": 0,
                     "unknown_class_relation_count": 0,
                     "malformed_relation_count": 0,

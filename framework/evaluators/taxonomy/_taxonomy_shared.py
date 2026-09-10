@@ -46,7 +46,18 @@ def _prediction_diagnostics(prediction: Any) -> dict[str, Any]:
 
 
 def score_taxonomy_result(result: dict[str, Any]) -> dict[str, Any]:
-    """Return exact precision/recall/F1 and diagnostics for one result row."""
+    """Return exact precision/recall/F1 and diagnostics for one result row.
+
+    Diagnostics prefer what the MODEL supplied over what this re-parse finds,
+    because only the model saw its raw response. A task model hands over the
+    relations it has already cleaned, so malformed relations are gone before the
+    scorer ever sees them; re-deriving that count here would always say zero.
+
+    `prediction_failed` and `malformed_prediction` are kept apart on purpose. A
+    failure means the model never answered (truncation, timeout, API error); a
+    malformed prediction means it answered with something unreadable. Both score
+    as an empty prediction, but only one of them is the model's fault.
+    """
     classes = result.get("classes") or []
     gold = normalize_relation_set(result.get("subclass_axioms") or [])
     prediction = _prediction_payload(result)
@@ -80,6 +91,7 @@ def score_taxonomy_result(result: dict[str, Any]) -> dict[str, Any]:
         "malformed_prediction": (
             parsed["malformed"] or bool(supplied_diagnostics.get("malformed"))
         ),
+        "prediction_failed": bool(supplied_diagnostics.get("failed")),
         "malformed_relation_count": supplied_diagnostics.get(
             "malformed_relation_count", parsed["malformed_relation_count"]
         ),
@@ -114,6 +126,11 @@ def _score(results: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "malformed_prediction_count": sum(
             1 for row in scored if row["malformed_prediction"]
+        ),
+        # Harness failures: the model never answered. Non-zero means the scores
+        # above are depressed by the evaluation run, not by the model.
+        "failed_prediction_count": sum(
+            1 for row in scored if row["prediction_failed"]
         ),
         "malformed_relation_count": malformed_relations,
     }
