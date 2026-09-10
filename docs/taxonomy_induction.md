@@ -327,9 +327,16 @@ make it look easier purely because of size. The same reference also supplies the
 real side of the structural fidelity profile, so it keeps that comparison
 like-for-like too.
 
-`forward+seeded` is the real subtrees with only the names and domain changed. Its
-gap against the matched reference therefore measures how much a model relies on
-recognising names rather than inducing structure.
+Per item, a `forward+seeded` synthetic item is one pool subtree's structure with
+only the names and domain changed. Per session the two sides are not paired: the
+real side is the whole pool, scored once, while each run's synthetic side is the
+subtrees that run drew and that passed verification. Verification drops the
+largest subtrees most often, and they dominate micro-averaged scores. A seeded
+session's gap therefore mixes the change of vocabulary with draw and verification
+attrition; it does not measure name reliance alone. The pairing can be recovered
+from the archive -- each item in `real_sample.json` carries its `pool_index`, and
+each generated record carries the `source_pool_index` of the subtree it
+re-verbalises -- but per-run paired scoring is not implemented.
 
 Micro-averaged scores are the headline. `diagnostics` also carries
 `macro_precision`, `macro_recall` and `macro_f1` -- each taxonomy's own score,

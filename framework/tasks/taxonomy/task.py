@@ -407,9 +407,17 @@ class TaxonomyTask(BaseTask):
         confound hit that comparison too.
 
         Seeded: the real subtrees of the SAME seed pool generation draws from,
-        with their real names and domain. forward+seeded is those subtrees
-        renamed, so the two sides differ only in vocabulary. The pool is used
-        exactly as it is -- never edited -- because the real side is real data.
+        with their real names and domain. The pool is used exactly as it is --
+        never edited -- because the real side is real data.
+
+        Per ITEM, a forward+seeded synthetic item is one pool subtree's
+        structure under new names. Per SESSION the sides are not paired: the
+        real side is the whole pool, scored once, while each run's synthetic
+        side is what that run drew and what passed verification. So a seeded
+        session's gap mixes the change of vocabulary with draw and verification
+        attrition. The pairing is recoverable from the archive -- each real item
+        carries `pool_index`, each accepted record the `source_pool_index` of its
+        subtree -- but per-run paired scoring is not implemented.
 
         Seedless: the whole ontology, which is what seedless generation targets.
         """
