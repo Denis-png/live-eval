@@ -55,8 +55,11 @@ class RecoveredParentTests(unittest.TestCase):
         self.assertIn(("VegPizza", "Pizza"), _edges(_record(_DEFINED)))
 
     def test_a_restriction_member_never_becomes_a_parent(self):
-        flat = {v for edge in _edges(_record(_DEFINED)) for v in edge}
-        self.assertNotIn("Restriction", flat)
+        # Topping is the restriction's FILLER (∃has.Topping) -- the class a
+        # wrong implementation would take. VegPizza ⊑ ∃has.Topping does not
+        # make VegPizza a Topping. (This used to check that "Restriction" was
+        # not a class name, which it never is, so it could not fail.)
+        self.assertNotIn(("VegPizza", "Topping"), _edges(_record(_DEFINED)))
 
     def test_recovered_edges_are_listed_as_provenance(self):
         record = _record(_DEFINED)
@@ -99,10 +102,18 @@ class ExcludedDefinitionTests(unittest.TestCase):
         self.assertNotIn(("Dish", "Pasta"), _edges(record))
 
     def test_an_enumeration_has_no_named_parent(self):
+        # Italy and France are declared classes so that a wrong reading of the
+        # oneOf list WOULD emit an edge: undeclared, they are not in the class
+        # index, and even an implementation reading oneOf members as parents
+        # emitted nothing -- the test could not fail.
         record = _record("""\
+            ex:Italy a owl:Class .
+            ex:France a owl:Class .
             ex:Country a owl:Class ;
                 owl:equivalentClass [ a owl:Class ; owl:oneOf ( ex:Italy ex:France ) ] .
         """)
+        self.assertNotIn(("Country", "Italy"), _edges(record))
+        self.assertNotIn(("Country", "France"), _edges(record))
         self.assertEqual(record["metadata"]["definitional_axioms"], [])
 
     def test_a_named_to_named_equivalence_adds_no_edge(self):
