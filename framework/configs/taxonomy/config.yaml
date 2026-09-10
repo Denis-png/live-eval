@@ -128,7 +128,12 @@ task_models:
     provider: "openrouter"
     api_key: "${OPENROUTER_API_KEY}"
     temperature: 0
-    max_tokens: 8192
+    max_tokens: 32768            # A CAP, not a spend: you pay for tokens used. The real
+                                 # baseline asks for the whole ontology in one answer,
+                                 # the largest single output in the system. At 8192 a
+                                 # reasoning model truncated on Pizza's 99 classes, the
+                                 # error was caught as a malformed prediction, and it
+                                 # scored 0.000. At 32768 it completes: F1 0.804.
     timeout: 600
     max_retries: 2
 
