@@ -298,9 +298,37 @@ model under test cannot score by recalling a canonical tutorial ontology.
 Seeded cells run no feedback loop — the gold is exact, so there is nothing to
 iterate toward.
 
+## What the Real Baseline Is
+
+Each session compares its synthetic benchmark against a real reference drawn the
+same way:
+
+| cell | real reference |
+|---|---|
+| seeded (`seedless: false`) | the real subtrees of the same seed pool, unedited |
+| seedless | the whole ontology |
+
+A seeded benchmark is made of subtrees, and precision and recall on a small graph
+are far higher than on a large one. Comparing it against the whole ontology would
+make it look easier purely because of size. The same reference also supplies the
+real side of the structural fidelity profile, so it keeps that comparison
+like-for-like too.
+
+`forward+seeded` is the real subtrees with only the names and domain changed. Its
+gap against the matched reference therefore measures how much a model relies on
+recognising names rather than inducing structure.
+
+Micro-averaged scores are the headline. `diagnostics` also carries
+`macro_precision`, `macro_recall` and `macro_f1` -- each taxonomy's own score,
+averaged -- so a report can check whether its conclusions depend on weighting
+large taxonomies more heavily than small ones.
+
 ## Current MVP Limitations
 
-- asserted direct named subclass relations only
+- direct named subclass relations only: asserted `rdfs:subClassOf` edges plus the
+  named conjuncts of `owl:equivalentClass` intersection definitions (listed in
+  each record's `metadata.definitional_axioms`); no union, enumeration or
+  complement is read as a parent
 - anonymous OWL restrictions excluded
 - no ontology reasoner or classification
 - no transitive evaluation
