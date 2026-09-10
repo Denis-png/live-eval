@@ -84,10 +84,13 @@ generation:
   max_retries: 2
   request_delay: 0.0
 
-  # Structural feedback loop — defaults live in taxonomy.json; override here.
-  # Only meaningful under mode: inverse.
+  # Structural feedback loop. Deliberately NOT enabled here: taxonomy.json already
+  # defaults it on, and the loop only runs in inverse+seedless — the one cell with
+  # an imposed target it can iterate toward. Writing `enabled: true` into THIS
+  # file turns that harmless default into an explicit request, which forward and
+  # seeded cells correctly refuse; the same config could then only ever run one
+  # of the four cells. Tune rounds here; leave `enabled` to the default.
   feedback:
-    enabled: true
     max_rounds: 1
 
   # Seeded cells only. Subtrees are sampled from the real ontology: max_depth

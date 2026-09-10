@@ -58,3 +58,51 @@ class ShippedConfigTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TaxonomyCellsRunFromTheShippedConfigTests(unittest.TestCase):
+    """Every taxonomy cell must run from the one shipped config, by CLI flags alone.
+
+    The config once set `feedback.enabled: true` explicitly. taxonomy.json already
+    defaults it on, and the guards deliberately tolerate that default while
+    refusing an EXPLICIT request in a cell with no imposed target. So writing it
+    into the run config made forward+seeded, forward+seedless and inverse+seeded
+    all refuse to start — the config validated, and only one of four cells ran.
+    validate_config cannot see this; only dispatching a cell can.
+    """
+
+    def test_no_cell_is_refused_over_the_feedback_loop(self):
+        import yaml
+        from framework import pipeline
+        from framework.generators.base_generator import BaseGenerator
+        from framework.main import _expand_env_vars
+        from framework.tasks.taxonomy.task import TaxonomyTask
+
+        class _Refuse(BaseGenerator):
+            def call_api(self, prompt):
+                return "{}"
+
+        base = _expand_env_vars(yaml.safe_load(open("framework/configs/taxonomy/config.yaml")))
+        real = [{"domain": "d",
+                 "classes": ["A", "B", "C", "D", "E", "F"],
+                 "subclass_axioms": [["B", "A"], ["C", "A"], ["D", "B"],
+                                     ["E", "B"], ["F", "C"]]}]
+        profile = {"taxonomies": [{"domain": "d", "n_classes": 6, "max_depth": 2,
+                                   "depth_distribution": {"0": .2, "1": .4, "2": .4}}]}
+        for mode in ("forward", "inverse"):
+            for seedless in (False, True):
+                with self.subTest(mode=mode, seedless=seedless):
+                    cfg = dict(base)
+                    cfg["generation"] = {**base["generation"], "mode": mode,
+                                         "seedless": seedless, "sample_size": 1,
+                                         "seed_pool": {"max_depth": 4, "min_classes": 3}}
+                    try:
+                        pipeline._run_generation(_Refuse(), TaxonomyTask(), cfg, real,
+                                                 None, None, None, profile=profile)
+                    except RuntimeError as e:
+                        # "0 usable samples" is expected from a model returning
+                        # "{}" — it means the cell DISPATCHED. A feedback refusal
+                        # means it never started.
+                        self.assertNotIn("feedback", str(e).lower(),
+                                         f"{mode}+{'seedless' if seedless else 'seeded'} "
+                                         f"refused to start: {e}")
