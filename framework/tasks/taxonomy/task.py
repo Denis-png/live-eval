@@ -136,9 +136,15 @@ class TaxonomyTask(BaseTask):
         if model_type == "llm":
             from framework.models.taxonomy import TaxonomyLLMModel
             return TaxonomyLLMModel(merged)
+        if model_type == "lexical":
+            from framework.models.taxonomy import LexicalHeadMatchModel
+            return LexicalHeadMatchModel(merged)
+        if model_type == "star":
+            from framework.models.taxonomy import StarModel
+            return StarModel(merged)
         raise ValueError(
             f"Unsupported taxonomy model type: '{model_type}'. "
-            "Supported MVP type: llm."
+            "Supported types: llm, lexical, star."
         )
 
     def parse_row(self, row: dict) -> dict | None:

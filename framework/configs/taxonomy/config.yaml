@@ -104,7 +104,22 @@ generation:
 # ── Evaluated models ────────────────────────────────────────────────────────
 # The model under test receives {domain, classes} and must predict the direct
 # subclass axioms. Gold axioms are never in its prompt.
+#
+#   lexical — parent = the class whose name is its longest proper token-suffix
+#             (VegetarianPizza -> Pizza). A cheap strong baseline, and a control:
+#             it reads only names, so it cannot MEMORISE a canonical ontology the
+#             way an LLM can. A gap that opens for the LLMs but not for it points
+#             at recall rather than induction.
+#   star    — every class under one root chosen from names alone. The standard
+#             floor: how much F1 is available for imposing no structure at all.
+#
+# Both are deterministic and free. minimax-m3 is ALSO the generation model above,
+# so it evaluates benchmarks its own family wrote — report it separately.
 task_models:
+  - name: "lexical"
+    type: "lexical"
+  - name: "star"
+    type: "star"
   - name: "minimax-m3"
     type: "llm"
     provider: "openrouter"
