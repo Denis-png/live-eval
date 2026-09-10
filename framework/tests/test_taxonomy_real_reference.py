@@ -85,8 +85,15 @@ class MatchedReferenceTests(unittest.TestCase):
         self.assertEqual(len(ref), 1)
 
     def test_no_gold_reaches_the_model_input(self):
+        # Both the model_input dict and the serialised `text`: the text is what
+        # model.predict is actually handed.
         for sample in self.task.get_real_eval_samples(_cfg(seedless=False), _REAL):
             self.assertEqual(set(sample["model_input"]), {"domain", "classes"})
+            self.assertEqual(set(json.loads(sample["text"])), {"domain", "classes"})
+            self.assertNotIn("subclass", sample["text"])
+            self.assertTrue(sample["subclass_axioms"])
+            for child, parent in sample["subclass_axioms"]:
+                self.assertNotIn(json.dumps([child, parent]), sample["text"])
 
     def test_each_real_subtree_carries_its_pool_index(self):
         # So real_sample.json records which pool subtree each real item is, and
