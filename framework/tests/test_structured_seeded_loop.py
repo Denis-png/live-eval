@@ -91,6 +91,14 @@ class SeededLoopTests(unittest.TestCase):
         out, _ = _run(_Gen())
         self.assertEqual(out[0]["source_max_depth"], 1)
 
+    def test_the_source_pool_index_survives_onto_the_record(self):
+        # Provenance again: the index pairs each accepted record with the real
+        # subtree it re-verbalises, so pairing is recoverable from the archive
+        # even after verification drops some golds.
+        golds = [{**gold, "source_pool_index": i} for i, gold in enumerate(_GOLDS)]
+        out, _ = _run(_Gen({2: TruncatedResponse("truncated")}), golds=golds)
+        self.assertEqual([record["source_pool_index"] for record in out], [0, 2])
+
     def test_the_record_carries_exactly_the_contracted_keys(self):
         # Was an assertNotIn("generation_feedback", ...) against a fixture that
         # never contains it and a loop that never adds it -- it could not fail,
@@ -99,12 +107,14 @@ class SeededLoopTests(unittest.TestCase):
         # gold's provenance, plus the parse diagnostics. Seeded cells run no
         # feedback loop (gold is exact, so there is nothing to iterate toward),
         # so ANY extra key here is either an unannounced schema change or the
-        # loop generate_structured_seeded exists to not run.
+        # loop generate_structured_seeded exists to not run. source_pool_index
+        # was such an announced change: gold's integer pool index, carried so
+        # a record can be paired with its real subtree.
         out, _ = _run(_Gen())
         self.assertEqual(
             set(out[0]),
             set(_parse_ok(None)["artifact"])
-            | {"domain", "source_max_depth", "seeded_diagnostics"},
+            | {"domain", "source_max_depth", "source_pool_index", "seeded_diagnostics"},
         )
         self.assertEqual(out[0]["seeded_diagnostics"], {"attempts": [{"attempt": 1}]})
 

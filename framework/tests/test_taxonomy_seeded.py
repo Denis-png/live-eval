@@ -35,6 +35,14 @@ class ContractTests(unittest.TestCase):
             BaseTask.build_seeded_artifact(_Bare(), {}, "forward", None, _CONFIG, Random(0))
 
 
+_SECOND = {
+    "ontology_id": "wine",
+    "domain": "wine",
+    "classes": ["Wine", "Red", "White", "Merlot"],
+    "subclass_axioms": [["Red", "Wine"], ["White", "Wine"], ["Merlot", "Red"]],
+}
+
+
 class SeedPoolTests(unittest.TestCase):
     def test_the_pool_holds_subtrees_with_a_recorded_depth(self):
         pool = TaxonomyTask().get_seed_pool(_CONFIG, _REAL, "forward", rng=Random(0))
@@ -42,6 +50,37 @@ class SeedPoolTests(unittest.TestCase):
         for seed in pool:
             self.assertIn("max_depth", seed)
             self.assertGreaterEqual(len(seed["classes"]), 3)
+
+    def test_every_subtree_carries_one_global_pool_index(self):
+        # ONE numbering over all of real_data, not one per ontology: the pool
+        # index is how an accepted record is paired with its real subtree.
+        rows = [{**_REAL[0], "ontology_id": "pizza"}, _SECOND]
+        pool = TaxonomyTask().get_seed_pool(_CONFIG, rows, "forward", rng=Random(0))
+        self.assertGreater(len({s["ontology_id"] for s in pool}), 1)
+        self.assertEqual([s["pool_index"] for s in pool], list(range(len(pool))))
+        for seed in pool:
+            self.assertIs(type(seed["pool_index"]), int)
+
+    def test_the_numbering_does_not_depend_on_the_rng(self):
+        # Generation draws with its own rng; the real reference passes none.
+        # The same index must name the same subtree in both.
+        rows = [{**_REAL[0], "ontology_id": "pizza"}, _SECOND]
+        task = TaxonomyTask()
+
+        def numbered(rng):
+            return [(s["pool_index"], s["classes"], s["subclass_axioms"])
+                    for s in task.get_seed_pool(_CONFIG, rows, "forward", rng=rng)]
+
+        self.assertEqual(numbered(Random(0)), numbered(Random(12345)))
+        self.assertEqual(numbered(Random(0)), numbered(None))
+
+    def test_each_subtree_carries_its_rows_ontology_id_and_domain(self):
+        rows = [{**_REAL[0], "ontology_id": "pizza"}, _SECOND]
+        pool = TaxonomyTask().get_seed_pool(_CONFIG, rows, "forward", rng=Random(0))
+        for seed in pool:
+            source = rows[0] if seed["ontology_id"] == "pizza" else rows[1]
+            self.assertEqual(seed["domain"], source["domain"])
+            self.assertTrue(set(seed["classes"]) <= set(source["classes"]))
 
 
 class ForwardSeededTests(unittest.TestCase):
@@ -67,6 +106,20 @@ class ForwardSeededTests(unittest.TestCase):
         seed = task.get_seed_pool(_CONFIG, _REAL, "forward", rng=Random(0))[0]
         gold = task.build_seeded_artifact(seed, "forward", None, _CONFIG, Random(0))
         self.assertEqual(gold["source_max_depth"], seed["max_depth"])
+
+    def test_the_gold_records_which_pool_subtree_it_came_from(self):
+        # An INTEGER pairs the record with its real subtree in the archive --
+        # never a real class name, never the seed's ontology id or root.
+        task = TaxonomyTask()
+        for mode, profile in (("forward", None), ("inverse", _PROFILE)):
+            with self.subTest(mode=mode):
+                seed = task.get_seed_pool(_CONFIG, _REAL, "forward", rng=Random(0))[1]
+                gold = task.build_seeded_artifact(seed, mode, profile, _CONFIG, Random(0))
+                self.assertEqual(gold["source_pool_index"], 1)
+                self.assertEqual(set(gold), {"domain", "classes", "subclass_axioms",
+                                             "source_max_depth", "source_pool_index"})
+                self.assertNotIn(str(seed["root"]),
+                                 task.build_seeded_generation_prompt(gold))
 
 
 class InverseSeededTests(unittest.TestCase):

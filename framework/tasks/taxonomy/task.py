@@ -279,16 +279,28 @@ class TaxonomyTask(BaseTask):
         used whole. `seed_weights` is accepted for signature compatibility and
         ignored: reweighting the draw is a calibration concern, and taxonomy has
         no calibration keys yet.
+
+        Each subtree is stamped with `pool_index`, its position in the pool: ONE
+        numbering over all of `real_data`. sample_subtrees enumerates in sorted
+        order and ignores `rng`, so every caller -- generation with its rng, the
+        real reference with none -- sees the same index on the same subtree.
+        It is also stamped with its row's `ontology_id` and `domain`, so the
+        real reference can take the whole pool in one call and still give each
+        item its own ontology's id and domain.
         """
         opts = ((config.get("generation") or {}).get("seed_pool") or {})
         pool: list[dict] = []
         for row in real_data:
-            pool.extend(sample_subtrees(
+            for subtree in sample_subtrees(
                 row.get("classes") or [], row.get("subclass_axioms") or [],
                 max_depth=int(opts.get("max_depth", 4)),
                 min_classes=int(opts.get("min_classes", 5)),
                 rng=rng,
-            ))
+            ):
+                pool.append({**subtree,
+                             "ontology_id": row.get("ontology_id"),
+                             "domain": row.get("domain"),
+                             "pool_index": len(pool)})
         return pool
 
     def _target_domain(self, config_domains, rng) -> str:
@@ -342,6 +354,10 @@ class TaxonomyTask(BaseTask):
             "classes": classes,
             "subclass_axioms": axioms,
             "source_max_depth": seed.get("max_depth"),
+            # Which pool subtree this gold came from, as an INTEGER: it pairs
+            # the accepted record with its real subtree in the archive, and no
+            # real class name or ontology id ever has to cross over to do it.
+            "source_pool_index": seed.get("pool_index"),
         }
 
     def build_seeded_generation_prompt(self, gold: dict) -> str:
@@ -405,16 +421,19 @@ class TaxonomyTask(BaseTask):
         if resolve_seedless(config, strategy):
             return [self._eval_sample(row) for row in real_data]
         mode = resolve_mode(config, strategy)
-        samples: list[dict] = []
-        for row in real_data:                    # per row, so each keeps its domain
-            for subtree in self.get_seed_pool(config, [row], mode):
-                samples.append(self._eval_sample({
-                    "ontology_id": row.get("ontology_id"),
-                    "domain": row["domain"],
-                    "classes": subtree["classes"],
-                    "subclass_axioms": subtree["subclass_axioms"],
-                }))
-        return samples
+        # ONE call over all of real_data: per-row calls would restart the pool
+        # numbering at 0 for each ontology. Each subtree carries its own row's
+        # ontology_id and domain.
+        return [
+            self._eval_sample({
+                "ontology_id": subtree["ontology_id"],
+                "domain": subtree["domain"],
+                "classes": subtree["classes"],
+                "subclass_axioms": subtree["subclass_axioms"],
+                "pool_index": subtree["pool_index"],
+            })
+            for subtree in self.get_seed_pool(config, real_data, mode)
+        ]
 
     def build_fidelity_profile(self, rows: list[dict]) -> dict:
         """Profile taxonomy artifacts with the same structural profiler for all sides.
@@ -503,7 +522,7 @@ class TaxonomyTask(BaseTask):
         domain = row["domain"]
         classes = list(row["classes"])
         model_input = taxonomy_model_input(domain, classes)
-        return {
+        sample = {
             "ontology_id": row.get("ontology_id"),
             "domain": domain,
             "classes": classes,
@@ -511,3 +530,8 @@ class TaxonomyTask(BaseTask):
             "text": serialize_taxonomy_model_input(domain, classes),
             "subclass_axioms": row.get("subclass_axioms", []),
         }
+        # A seeded reference item's seed-pool position, so real_sample.json
+        # records which subtree each real item is.
+        if "pool_index" in row:
+            sample["pool_index"] = row["pool_index"]
+        return sample

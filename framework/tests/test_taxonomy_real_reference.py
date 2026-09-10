@@ -88,6 +88,32 @@ class MatchedReferenceTests(unittest.TestCase):
         for sample in self.task.get_real_eval_samples(_cfg(seedless=False), _REAL):
             self.assertEqual(set(sample["model_input"]), {"domain", "classes"})
 
+    def test_each_real_subtree_carries_its_pool_index(self):
+        # So real_sample.json records which pool subtree each real item is, and
+        # a generated record's source_pool_index can be matched against it.
+        cfg = _cfg(seedless=False)
+        ref = self.task.get_real_eval_samples(cfg, _REAL)
+        self.assertEqual([r["pool_index"] for r in ref],
+                         [p["pool_index"] for p in self._pool(cfg)])
+        self.assertEqual([r["pool_index"] for r in ref], list(range(len(ref))))
+
+    def test_the_pool_is_numbered_once_across_ontologies(self):
+        # Built per row, the numbering restarted at 0 for each ontology, so one
+        # index named two different subtrees.
+        second = {"ontology_id": "w", "domain": "wine",
+                  "classes": ["Wine", "Red", "White", "Merlot"],
+                  "subclass_axioms": [["Red", "Wine"], ["White", "Wine"],
+                                      ["Merlot", "Red"]]}
+        rows = _REAL + [second]
+        cfg = _cfg(seedless=False)
+        ref = self.task.get_real_eval_samples(cfg, rows)
+        pool = self.task.get_seed_pool(cfg, rows, "forward")
+        self.assertEqual({r["ontology_id"] for r in ref}, {"t", "w"})
+        self.assertEqual([r["pool_index"] for r in ref], list(range(len(pool))))
+        for item, subtree in zip(ref, pool):
+            self.assertEqual(item["classes"], subtree["classes"])
+            self.assertEqual(item["domain"], "pizza" if item["ontology_id"] == "t" else "wine")
+
 
 class ContextWiringTests(unittest.TestCase):
     """The reference reaches the pipeline, which passes it to BOTH consumers:
@@ -187,6 +213,32 @@ class SeededSessionEndToEndTests(unittest.TestCase):
         for scores in results.values():
             self.assertIn("real", scores)
             self.assertIn("generated", scores)
+
+    def test_real_sample_records_each_items_pool_index(self):
+        real = self._load("real_sample.json")
+        self.assertEqual(sorted(item["pool_index"] for item in real),
+                         list(range(self.pool_size)))
+
+    def test_each_generated_record_pairs_with_the_real_item_of_its_index(self):
+        # Pairing is recoverable from the archive: a forward+seeded record is
+        # its pool subtree's structure under new names, and source_pool_index
+        # says which subtree. The fixture's subtrees differ in shape, so a
+        # record paired with the wrong real item cannot match it.
+        from framework.tasks.taxonomy.graph_ops import matches_structure
+
+        real = {item["pool_index"]: item for item in self._load("real_sample.json")}
+        generated = self._load("generated", "run_1.json")
+        self.assertEqual(sorted(r["source_pool_index"] for r in generated),
+                         sorted(real))
+        for record in generated:
+            self.assertIs(type(record["source_pool_index"]), int)
+            partner = real[record["source_pool_index"]]
+            self.assertTrue(matches_structure(
+                partner["classes"], partner["subclass_axioms"],
+                record["classes"], record["subclass_axioms"]),
+                record["source_pool_index"])
+            # An integer is all that crosses over: no real name in the record.
+            self.assertFalse(set(record["classes"]) & set(_E2E_REAL["classes"]))
 
 
 if __name__ == "__main__":

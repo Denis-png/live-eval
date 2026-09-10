@@ -1092,6 +1092,8 @@ class BaseGenerator(ABC):
                     record = dict(parsed)
                     record["domain"] = gold["domain"]
                     record["source_max_depth"] = gold.get("source_max_depth")
+                    # An integer: pairs the record with its real pool subtree.
+                    record["source_pool_index"] = gold.get("source_pool_index")
                     record["seeded_diagnostics"] = {"attempts": diagnostics}
                     synthetic.append(record)
                 if request_delay > 0:
