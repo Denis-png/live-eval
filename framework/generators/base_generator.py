@@ -65,6 +65,29 @@ def _strip_reasoning(raw: str) -> str:
     return _THINK_BLOCK_RE.sub("", raw or "").strip()
 
 
+_PREVIEW_ELISION = "\n[...]\n"
+
+
+def preview_response(text, limit: int = 800) -> str | None:
+    """A bounded preview of a model response that keeps its START and its END.
+
+    A head-only preview is useless for the responses that actually fail: a
+    reasoning model writes thousands of characters of <think> before its answer,
+    so the first `limit` characters show only the opening of its reasoning. The
+    answer -- and whatever broke -- is at the end. When the response is longer
+    than `limit`, this keeps both ends around a fixed elision marker, and the
+    result is exactly `limit` characters long.
+    """
+    if text is None:
+        return None
+    s = text if isinstance(text, str) else repr(text)
+    if len(s) <= limit:
+        return s
+    keep = limit - len(_PREVIEW_ELISION)
+    head = keep // 2
+    return s[:head] + _PREVIEW_ELISION + s[-(keep - head):]
+
+
 def extract_json_object(text) -> tuple[dict | None, str | None]:
     """Pull a model's JSON answer out of a response that may carry reasoning.
 
@@ -864,8 +887,11 @@ class BaseGenerator(ABC):
         rounds_budget = max(0, max_feedback_rounds) if feedback_enabled else 0
         max_parse_attempts = max(1, max_parse_attempts)
         synthetic: list[dict] = []
+        # A sample whose every attempt failed used to vanish with its
+        # diagnostics. Persisted by the pipeline; reset per call.
+        self.last_rejections: list[dict] = []
 
-        for _ in range(sample_size):
+        for sample_idx in range(1, sample_size + 1):
             selected = None
             metadata: dict = {
                 "feedback_enabled": feedback_enabled,
@@ -883,6 +909,9 @@ class BaseGenerator(ABC):
                 while parsed is None and attempts < max_parse_attempts:
                     attempts += 1
                     failure = None
+                    # Reset every attempt, so a call that raises can never be
+                    # credited with the previous attempt's response.
+                    raw = None
                     try:
                         raw = self.call_api(build_prompt(feedback))
                         parse_result = parse(raw)
@@ -903,6 +932,8 @@ class BaseGenerator(ABC):
                     provider_diagnostic = getattr(self, "last_response_diagnostic", None)
                     if parsed is None and provider_diagnostic:
                         diagnostic["provider_response"] = provider_diagnostic
+                    if parsed is None and raw is not None:
+                        diagnostic.setdefault("raw_preview", preview_response(raw))
                     attempt_diagnostics.append(diagnostic)
                     if parsed is None:
                         reason = diagnostic.get("rejection_reason", "unknown")
@@ -973,6 +1004,11 @@ class BaseGenerator(ABC):
             if selected is not None:
                 selected["generation_feedback"] = metadata
                 synthetic.append(selected)
+            else:
+                self.last_rejections.append({
+                    "index": sample_idx,
+                    "attempts": [a for rnd in metadata["rounds"] for a in rnd["attempts"]],
+                })
 
         if len(synthetic) < sample_size:
             print(
@@ -1010,11 +1046,19 @@ class BaseGenerator(ABC):
         never the task itself.
         """
         synthetic: list[dict] = []
+        # Rejected golds used to vanish with their diagnostics, so a run that
+        # rejected everything left nothing to diagnose. The pipeline persists
+        # this; it is reset per call so one run's rejections never leak into
+        # the next.
+        self.last_rejections: list[dict] = []
         for i, gold in enumerate(golds, 1):
             attempts, accepted = 0, False
             diagnostics: list[dict] = []
             while not accepted and attempts < max_parse_attempts:
                 attempts += 1
+                # Reset every attempt: if this call raises, the previous
+                # attempt's response must not be attributed to it.
+                raw = None
                 try:
                     raw = self.call_api(build_prompt(gold))
                     result = parse(raw)
@@ -1027,6 +1071,9 @@ class BaseGenerator(ABC):
                 if parsed is not None and not verify(gold, parsed):
                     parsed = None
                     diagnostic["rejection_reason"] = "structure does not match gold"
+                if parsed is None and raw is not None:
+                    # What the model actually said, not just that it was wrong.
+                    diagnostic.setdefault("raw_preview", preview_response(raw))
                 diagnostics.append(diagnostic)
                 if parsed is None:
                     print(f"[{i}/{len(golds)}] [SKIP] "
@@ -1049,6 +1096,12 @@ class BaseGenerator(ABC):
                     synthetic.append(record)
                 if request_delay > 0:
                     time.sleep(request_delay)
+            if not accepted:
+                self.last_rejections.append({
+                    "index": i,
+                    "gold_classes": list(gold.get("classes") or []),
+                    "attempts": diagnostics,
+                })
 
         if len(synthetic) < len(golds):
             print(f"[WARN] seeded structured generation produced {len(synthetic)} "

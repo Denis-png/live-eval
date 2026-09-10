@@ -445,6 +445,40 @@ def save_synthetic_data(synthetic: list[dict], generated_dir: str, run_idx: int)
     return path
 
 
+def save_rejections(generator, generated_dir: str, run_idx: int) -> str | None:
+    """Archive the samples a run rejected under <session>/generated/run_<N>_rejected.json.
+
+    Only accepted samples used to be archived, so every rejection's diagnostics
+    -- including what the model actually said -- were thrown away. Returns None
+    and writes nothing when there were no rejections, or when the generator's
+    loop does not record them (only the structured loops do so far).
+    """
+    rejections = getattr(generator, "last_rejections", None)
+    if not rejections:
+        return None
+    os.makedirs(generated_dir, exist_ok=True)
+    path = os.path.join(generated_dir, f"run_{run_idx + 1}_rejected.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(rejections, f, indent=2, ensure_ascii=False)
+    return path
+
+
+def run_recording_rejections(generate, generator, generated_dir: str, run_idx: int):
+    """Run `generate()` and persist its rejections whether it succeeds or raises.
+
+    The "0 usable samples" guard raises inside _run_generation, so a run that
+    rejected everything used to abort before anything was saved -- leaving an
+    empty session directory for precisely the run that most needed diagnosing.
+    The `finally` is the point: the evidence is written before the error leaves.
+    """
+    try:
+        return generate()
+    finally:
+        path = save_rejections(generator, generated_dir, run_idx)
+        if path:
+            print(f"Rejected samples archived to {path}")
+
+
 # ── Results writing (with provenance) ────────────────────────
 
 def _build_meta(config: dict, task, runs_completed: int,
@@ -1157,8 +1191,11 @@ def run_pipeline(config: dict) -> dict:
 
     for run_idx in range(num_runs):
         print(f"\n{'='*50}\nRUN {run_idx + 1} / {num_runs}\n{'='*50}")
-        synthetic = _run_generation(generator, task, config, real_data, error_dist,
-                                    judge_call, class_prob, profile=profile)
+        synthetic = run_recording_rejections(
+            lambda: _run_generation(generator, task, config, real_data, error_dist,
+                                    judge_call, class_prob, profile=profile),
+            generator, paths["generated_dir"], run_idx,
+        )
         all_generated.extend(synthetic)
 
         eval_samples = task.get_eval_samples(synthetic)

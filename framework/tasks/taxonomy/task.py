@@ -21,7 +21,7 @@ from framework.evaluators.taxonomy.relations import (
     normalize_relation_set,
 )
 from framework.tasks.base_task import BaseTask
-from framework.generators.base_generator import extract_json_object
+from framework.generators.base_generator import extract_json_object, preview_response
 from framework.tasks.taxonomy.graph_ops import (
     EDIT_OPERATORS, matches_structure, sample_subtrees,
 )
@@ -50,11 +50,9 @@ _RAW_PREVIEW_LIMIT = 800
 
 
 def _raw_preview(text: Any) -> str | None:
-    """Bounded provider-output preview for diagnostics only."""
-    if text is None:
-        return None
-    preview = text if isinstance(text, str) else repr(text)
-    return preview[:_RAW_PREVIEW_LIMIT]
+    """Bounded provider-output preview for diagnostics only. Keeps the start AND
+    the end: a reasoning model's answer sits after its <think> block."""
+    return preview_response(text, limit=_RAW_PREVIEW_LIMIT)
 
 
 def _extract_json_object(text: str) -> tuple[dict[str, Any] | None, str | None]:
