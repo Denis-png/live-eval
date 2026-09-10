@@ -8,8 +8,8 @@ task-specific: a matching label, a matching ERRANT edit, a matching subclass
 relation. Only the arithmetic from those counts lives here.
 
 The pieces are separate rather than one tp/fp/fn function because the callers
-need them separately: macro metrics average precision and recall per class
-BEFORE combining them, and errant_dist feeds in soft float counts summed from
+need them separately: macro precision and macro recall each average one side
+per class on its own, and errant_dist feeds in soft float counts summed from
 distributions rather than integers.
 """
 from __future__ import annotations
