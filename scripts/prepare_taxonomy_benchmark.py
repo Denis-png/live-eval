@@ -100,6 +100,7 @@ def _definitional_parents(graph: Graph, ids: dict[URIRef, str]) -> set[tuple[str
       * owl:oneOf: an enumeration of individuals, with no named superclass;
       * named ≡ named: A ⊑ B and B ⊑ A, a two-cycle.
     owl:equivalentClass is symmetric, so the named class may sit on either side.
+    Nested intersections are not unwrapped: incomplete, never unsound; Pizza has none.
     """
     edges: set[tuple[str, str]] = set()
     for left, _, right in graph.triples((None, OWL.equivalentClass, None)):
