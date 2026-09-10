@@ -285,32 +285,42 @@ def _resolve_benchmark_profile_path(config: dict, task) -> str:
     )
 
 
+def _consults_benchmark_profile(config: dict, task) -> bool:
+    """Whether this cell's generation reads the benchmark profile.
+
+    Every seedless cell does. Of the seeded cells, only structured `inverse`
+    does: it samples the structure it imposes from the profile, while
+    `forward+seeded` inherits its structure from the drawn seed.
+
+    The one rule both `_load_benchmark_profile` (which loads the file) and
+    `_build_meta` (which records its path) follow. `_build_meta` used to key on
+    `seedless` alone, so inverse+seeded loaded a profile yet recorded
+    `profile_path: None`."""
+    strategy = task.get_generation_strategy()
+    if resolve_seedless(config, strategy):
+        return True
+    return strategy == "structured" and resolve_mode(config, strategy) != "forward"
+
+
 def _load_benchmark_profile(config: dict, task) -> dict | None:
     """Load the benchmark profile that drives generation.
 
-    Returns None for the cells that consult no profile. Runs before the
-    generation loop so a missing or un-topic-profiled profile fails before any
-    API spend.
+    Returns None for the cells that consult no profile (see
+    `_consults_benchmark_profile`). Runs before the generation loop so a
+    missing or un-topic-profiled profile fails before any API spend.
 
-    A structured task needs a profile for every cell EXCEPT `forward+seeded`,
-    which inherits its structure from the drawn seed. Short-circuiting on
-    `seedless is False` made `inverse+seeded` unreachable: it returned None
-    before `generation.profile_path` was ever consulted, and the dispatch then
-    died asking for a profile the config had no way to supply."""
-    gen = config.get("generation") or {}
-    strategy = task.get_generation_strategy()
-    seedless = resolve_seedless(config, strategy)
-    if strategy == "structured":
-        if not seedless and resolve_mode(config, strategy) == "forward":
-            return None
-        path = _resolve_benchmark_profile_path(config, task)
+    Short-circuiting structured on `seedless is False` once made
+    `inverse+seeded` unreachable: it returned None before
+    `generation.profile_path` was ever consulted, and the dispatch then died
+    asking for a profile the config had no way to supply."""
+    if not _consults_benchmark_profile(config, task):
+        return None
+    path = _resolve_benchmark_profile_path(config, task)
+    if task.get_generation_strategy() == "structured":
         with open(path, encoding="utf-8") as f:
             return json.load(f)
-    if not seedless:
-        return None
     from framework.profiling.spec_sampler import load_profile
 
-    path = _resolve_benchmark_profile_path(config, task)
     topics_key = (
         "topics_per_label"
         if task.get_generation_strategy() == "class_conditional"
@@ -500,13 +510,14 @@ def _build_meta(config: dict, task, runs_completed: int,
     the seedless bucket in scripts/analyze_results.py, where it collided with
     the real seedless session and one of the two was dropped.
     `profile_path` is the resolved path of the profile that actually drove
-    generation when seedless is true — generation.profile_path if the config
-    set one, else the same default `_load_benchmark_profile` resolves
-    internally (see `_resolve_benchmark_profile_path`, shared by both) — and None when
-    seedless is false. Profiles are gitignored, so this is the only record of
-    what generated a seedless benchmark; it must NOT be left None in the
-    common case where seedless is true and profile_path is left unset (both
-    shipped configs ship it commented out)."""
+    generation, for every cell that consults one (`_consults_benchmark_profile`:
+    all seedless cells, plus structured inverse+seeded) — generation.profile_path
+    if the config set one, else the same default `_load_benchmark_profile`
+    resolves internally (see `_resolve_benchmark_profile_path`, shared by
+    both) — and None for cells that consult none. Profiles are gitignored, so
+    this is the only record of what shaped the benchmark; it must NOT be left
+    None in the common case where profile_path is left unset (both shipped
+    configs ship it commented out)."""
     gen = config["generation"]
     ds = resolve_dataset_config(config.get("dataset") or {})
     judge = config.get("judge") or {}
@@ -528,7 +539,8 @@ def _build_meta(config: dict, task, runs_completed: int,
         "strategy": strategy,
         "mode": mode,
         "seedless": seedless,
-        "profile_path": _resolve_benchmark_profile_path(config, task) if seedless else None,
+        "profile_path": (_resolve_benchmark_profile_path(config, task)
+                         if _consults_benchmark_profile(config, task) else None),
         "provider": gen["provider"],
         "model": gen["model"],
         "num_runs": num_runs,
