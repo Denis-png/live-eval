@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from framework.evaluators.taxonomy.metrics import parse_prediction_relations
+from framework.evaluators.taxonomy.relations import parse_prediction_relations
 from framework.models.base_model import BaseModel
 
 DEFAULT_PROMPT_TEMPLATE = """\

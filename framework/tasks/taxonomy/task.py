@@ -12,11 +12,11 @@ import json
 import os
 from typing import Any
 
-from framework.evaluators.taxonomy.metrics import (
-    compute_diagnostics,
-    compute_f1,
-    compute_precision,
-    compute_recall,
+from framework.evaluators.taxonomy.diagnostics import compute_diagnostics
+from framework.evaluators.taxonomy.f1 import compute_f1
+from framework.evaluators.taxonomy.precision import compute_precision
+from framework.evaluators.taxonomy.recall import compute_recall
+from framework.evaluators.taxonomy.relations import (
     normalize_relation_pair,
     normalize_relation_set,
 )

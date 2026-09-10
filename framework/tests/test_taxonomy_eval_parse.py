@@ -13,10 +13,8 @@ cannot drift apart again.
 """
 import unittest
 
-from framework.evaluators.taxonomy.metrics import (
-    compute_taxonomy_scores,
-    parse_prediction_relations,
-)
+from framework.evaluators.taxonomy._taxonomy_shared import compute_taxonomy_scores
+from framework.evaluators.taxonomy.relations import parse_prediction_relations
 from framework.generators.base_generator import extract_json_object
 
 # Verbatim minimax-m3 task-model output: an UNCLOSED <think> running into a

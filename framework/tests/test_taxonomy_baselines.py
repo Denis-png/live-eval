@@ -9,7 +9,7 @@ names cannot. That makes them a control for the real-vs-synthetic comparison.
 import json
 import unittest
 
-from framework.evaluators.taxonomy.metrics import compute_taxonomy_scores
+from framework.evaluators.taxonomy._taxonomy_shared import compute_taxonomy_scores
 from framework.models.taxonomy.baselines import (
     LexicalHeadMatchModel,
     StarModel,

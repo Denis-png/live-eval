@@ -15,7 +15,7 @@ import json
 import re
 from collections import Counter
 
-from framework.evaluators.taxonomy.metrics import parse_prediction_relations
+from framework.evaluators.taxonomy.relations import parse_prediction_relations
 from framework.models.base_model import BaseModel
 from framework.models.taxonomy.llm import TaxonomyLLMModel
 
