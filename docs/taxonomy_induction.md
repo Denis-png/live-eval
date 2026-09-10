@@ -193,6 +193,17 @@ Distribution comparisons use Jensen-Shannon divergence for:
 Lower JSD means more similar distributions. The framework does not create one
 combined overall fidelity score.
 
+A seeded session's real side is several subtrees of one ontology (see "What the
+Real Baseline Is"). They are pooled into ONE reference profile, summarised with
+the statistic the synthetic side is summarised with: each scalar is the mean over
+the subtrees, and each distribution is the mean of the subtrees' normalised
+distributions -- not their summed counts, which would let the largest subtree
+dominate. `fidelity.real_profile.pooled_taxonomies` records how many subtrees the
+reference pools. Real taxonomies from different ontologies are not pooled; the
+fidelity step refuses them. Because each synthetic item is still compared with
+the pool's mean, the per-item JSD is not zero even for a synthetic side identical
+to the pool: it includes the subtrees' own spread around their mean.
+
 ## Plots
 
 Taxonomy runs write:
@@ -335,5 +346,7 @@ large taxonomies more heavily than small ones.
 - no ontology reasoner or classification
 - no transitive evaluation
 - no semantic or fuzzy matching
-- current Pizza MVP assumes one real reference ontology for fidelity selection
+- fidelity takes its real reference from one ontology: a seeded session's
+  subtrees of it are pooled, and real taxonomies from different ontologies need
+  an explicitly named reference
 - model/provider structured-output behavior can affect real runs

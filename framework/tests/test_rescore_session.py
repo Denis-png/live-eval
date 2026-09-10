@@ -48,6 +48,50 @@ def _config():
     }
 
 
+# One ontology whose seed pool (max_depth 3, min_classes 3) is three subtrees.
+_TAXONOMY_ROW = {
+    "ontology_id": "onto",
+    "domain": "cuisine",
+    "classes": ["Food", "Pizza", "Dessert", "Margherita", "Napoletana", "Gelato",
+                "Sorbet", "Tiramisu", "DessertPizza", "Nutella"],
+    "subclass_axioms": [["Pizza", "Food"], ["Dessert", "Food"],
+                        ["Margherita", "Pizza"], ["Napoletana", "Pizza"],
+                        ["Gelato", "Dessert"], ["Sorbet", "Dessert"],
+                        ["Tiramisu", "Dessert"], ["DessertPizza", "Pizza"],
+                        ["DessertPizza", "Dessert"], ["Nutella", "DessertPizza"]],
+}
+
+
+def _write_seeded_taxonomy_session(d):
+    """A forward+seeded taxonomy session as run_pipeline leaves it: the real
+    side is the seed pool's subtrees, the generated side those subtrees renamed.
+    Returns the number of real subtrees."""
+    from framework.tasks.taxonomy.task import TaxonomyTask
+
+    cfg = {"generation": {"mode": "forward", "seedless": False,
+                          "seed_pool": {"max_depth": 3, "min_classes": 3}}}
+    real = TaxonomyTask().get_real_eval_samples(cfg, [_TAXONOMY_ROW])
+    generated = []
+    for item in real:
+        names = {c: f"Species{i}" for i, c in enumerate(item["classes"])}
+        generated.append({"domain": "marine biology",
+                          "classes": [names[c] for c in item["classes"]],
+                          "subclass_axioms": [[names[c], names[p]]
+                                              for c, p in item["subclass_axioms"]]})
+    os.makedirs(os.path.join(d, "generated"))
+    meta = {"created": "2026-09-10T00:00:00", "task": "taxonomy", "mode": "forward",
+            "seedless": False, "provider": "stub", "model": "stub", "num_runs": 1,
+            "runs_completed": 1, "partial": False,
+            "effective_samples_per_run": [len(generated)], "real_baseline": True}
+    with open(os.path.join(d, "results.json"), "w") as f:
+        json.dump({"meta": meta, "results": {}}, f)
+    with open(os.path.join(d, "generated", "run_1.json"), "w") as f:
+        json.dump(generated, f)
+    with open(os.path.join(d, "real_sample.json"), "w") as f:
+        json.dump(real, f)
+    return len(real)
+
+
 class RescoreSessionTests(unittest.TestCase):
     def _run(self, d, **kwargs):
         with patch("framework.tasks.spam.task.SpamTask.get_model",
@@ -149,6 +193,23 @@ class RescoreSessionTests(unittest.TestCase):
             self._run(d)
             out = json.load(open(os.path.join(d, "results.json")))
             self.assertFalse(out["meta"]["seedless"])
+
+    def test_a_seeded_taxonomy_session_rescores_to_a_profile(self):
+        # Its real side is several subtrees of one ontology. The fidelity step
+        # used to raise on more than one real taxonomy, so rescoring a seeded
+        # session died exactly as the live run did.
+        cfg = {"task": {"name": "taxonomy"},
+               "task_models": [{"name": "lexical", "type": "lexical"},
+                               {"name": "star", "type": "star"}],
+               "evaluation": {"real_baseline": True}}
+        with tempfile.TemporaryDirectory() as d:
+            n_real = _write_seeded_taxonomy_session(d)
+            self.assertGreater(n_real, 1)
+            rescore_session(d, cfg)
+            prof = json.load(open(os.path.join(d, "profile.json")))
+            self.assertEqual(prof["fidelity"]["real_profile"]["pooled_taxonomies"], n_real)
+            out = json.load(open(os.path.join(d, "results.json")))
+            self.assertEqual(set(out["results"]), {"lexical", "star"})
 
     def test_task_mismatch_raises(self):
         with tempfile.TemporaryDirectory() as d:

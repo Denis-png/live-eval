@@ -3,7 +3,8 @@
 This module compares a real taxonomy profile against one or more generated
 taxonomy profiles. It reuses the structural profile shape from
 taxonomy_profiler; it does not inspect class names, URI provenance, text, or
-semantic labels.
+semantic labels. A seeded session's real side is several subtrees of one
+ontology; they are pooled into one reference by pool_taxonomy_profiles.
 """
 
 from __future__ import annotations
@@ -49,6 +50,15 @@ STRUCTURAL_PROFILE_KEYS = [
     "validation",
 ]
 
+# Kept by sanitising beside the structure, although neither is structural.
+# `ontology_id` is the benchmark's own id, not a class identifier, so keeping it
+# exposes nothing sanitising protects; it is what lets
+# select_reference_taxonomy_profile tell k subtrees of ONE ontology from k
+# different ontologies. `pooled_taxonomies` marks a reference that is such a pool.
+REFERENCE_KEYS = ["ontology_id", "pooled_taxonomies"]
+
+_SANITIZED_KEYS = [REFERENCE_KEYS[0], *STRUCTURAL_PROFILE_KEYS, REFERENCE_KEYS[1]]
+
 
 def feedback_tolerances(config: dict[str, Any] | None = None) -> dict[str, float]:
     """Merge caller tolerances with conservative taxonomy defaults."""
@@ -64,10 +74,10 @@ def sanitize_taxonomy_profile(profile: dict[str, Any]) -> dict[str, Any]:
 
     The Phase 1 profiler keeps roots, leaves, and class_depths to aid debugging.
     Those contain class identifiers, so run-level fidelity artifacts strip them
-    and retain only aggregate structure.
+    and retain only aggregate structure, plus the REFERENCE_KEYS.
     """
     taxonomies = [
-        {key: taxonomy.get(key) for key in STRUCTURAL_PROFILE_KEYS if key in taxonomy}
+        {key: taxonomy.get(key) for key in _SANITIZED_KEYS if key in taxonomy}
         for taxonomy in profile.get("taxonomies") or []
     ]
     return {
@@ -85,13 +95,22 @@ def select_reference_taxonomy_profile(
 ) -> dict[str, Any]:
     """Select the real taxonomy profile used as the fidelity reference.
 
-    The Pizza MVP uses one real ontology. If a future profile contains multiple
-    real ontologies, callers must name the reference explicitly instead of
-    silently comparing against the first unrelated ontology.
+    One real taxonomy is the reference as it is. Several taxonomies that all
+    carry the same ontology_id are subtrees of ONE ontology -- a seeded
+    session's real side is its seed pool -- and are pooled into one reference
+    by pool_taxonomy_profiles. A named `ontology_id` must then equal that id.
+
+    Taxonomies from different ontologies, or any taxonomy without an id, still
+    raise: callers must name the reference explicitly instead of silently
+    comparing against the first unrelated ontology.
     """
     taxonomies = profile.get("taxonomies") or []
     if not taxonomies:
         raise ValueError("Taxonomy fidelity requires at least one real taxonomy profile.")
+    ids = {taxonomy.get("ontology_id") for taxonomy in taxonomies}
+    shared_id = next(iter(ids)) if len(ids) == 1 else None
+    if len(taxonomies) > 1 and shared_id is not None and ontology_id in (None, shared_id):
+        return pool_taxonomy_profiles(taxonomies)
     if ontology_id is not None:
         matches = [t for t in taxonomies if t.get("ontology_id") == ontology_id]
         if len(matches) == 1:
@@ -103,6 +122,95 @@ def select_reference_taxonomy_profile(
         "Taxonomy fidelity received multiple real taxonomy profiles; pass an "
         "explicit ontology_id to select the reference."
     )
+
+
+def _shared(values: list[Any]) -> Any:
+    """The one value every item agrees on, else None."""
+    distinct = set(values)
+    return next(iter(distinct)) if len(distinct) == 1 else None
+
+
+def _bin_order(label: str) -> tuple[int, float | str]:
+    try:
+        return (0, float(label))
+    except ValueError:
+        return (1, label)
+
+
+def _probabilities(distribution: dict[str, Any]) -> dict[str, float]:
+    """One item's count distribution as probabilities; {} when it has no mass."""
+    counts = {
+        str(key): float(value)
+        for key, value in (distribution or {}).items()
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    }
+    total = sum(counts.values())
+    if total <= 0:
+        return {}
+    return {key: value / total for key, value in counts.items()}
+
+
+def pool_taxonomy_profiles(taxonomies: list[dict[str, Any]]) -> dict[str, Any]:
+    """Pool several real taxonomies -- subtrees of one ontology -- into ONE
+    reference profile, in the key shape plots.py reads as `real_profile`.
+
+    Mean of items, because the real side must be summarised with the same
+    statistic as the synthetic side, or the gap measures the summary, not the
+    generation. aggregate_comparisons reports the synthetic side as the mean of
+    each synthetic taxonomy's own value, and plots._taxonomy_distribution_series
+    averages each synthetic taxonomy's independently normalised distribution. So:
+
+    * each SCALAR_KEYS value is the arithmetic mean over the items (rounded to
+      4 places, exactly as aggregate_comparisons rounds); an item whose value is
+      None -- a cyclic taxonomy has no depth -- is left out, as it is there;
+    * each DISTRIBUTION_KEYS value is the mean of the items' NORMALISED
+      distributions (probabilities, missing bins as 0), not summed raw counts.
+      Summed counts would weight a 91-class subtree ~18x a 5-class one, which
+      the synthetic side never does. An item with no distribution (again, a
+      cyclic taxonomy's depths) is left out. The values are floats; the JSD
+      helper and the plots normalise defensively, so they take them as weights;
+    * `has_cycle` is True when any item has a cycle;
+    * `validation` holds each defect count (unknown-class edges, self-loops,
+      duplicate axioms) SUMMED over the items: a pooled defect stays visible as
+      a count, where a mean would dilute one defective subtree into a fraction,
+      and 0 still means no item had one;
+    * `domain` and `ontology_id` are the value all items share, else None;
+    * `pooled_taxonomies` is the number of items, so a reader of profile.json
+      sees the real side is a pool of k subtrees, not one taxonomy.
+
+    What is zero at perfect fidelity is the mean-vs-mean comparison: the
+    aggregate synthetic means and the plotted distribution means. The per-item
+    comparisons still measure each synthetic item against the pool's MEAN, so a
+    synthetic side identical to the pool shows a nonzero per-item JSD (and
+    nonzero relative differences) -- the subtrees' own spread around their mean.
+    """
+    items = list(taxonomies)
+    if not items:
+        raise ValueError("Cannot pool zero taxonomy profiles.")
+
+    pooled: dict[str, Any] = {
+        "ontology_id": _shared([item.get("ontology_id") for item in items]),
+        "domain": _shared([item.get("domain") for item in items]),
+    }
+    for key in SCALAR_KEYS:
+        values = [float(item[key]) for item in items if item.get(key) is not None]
+        pooled[key] = _summary(values)["mean"]
+    for key in DISTRIBUTION_KEYS:
+        per_item = [p for p in (_probabilities(item.get(key)) for item in items) if p]
+        labels = sorted({label for p in per_item for label in p}, key=_bin_order)
+        pooled[key] = {
+            label: sum(p.get(label, 0.0) for p in per_item) / len(per_item)
+            for label in labels
+        }
+    pooled["has_cycle"] = any(bool(item.get("has_cycle")) for item in items)
+    validation: dict[str, int | float] = {}
+    for item in items:
+        for key, value in (item.get("validation") or {}).items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                validation[key] = validation.get(key, 0) + value
+    pooled["validation"] = validation
+    pooled["pooled_taxonomies"] = len(items)
+    return pooled
 
 
 def _relative_difference(real_value: float | int | None, absolute_difference: float) -> float | None:
