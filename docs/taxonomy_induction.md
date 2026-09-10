@@ -22,12 +22,14 @@ The current Pizza MVP uses the canonical Protege Pizza ontology as the intended
 real benchmark. The converter keeps:
 
 - named classes
-- direct named `rdfs:subClassOf` relations
+- direct named `rdfs:subClassOf` relations plus parents named by `owl:equivalentClass`
+  intersection definitions (listed in `metadata.definitional_axioms`)
 - multiple inheritance
 
 It intentionally excludes:
 
 - anonymous blank-node restrictions
+- unions, enumerations, and complements from equivalence definitions
 - inferred or transitive hierarchy
 - reasoner-classified structure
 
