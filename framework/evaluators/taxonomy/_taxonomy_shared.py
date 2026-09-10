@@ -11,7 +11,9 @@ evaluation, which is how the pipeline builds and passes it.
 
 Scores are MICRO-averaged: true/false positives and negatives are summed across
 results before precision and recall are taken, so a large taxonomy weighs more
-than a small one. Per-result scores are exposed by score_taxonomy_result.
+than a small one. Per-result scores are exposed by score_taxonomy_result. Macro
+averages -- each result's own score, averaged -- are reported beside them as
+macro_precision, macro_recall and macro_f1.
 """
 
 from __future__ import annotations
@@ -108,10 +110,22 @@ def _score(results: list[dict[str, Any]]) -> dict[str, Any]:
     predicted = sum(row["predicted_relation_count"] for row in scored)
     malformed_relations = sum(row["malformed_relation_count"] for row in scored)
 
+    # Macro: each taxonomy's own score, averaged, so every item counts equally.
+    # Micro (above) sums counts first, so a large taxonomy outweighs a small
+    # one. Reported beside micro so a report can show whether its conclusions
+    # depend on the choice.
+    n = len(scored)
+
+    def macro(side: str) -> float:
+        return sum(row[side] for row in scored) / n if n else 0.0
+
     return {
         "precision": precision,
         "recall": recall,
         "f1": f1,
+        "macro_precision": macro("precision"),
+        "macro_recall": macro("recall"),
+        "macro_f1": macro("f1"),
         "tp": tp,
         "fp": fp,
         "fn": fn,
