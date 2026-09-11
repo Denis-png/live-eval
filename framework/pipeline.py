@@ -7,6 +7,7 @@ import sys
 from datetime import datetime
 
 import numpy as np
+from framework.calibration.artifact import targets_match
 from framework.data_loading import iter_local_rows, resolve_dataset_config
 from framework.generators.base_generator import CLASS_CONDITIONAL_SEMANTICS
 from framework.generators.factory import load_generator
@@ -620,7 +621,12 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                     "generation.feedback."
                 )
             rng = random.Random()
-            pool = task.get_seed_pool(config, real_data, mode, rng=rng)
+            # A calibrated seeded cell draws by bucket weight (with repeats);
+            # without weights the whole pool is drawn, as before.
+            seed_weights = (gen_cfg.get("seed_weights")
+                            if isinstance(gen_cfg.get("seed_weights"), dict) else None)
+            pool = task.get_seed_pool(config, real_data, mode,
+                                      seed_weights=seed_weights, rng=rng)
             if len(pool) < sample_size:
                 raise RuntimeError(
                     f"{task.get_task_name()} seed pool holds {len(pool)} subtrees "
@@ -1091,15 +1097,36 @@ def _render_plots(config: dict, paths: dict) -> None:
 
 # ── Generation context ────────────────────────────────────────
 
-def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
-                       seedless: bool) -> dict | None:
-    """Calibrated seed weights for cells whose only control input is seed choice.
+def _str_keys(dist) -> dict:
+    return {str(key): value for key, value in (dist or {}).items()}
 
-    GEC forward+seeded never reaches load_error_distribution (the generator picks
-    its own error type, so _should_load_error_distribution is False), so its
-    calibration artifact has to be resolved here instead.
+
+def _structured_target_matches(task, payload: dict, real_reference, keys: dict) -> bool:
+    """Whether a structured calibration artifact was built against THIS real
+    reference: its target is re-measured with the instrument calibration used,
+    build_fidelity_profile -- cheap for taxonomy, no model calls. Keys compare
+    as strings: load_calibration turns count_dist keys back into ints for GEC's
+    edit counts, while taxonomy's structure keys are strings."""
+    measured = task.build_fidelity_profile(real_reference or [])
+    current = {name: _str_keys(measured.get(key)) for name, key in keys.items()}
+    stored = {name: _str_keys((payload.get("target") or {}).get(name)) for name in keys}
+    return targets_match(stored, current)
+
+
+def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
+                       seedless: bool, real_reference=None) -> dict | None:
+    """Calibrated seed weights for cells whose only control input is seed choice:
+    corruption forward+seeded (GEC) and every structured seeded cell (taxonomy).
+
+    Neither reaches load_error_distribution, so their calibration artifact has to
+    be resolved here instead. A structured artifact is checked against
+    `real_reference` first -- a stale one is ignored, as _apply_calibration
+    ignores one for the other cells.
     """
-    if strategy != "corruption" or mode != "forward" or seedless:
+    structured = strategy == "structured"
+    seed_cell = not seedless and (structured or (strategy == "corruption"
+                                                 and mode == "forward"))
+    if not seed_cell:
         return None
     from framework.calibration.artifact import load_calibration, resolve_calibration_path
 
@@ -1130,6 +1157,16 @@ def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
               file=sys.stderr)
         return None
 
+    if structured:
+        seed_key = (task.get_seed_calibration_key()
+                    or task.get_calibration_keys()["type_dist"])
+        if not _structured_target_matches(task, payload, real_reference,
+                                          {"type_dist": seed_key}):
+            print(f"[WARN] calibration {path!r} was measured against a different "
+                  "real reference; drawing seeds unweighted. Recalibrate to use it.",
+                  file=sys.stderr)
+            return None
+
     # Provenance, same as _apply_calibration records for every other cell:
     # artifacts are gitignored, so results.json is the only surviving record of
     # what produced a benchmark. Written only on success and only after
@@ -1140,8 +1177,9 @@ def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
     _LAST_CALIBRATION = {"path": path,
                          "selected_round": payload.get("selected_round"),
                          "class_prob": None}
+    what = "depth buckets" if structured else "edit types"
     print(f"Calibration: {path} (round {payload.get('selected_round')}) — "
-          f"seed weights over {len(weights)} edit types")
+          f"seed weights over {len(weights)} {what}")
     return weights
 
 
@@ -1177,15 +1215,17 @@ def build_generation_context(config: dict) -> dict:
     )
     profile = _load_benchmark_profile(config, task)
 
+    # Real reference feeds class balance, the real baseline, profiling -- and
+    # the stale check of a structured calibration artifact.
+    real_reference = task.get_real_eval_samples(config, real_data)
+
     # Published onto the config so _run_generation's forward+seeded branch (which
     # reads generation.seed_weights) sees them: that cell never calls
     # _apply_calibration, so this is the only place its artifact can be resolved.
-    seed_weights = _load_seed_weights(config, task, strategy, mode, seedless)
+    seed_weights = _load_seed_weights(config, task, strategy, mode, seedless,
+                                      real_reference)
     if seed_weights:
         config.setdefault("generation", {})["seed_weights"] = seed_weights
-
-    # Real reference feeds class balance, the real baseline, and profiling.
-    real_reference = task.get_real_eval_samples(config, real_data)
 
     return {
         "task": task,

@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import json
 import os
+import random
 from typing import Any
 
+from framework.calibration.seeds import draw_weighted_seeds
 from framework.evaluators.taxonomy.diagnostics import compute_diagnostics
 from framework.evaluators.taxonomy.f1 import compute_f1
 from framework.evaluators.taxonomy.precision import compute_precision
@@ -276,9 +278,9 @@ class TaxonomyTask(BaseTask):
         """Subtrees of the real ontology, indexed by their own max depth.
 
         One ontology has to supply the whole pool, so it is sampled rather than
-        used whole. `seed_weights` is accepted for signature compatibility and
-        ignored: reweighting the draw is a calibration concern, and taxonomy has
-        no calibration keys yet.
+        used whole. `seed_weights` (a calibration artifact's, keyed by
+        `str(max_depth)`) switches the pool to `sample_size` weighted draws
+        with replacement; without it the whole pool is returned.
 
         Each subtree is stamped with `pool_index`, its position in the pool: ONE
         numbering over all of `real_data`. sample_subtrees enumerates in sorted
@@ -301,7 +303,16 @@ class TaxonomyTask(BaseTask):
                              "ontology_id": row.get("ontology_id"),
                              "domain": row.get("domain"),
                              "pool_index": len(pool)})
-        return pool
+        if not seed_weights:
+            return pool
+        # Calibrated: draw sample_size seeds -- a max-depth bucket by weight, then
+        # a subtree uniformly within it, with replacement. With the whole pool
+        # drawn every run, repeats are the only way a weight can shift the mix.
+        index: dict[str, list[int]] = {}
+        for i, subtree in enumerate(pool):
+            index.setdefault(str(subtree.get("max_depth")), []).append(i)
+        size = int((config.get("generation") or {}).get("sample_size", len(pool)))
+        return draw_weighted_seeds(pool, index, seed_weights, size, rng or random.Random())
 
     def _target_domain(self, config_domains, rng) -> str:
         return rng.choice(list(config_domains)) if config_domains else "general knowledge"
