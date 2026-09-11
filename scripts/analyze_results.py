@@ -64,6 +64,17 @@ IDENTITY_METRICS = {
     "taxonomy": ["precision", "recall", "f1"],
     "sentiment": ["accuracy", "macro_precision", "macro_recall", "macro_f1"],
 }
+# The two fidelity JSDs each task reports per session, and what "lower" means.
+# Taxonomy's structural JSDs are per-taxonomy means with a seeded floor; they
+# live in its own per-session figure, not in this cross-session one.
+FIDELITY_JSD = {
+    "gec": (("type_dist_jsd", "count_dist_jsd"),
+            "generated errors distributed like real ones"),
+    "spam": (("type_dist_jsd", "count_dist_jsd"),
+             "generated errors distributed like real ones"),
+    "sentiment": (("label_dist_jsd", "length_jsd"),
+                  "generated labels and lengths distributed like real ones"),
+}
 
 
 def _headline(task: str) -> str:
@@ -451,11 +462,13 @@ def plot_mode_effect(rows, task, out_dir):
 
 
 def plot_fidelity_jsd(sessions, task, out_dir):
-    """Distribution fidelity per session: error-type and count JSDs (0 = the
-    generated dataset's error mix matches the real benchmark exactly)."""
+    """Distribution fidelity per session: the task's two FIDELITY_JSD keys
+    (0 = the generated distribution matches the real benchmark exactly)."""
     from framework.plotting.style import SURFACE, apply_axes_style
+    if task not in FIDELITY_JSD:
+        return None
+    keys, meaning = FIDELITY_JSD[task]
     plt = _plt()
-    keys = ("type_dist_jsd", "count_dist_jsd")
     sel = [s for s in sessions if s["meta"]["task"] == task
            and (s.get("profile") or {}).get("fidelity")]
     sel = [s for s in sel if all(k in s["profile"]["fidelity"] for k in keys)]
@@ -478,8 +491,8 @@ def plot_fidelity_jsd(sessions, task, out_dir):
         ax.set_xticklabels(labels, fontsize=8)
         ax.set_title(key.replace("_", " "), fontsize=10)
     axes[0].set_ylabel("Jensen-Shannon divergence", fontsize=9)
-    fig.suptitle(f"{task}: distribution fidelity (lower = generated errors "
-                 f"distributed like real ones)", fontsize=11, y=1.04)
+    fig.suptitle(f"{task}: distribution fidelity (lower = {meaning})",
+                 fontsize=11, y=1.04)
     return _save(fig, os.path.join(out_dir, f"fidelity_{task}.png"))
 
 
