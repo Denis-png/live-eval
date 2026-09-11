@@ -7,6 +7,7 @@ from typing import Callable
 
 _REDUNDANCY_RE   = re.compile(r"(?im)^\s*Redundancy:\s*(trivial|valid)\b")
 _CORRECTION_RE   = re.compile(r"(?im)^\s*Correction:\s*(correct|incorrect)\b")
+_FAITHFULNESS_RE = re.compile(r"(?im)^\s*Faithfulness:\s*(broken|ok)\b")
 _CORRUPTED_RE = re.compile(r"(?im)^\s*Corrupted:\s*(.+?)\s*$")
 
 # Consulted only when structured parsing found no answer field — so a false
@@ -173,12 +174,17 @@ def _accept_pair(corrupted: str | None, gold: str | None) -> str | None:
 
 def _judgement_passes(raw: str) -> bool:
     """True iff the judge marks the sample valid AND the correction correct.
-    Missing fields default to True (keep) to mirror Denis's parse_judge_output."""
+    Missing fields default to True (keep) to mirror Denis's parse_judge_output.
+    Supports both Correction:/Faithfulness: field names."""
+    if not raw:
+        return True
     r = _REDUNDANCY_RE.search(raw)
     c = _CORRECTION_RE.search(raw)
-    valid   = (r.group(1).lower() == "valid")   if r else True
-    correct = (c.group(1).lower() == "correct") if c else True
-    return valid and correct
+    f = _FAITHFULNESS_RE.search(raw)
+    redundant  = (r.group(1).lower() == "trivial") if r else False
+    incorrect  = (c.group(1).lower() == "incorrect") if c else False
+    unfaithful = (f.group(1).lower() == "broken") if f else False
+    return not redundant and not incorrect and not unfaithful
 
 
 def _draw_label(class_balance: dict[str, float], labels, rng) -> str:
@@ -243,6 +249,14 @@ class BaseGenerator(ABC):
             try:
                 raw = self.call_api(prompt)
                 gen_dt = time.monotonic() - t0
+                if not raw:
+                    time.sleep(30)
+                    raw = self.call_api(prompt)
+                    gen_dt = time.monotonic() - t0
+                if not raw:
+                    print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] empty API response", flush=True)
+                    parse_failed += 1
+                    continue
                 error_type, corrupted, gold = _parse_generation(raw)
                 reason = _accept_pair(corrupted, gold)
                 if reason:
@@ -356,6 +370,14 @@ class BaseGenerator(ABC):
             try:
                 raw = self.call_api(prompt)
                 gen_dt = time.monotonic() - t0
+                if not raw:
+                    time.sleep(3)
+                    raw = self.call_api(prompt)
+                    gen_dt = time.monotonic() - t0
+                if not raw:
+                    print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] empty API response", flush=True)
+                    parse_failed += 1
+                    continue
                 # Refusal check BEFORE _parse_inverse: its bare single-line
                 # fallback would otherwise accept a one-line refusal as the
                 # corrupted text. An explicit Corrupted: field always wins.
@@ -444,6 +466,14 @@ class BaseGenerator(ABC):
             try:
                 raw = self.call_api(prompt.format(spec=spec, error_spec=error_spec))
                 gen_dt = time.monotonic() - t0
+                if not raw:
+                    time.sleep(30)
+                    raw = self.call_api(prompt.format(spec=spec, error_spec=error_spec))
+                    gen_dt = time.monotonic() - t0
+                if not raw:
+                    print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] empty API response", flush=True)
+                    parse_failed += 1
+                    continue
                 error_type, corrupted, gold = _parse_generation(raw)
                 reason = _accept_pair(corrupted, gold)
                 if reason:
@@ -468,7 +498,7 @@ class BaseGenerator(ABC):
                 synthetic.append({
                     "original": gold,
                     "corrupted": corrupted,
-                    "error_type": error_type or ", ".join(keys),
+                    "error_type": ", ".join(keys),
                 })
                 suffix = f" + judge {judge_dt:.1f}s" if judge_prompt else ""
                 print(f"[{i}/{total}] gen {gen_dt:.1f}s{suffix} ✓ ({error_type or ', '.join(keys)})", flush=True)

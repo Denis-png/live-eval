@@ -25,6 +25,24 @@ class SentimentTask(BaseTask):
     def get_judge_prompt(self) -> str | None:
         return self._config.get("judge_prompt")
 
+    def get_inverse_prompt(self) -> str | None:
+        return self._config.get("inverse_prompt")
+
+    def get_inverse_judge_prompt(self) -> str | None:
+        return self._config.get("inverse_judge_prompt")
+
+    def get_error_descriptions(self) -> dict[str, str]:
+        return self._config.get("error_descriptions", {})
+
+    def get_carrier_prompt(self) -> str | None:
+        return self._config.get("carrier_prompt")
+
+    def get_seedless_forward_prompt(self) -> str | None:
+        return self._config.get("seedless_forward_prompt")
+
+    def get_profile_side(self, mode: str) -> str:
+        return "incorrect"
+
     def get_evaluators(self) -> list[str]:
         return self._config["evaluators"]
 
@@ -113,6 +131,56 @@ class SentimentTask(BaseTask):
             for r in real_data
             if r.get("incorrect") and r.get("sentiment_label")
         ]
+
+    def profile_dataset(self, rows: list[dict]) -> dict | None:
+        from collections import Counter
+        from framework.profiling.dataset_profiler import tokenize
+        from framework.profiling.text_stats import WORD_BINS, length_distribution, style_profile
+
+        texts = [r.get("text") or r.get("corrupted") or r.get("incorrect") for r in rows]
+        texts = [t for t in texts if t]
+        if not texts:
+            return None
+
+        error_types = [r.get("error_type") for r in rows if r.get("error_type")]
+        type_counts = Counter(error_types)
+        total = max(sum(type_counts.values()), 1)
+
+        label_counts = Counter(r.get("label") for r in rows if r.get("label"))
+
+        return {
+            "num_samples": len(rows),
+            "error_type_dist": {k: round(v / total, 4) for k, v in type_counts.most_common()},
+            "label_dist": dict(label_counts),
+            "word_count_hist": length_distribution(
+                [len(tokenize(t)) for t in texts], WORD_BINS
+            )["bins"],
+            "style": style_profile(texts),
+        }
+
+    def compare_profiles(self, real: dict, generated: dict) -> dict:
+        from framework.profiling.fidelity import jensen_shannon_divergence
+        return {
+            "type_dist_jsd": jensen_shannon_divergence(
+                real.get("error_type_dist", {}), generated.get("error_type_dist", {})
+            ),
+            "label_dist_jsd": jensen_shannon_divergence(
+                {k: v for k, v in (real.get("label_dist") or {}).items()},
+                {k: v for k, v in (generated.get("label_dist") or {}).items()},
+            ),
+            "length_jsd": jensen_shannon_divergence(
+                real.get("word_count_hist", {}), generated.get("word_count_hist", {})
+            ),
+            "style_deltas": {
+                key: round(
+                    generated.get("style", {}).get(key, 0.0)
+                    - real.get("style", {}).get(key, 0.0), 4
+                )
+                for key in sorted(
+                    set(real.get("style", {})) | set(generated.get("style", {}))
+                )
+            },
+        }
 
     def get_task_name(self) -> str:
         return "sentiment"
