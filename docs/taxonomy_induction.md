@@ -78,7 +78,8 @@ One generated sample is one complete synthetic taxonomy, not one class or one ed
 
 Taxonomy generation has two modes:
 
-- **Seedless** (default): profile-driven generation producing completely synthetic
+- **Seedless** (the default when `seedless` is omitted; the shipped config runs
+  seeded): profile-driven generation producing completely synthetic
   taxonomies. The model receives a structural target sampled from the real profile
   (inverse mode) or only a domain (forward mode).
 - **Seeded**: the model receives a real benchmark subtree anonymised as `C0, C1, ...`
@@ -219,24 +220,33 @@ real-vs-synthetic distribution shapes for depth, parent count, and child count.
 
 ## Example Run Configuration
 
-Relevant taxonomy config fields:
+Relevant fields of the shipped `framework/configs/taxonomy/config.yaml`:
 
 ```yaml
 generation:
+  mode: forward             # the shipped baseline cell; --mode / --seedless pick others
+  seedless: false
   provider: openrouter
-  model: xiaomi/mimo-v2.5
+  model: minimax-m3
   num_runs: 3
-  sample_size: 1
-  profile_path: framework/data/profiles/taxonomy/<benchmark>_<n>_taxonomy_profile.json
-  max_parse_attempts: 2
-  max_tokens: 4096
+  sample_size: 10           # whole taxonomies per run
+  max_tokens: 32768         # a reasoning model thinks before it emits the artifact
+  timeout: 600
   feedback:
-    enabled: true
-    max_rounds: 1
+    max_rounds: 1           # leave `enabled` to taxonomy.json's default: an explicit
+                            # `enabled: true` makes three of the four cells refuse
+  seed_pool:
+    max_depth: 4
+    min_classes: 5
+
+task_models:
+  - {name: lexical, type: lexical}
+  - {name: star, type: star}
+  - {name: minimax-m3, type: llm, provider: openrouter, max_tokens: 32768}
 ```
 
-`sample_size: 1` and `num_runs: 3` means one complete synthetic taxonomy per
-run, across three independent runs.
+`sample_size: 10` and `num_runs: 3` mean ten synthetic taxonomies per run, across
+three independent runs.
 
 The taxonomy task config also contains feedback tolerances:
 
@@ -255,30 +265,25 @@ The taxonomy task config also contains feedback tolerances:
 }
 ```
 
-Run the pipeline with a complete taxonomy YAML config:
+Run the pipeline with the shipped config:
 
 ```bash
-python -m framework.main --config /path/to/taxonomy_run.yaml
+python -m framework.main --config framework/configs/taxonomy/config.yaml
 ```
 
 ## Validation Note
 
-The final Xiaomi/MiMo OpenRouter smoke validation reached the provider and
-passed prompt leakage checks, but did not produce a valid generated taxonomy
-under:
+A live `forward+seeded` smoke run on 2026-09-11 (minimax-m3, generation and LLM
+task model both at `max_tokens: 32768`, 2 samples, 1 run) verified both generated
+taxonomies against their computed gold, and scored the LLM task model at real
+F1 0.886 on the matched seed-pool reference (lexical 0.30, star 0.17). Every stage
+-- generation, evaluation, fidelity and plots -- completed.
 
-```text
-generation.max_tokens = 4096
-```
-
-Both bounded attempts returned `message.content = None`, had
-`finish_reason = length`, consumed all 4096 completion tokens, and reported
-reasoning output. No textual taxonomy JSON was produced, so evaluator and
-fidelity stages were not reached in that smoke run.
-
-This is treated as a model/configuration limitation rather than a taxonomy
-validator failure. The validation note does not imply that increasing token
-limits is proven to solve the issue.
+History: an earlier Xiaomi/MiMo smoke run at `generation.max_tokens = 4096` never
+produced an artifact. Both attempts ended with `finish_reason = length` and
+`message.content = None` after spending the whole budget on reasoning; the same
+truncation later hit minimax at 16384 on the largest seeds, which is why both
+limits now sit at 32768.
 
 ## Seeded Generation
 
