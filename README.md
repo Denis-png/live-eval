@@ -217,12 +217,17 @@ declares prompts for (see "Fail-fast" below).
 
 ### The four cells, per task shape
 
-**`corruption` (GEC)** — corrupt a source text:
+**`corruption` (GEC, Sentiment)** — corrupt a source text:
 
 | | `seedless: false` (seeded) | `seedless: true` |
 |---|---|---|
 | **`mode: forward`** | `generate()` rewrites a real seed sentence into a corrupted variant; the generator picks the error type itself. | `generate_seedless_pairs()`: no real seed — a profile-sampled content spec drives the LLM to invent an original/corrupted pair directly. Needs `seedless_forward_prompt`. |
 | **`mode: inverse`** | `generate_inverse()` corrupts the real benchmark's known-clean `correct` field according to an **empirical error distribution** (ERRANT-profiled) so the injected error mix matches the benchmark. | A carrier (clean sentence) is synthesized from a profile content spec via `generate_carriers()` (needs `carrier_prompt`), then fed through the same `generate_inverse()` in place of a real seed — the empirical error distribution still drives the injected errors. |
+
+For Sentiment the "error types" are sentiment transformations (`sentiment_flip_negative`,
+`sarcasm_injection`, …), each implying the label the sample is scored against. Real tweets
+carry a label but no transformation, so its empirical distribution is the real **label
+balance**, spread evenly over the transformations producing each label — one per sample.
 
 **`class_conditional`** — classification is inherently label → text: draw a target
 label from the balance (`class_balance`, default the real dataset's empirical
@@ -234,7 +239,7 @@ classifier cannot separate them on "was this written by an LLM" artifacts.
 
 | | `seedless: false` (seeded) | `seedless: true` |
 |---|---|---|
-| **`mode: inverse`** (default) | The target label is drawn independently and **imposed** on a seed of any class, via `get_inverse_class_prompts()[label]`. A spam seed rewritten to HAM is a hard negative — spam-like topic, no spam signals. | The same, over carriers synthesized from the profile instead of real messages. |
+| **`mode: inverse`** (default when `mode` is omitted) | The target label is drawn independently and **imposed** on a seed of any class, via `get_inverse_class_prompts()[label]`. A spam seed rewritten to HAM is a hard negative — spam-like topic, no spam signals. | The same, over carriers synthesized from the profile instead of real messages. |
 | **`mode: forward`** | The seed's own label is **inherited**: each class rewrites a labeled seed of that class into a new one. Needs `forward_prompts`. | Per-label profile content specs, no real seed. Needs `seedless_class_prompts`. Note this cell draws its label from the balance, so it imposes rather than inherits — see Limitations. |
 
 **`structured` (Taxonomy)** — one sample is a whole artifact. The `mode` and
@@ -244,7 +249,7 @@ computed gold graph rather than parsing one from model output:
 | | `seedless: false` (seeded) | `seedless: true` |
 |---|---|---|
 | **`mode: forward`** | Inherits the seed subtree's structure. No profile needed. | Only the domain is supplied. Size, depth and branching all emerge. |
-| **`mode: inverse`** (default) | Edits the seed toward a target sampled from the profile. | A structural target is sampled from the real profile and imposed; the feedback loop iterates toward it for a bounded number of rounds. |
+| **`mode: inverse`** (default when `mode` is omitted) | Edits the seed toward a target sampled from the profile. | A structural target is sampled from the real profile and imposed; the feedback loop iterates toward it for a bounded number of rounds. |
 
 ### Setting it
 
@@ -252,7 +257,10 @@ computed gold graph rather than parsing one from model output:
       mode: "inverse"        # forward | inverse — see the tables above
       seedless: false         # true = drop real seeds, generate from the profile only
 
-CLI overrides: `--mode forward|inverse`, `--seedless`/`--no-seedless`.
+CLI overrides: `--mode forward|inverse`, `--seedless`/`--no-seedless`. Every shipped
+config runs the **forward + seeded** baseline with the same generator
+(`openrouter` / `minimax-m3`); `framework/tests/test_shipped_configs.py` keeps the four
+aligned.
 
 ### Fail-fast
 
@@ -273,14 +281,17 @@ clone, before the first seedless run:
       # writes framework/data/profiles/gec/<benchmark>_<n>_gec_profile.json
 
 `--topics` is required for seedless generation — it adds the LLM-driven `topics`
-(GEC) / `topics_per_label` (Spam) block the content-spec sampler needs; without it,
-`_load_generation_profile` raises `RuntimeError` naming the missing block. The default
-profile path is `framework/data/profiles/<task>_profile.json`; override per-run with
-`generation.profile_path`.
+(GEC, Sentiment) / `topics_per_label` (Spam) block the content-spec sampler needs;
+without it, loading the profile raises `RuntimeError` naming the missing block.
+`--task` is one of `gec`, `spam`, `sentiment`, `taxonomy` (taxonomy takes no `--topics`),
+and every task profiles the benchmark its config names — the rows the real baseline is
+scored on. The profile lands in `framework/data/profiles/<task>/<benchmark>_<n>_<task>_profile.json`,
+where the pipeline looks for it; override per-run with `generation.profile_path`.
 
 | Task | strategy | cells |
 |------|----------|------------|
 | GEC  | `corruption` | forward / inverse × seeded / seedless (see table above) |
+| Sentiment | `corruption` | forward / inverse × seeded / seedless; the inverse and seedless mix follows the real label balance |
 | Spam | `class_conditional` | inverse / forward × seeded / seedless; class balance from `class_balance` |
 | Taxonomy | `structured` | forward / inverse × seeded / seedless; seeded cells verify generated structure against computed gold; see [docs/taxonomy_induction.md](docs/taxonomy_induction.md) |
 
@@ -341,7 +352,11 @@ what the fidelity detectors look for.
 steer `type_dist`/`count_dist`. GEC `forward + seeded` has no injectable distribution —
 the generator picks its own error type — so calibration steers **which seeds are fed**
 instead, reweighting the seed pool that is that cell's implicit error distribution; the
-prompt is untouched and runs still draw seeds freshly each run. Spam steers
+prompt is untouched and runs still draw seeds freshly each run. Sentiment steers
+`type_dist`/`count_dist` in its imposed cells, measured on the transformations the
+surviving samples carry, so it corrects per-transformation attrition from parsing and
+judging; its `forward + seeded` cell cannot be calibrated (the model picks the
+transformation, and real tweets carry none to aim a seed mix at) and says so. Spam steers
 `type_dist`/`count_dist` in all four cells, plus `class_prob`, which is corrected in
 closed form from per-class attrition (a model refuses to write spam far more often than
 it refuses a benign paraphrase, so the surviving class balance drifts from the balance
@@ -448,8 +463,12 @@ Use the multi-model driver to run several generation models over the identical
 sample in one command:
 
     cd live-eval
-    # generation_models: lives in each task's compare.yaml (see its comments)
     python -m scripts.compare_models --config framework/configs/gec/compare.yaml
+
+A task's `compare.yaml` holds only `base_config: config.yaml` and the
+`generation_models` list: every other setting is the run config's own, so a comparison
+differs from a normal run only in the generation model. For another cell, point
+`base_config` at an edited copy of `config.yaml`.
 
 > **`generation_models` is read ONLY by `scripts.compare_models`.**
 > `python -m framework.main` always runs the **single** model in `generation.provider` /
@@ -485,7 +504,7 @@ the first model runs.
    |--------|-----|
    | `inverse` cells | `get_inverse_prompt`, `get_error_descriptions`, `profile_error_distribution` |
    | `seedless` cells | `get_carrier_prompt` / `get_seedless_forward_prompt` + a `--topics` profile |
-   | real-vs-generated fidelity | `profile_dataset`, `compare_profiles`, `get_real_eval_samples` |
+   | real-vs-generated fidelity | `build_fidelity_profile`, `compare_fidelity_profiles`, `get_real_eval_samples` |
    | calibration | `get_calibration_keys` |
    | the `class_conditional` shape | `get_generation_strategy`, `get_class_labels`, `get_inverse_class_prompts`, `get_forward_prompts`, `get_seedless_class_prompts`, `get_seed_pool` |
 
@@ -513,9 +532,11 @@ Each run session gets its own directory under `output.base_dir/<task>/<session>/
     results.json       - {"meta": <provenance>, "results": <scores>}
     generated/
         run_1.json …   - each run's synthetic data (never reused for eval)
-    real_sample.json   - the real reference sample (classification tasks)
-    profile.json       - {real, generated, fidelity} (classification tasks)
-    plots/             - generated_vs_real_<model>.png, run_variance_<model>.png, fidelity.png (classification tasks)
+    real_sample.json   - the real reference sample
+    profile.json       - {real, generated, fidelity}
+    plots/             - generated_vs_real_<model>.png, run_variance_<model>.png, and the
+                         task's fidelity figure (fidelity.png, sentiment_fidelity.png, or
+                         taxonomy_fidelity*.png)
 
 `results.json` has two top-level keys:
 
@@ -547,7 +568,7 @@ GEC (Grammatical Error Correction) — implemented (corruption: forward + invers
 Spam Detection — implemented (class-conditional generation + real baseline + fidelity)
 Taxonomy Induction — implemented (structured generation + subclass evaluation + structural fidelity); see [docs/taxonomy_induction.md](docs/taxonomy_induction.md)
 Hate Speech Detection — planned
-Sentiment Analysis — planned
+Sentiment Analysis — implemented (corruption: forward + inverse, seeded + seedless; label-balance fidelity)
 
 ## Current Evaluators (GEC)
 
@@ -563,3 +584,15 @@ n_edits — raw edit count
 accuracy — overall correct classification rate
 precision / recall / f1 — computed with SPAM as the positive label
 fpr — false-positive rate (legitimate messages flagged as spam)
+
+## Current Evaluators (Sentiment)
+
+accuracy — overall correct classification rate
+macro_precision / macro_recall — each class's own score, averaged over NEGATIVE / NEUTRAL / POSITIVE
+macro_f1 — the mean of per-class F1 (sklearn's `average="macro"`)
+
+## Current Evaluators (Taxonomy)
+
+precision / recall / f1 — exact subclass relations, micro-averaged over taxonomies
+diagnostics — macro precision / recall / F1, invalid and unknown-class relations, and
+malformed vs failed predictions; see [docs/taxonomy_induction.md](docs/taxonomy_induction.md)
