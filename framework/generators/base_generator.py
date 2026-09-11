@@ -1,3 +1,4 @@
+import json
 import random
 import re
 import sys
@@ -63,6 +64,74 @@ def _strip_reasoning(raw: str) -> str:
     (the model opened a reasoning block, never closed it, and glued the answer on)
     is left intact — the tag parser recovers the answer from it."""
     return _THINK_BLOCK_RE.sub("", raw or "").strip()
+
+
+_PREVIEW_ELISION = "\n[...]\n"
+
+
+def preview_response(text, limit: int = 800) -> str | None:
+    """A bounded preview of a model response that keeps its START and its END.
+
+    A head-only preview is useless for the responses that actually fail: a
+    reasoning model writes thousands of characters of <think> before its answer,
+    so the first `limit` characters show only the opening of its reasoning. The
+    answer -- and whatever broke -- is at the end. When the response is longer
+    than `limit`, this keeps both ends around a fixed elision marker, and the
+    result is exactly `limit` characters long.
+    """
+    if text is None:
+        return None
+    s = text if isinstance(text, str) else repr(text)
+    if len(s) <= limit:
+        return s
+    keep = limit - len(_PREVIEW_ELISION)
+    head = keep // 2
+    return s[:head] + _PREVIEW_ELISION + s[-(keep - head):]
+
+
+def extract_json_object(text) -> tuple[dict | None, str | None]:
+    """Pull a model's JSON answer out of a response that may carry reasoning.
+
+    Returns (object, None), or (None, reason) with reason one of
+    "non_string_response", "empty_response", "malformed_json".
+
+    A reasoning model does not return bare JSON. It may wrap its chain of thought
+    in <think>...</think>, or open <think> and never close it, running straight
+    into a fenced answer. Both taxonomy parsers -- generation AND evaluation --
+    once called json.loads on the whole response and so discarded every correct
+    answer such a model gave. They share this one extractor now, so they cannot
+    drift apart again.
+
+    Closed reasoning blocks are stripped, then the LAST complete top-level JSON
+    object is taken: the final answer follows the reasoning, and reasoning often
+    contains a draft that must not become the answer. Nothing is invented.
+    """
+    if not isinstance(text, str):
+        return None, "non_string_response"
+    stripped = _strip_reasoning(text)
+    if not stripped:
+        return None, "empty_response"
+    try:
+        payload = json.loads(stripped)
+        if isinstance(payload, dict):
+            return payload, None
+    except json.JSONDecodeError:
+        pass
+    # Walk top-level objects left to right, jumping past each one decoded, so a
+    # dict NESTED inside an answer is never mistaken for the answer itself.
+    decoder = json.JSONDecoder()
+    last = None
+    i = stripped.find("{")
+    while i != -1:
+        try:
+            obj, end = decoder.raw_decode(stripped, i)
+        except json.JSONDecodeError:
+            i = stripped.find("{", i + 1)
+            continue
+        if isinstance(obj, dict):
+            last = obj
+        i = stripped.find("{", end)
+    return (last, None) if last is not None else (None, "malformed_json")
 
 
 def _is_reasoning_dump(text: str) -> bool:
@@ -848,8 +917,11 @@ class BaseGenerator(ABC):
         rounds_budget = max(0, max_feedback_rounds) if feedback_enabled else 0
         max_parse_attempts = max(1, max_parse_attempts)
         synthetic: list[dict] = []
+        # A sample whose every attempt failed used to vanish with its
+        # diagnostics. Persisted by the pipeline; reset per call.
+        self.last_rejections: list[dict] = []
 
-        for _ in range(sample_size):
+        for sample_idx in range(1, sample_size + 1):
             selected = None
             metadata: dict = {
                 "feedback_enabled": feedback_enabled,
@@ -866,19 +938,39 @@ class BaseGenerator(ABC):
                 attempt_diagnostics: list[dict] = []
                 while parsed is None and attempts < max_parse_attempts:
                     attempts += 1
-                    raw = self.call_api(build_prompt(feedback))
-                    parse_result = parse(raw)
-                    parsed = parse_result["artifact"]
-                    diagnostic = {"attempt": attempts, **parse_result["diagnostic"]}
+                    failure = None
+                    # Reset every attempt, so a call that raises can never be
+                    # credited with the previous attempt's response.
+                    raw = None
+                    try:
+                        raw = self.call_api(build_prompt(feedback))
+                        parse_result = parse(raw)
+                        parsed = parse_result["artifact"]
+                        diagnostic = {"attempt": attempts, **parse_result["diagnostic"]}
+                    except Exception as e:
+                        # Every other generation loop turns a per-sample failure into
+                        # a counted skip. This one used to let it propagate, which
+                        # aborted the whole run and discarded every artifact already
+                        # built — and TruncatedResponse makes that the COMMON case,
+                        # not a rare one: a reasoning model that spends its budget on
+                        # chain-of-thought truncates on every long artifact. That is
+                        # the failure docs/taxonomy_induction.md records as the
+                        # blocker on taxonomy's last end-to-end smoke run.
+                        parsed = None
+                        failure = f"{type(e).__name__}: {e}"
+                        diagnostic = {"attempt": attempts, "rejection_reason": failure}
                     provider_diagnostic = getattr(self, "last_response_diagnostic", None)
                     if parsed is None and provider_diagnostic:
                         diagnostic["provider_response"] = provider_diagnostic
+                    if parsed is None and raw is not None:
+                        diagnostic.setdefault("raw_preview", preview_response(raw))
                     attempt_diagnostics.append(diagnostic)
                     if parsed is None:
                         reason = diagnostic.get("rejection_reason", "unknown")
                         print(
-                            "[SKIP] structured generation returned invalid "
-                            f"JSON/artifact ({reason})."
+                            "[SKIP] structured generation "
+                            + (f"failed ({reason})." if failure
+                               else f"returned invalid JSON/artifact ({reason}).")
                         )
                     if request_delay > 0:
                         time.sleep(request_delay)
@@ -900,7 +992,24 @@ class BaseGenerator(ABC):
                 if not feedback_enabled:
                     metadata["final_round_selected"] = round_idx
                     break
-                round_info = build_feedback(selected)
+                try:
+                    round_info = build_feedback(selected)
+                except Exception as e:
+                    # The artifact is already parsed, valid and paid for; feedback
+                    # only tries to improve it. Losing the run over a failure in the
+                    # refinement step would discard work that already succeeded.
+                    print(f"[WARN] feedback round {round_idx} failed, keeping the "
+                          f"artifact as generated: {e}", file=sys.stderr, flush=True)
+                    metadata["rounds"].append({
+                        "round": round_idx,
+                        "feedback_informed": feedback is not None,
+                        "parse_attempts": attempts,
+                        "attempts": attempt_diagnostics,
+                        "valid": True,
+                        "feedback_error": f"{type(e).__name__}: {e}",
+                    })
+                    metadata["final_round_selected"] = round_idx
+                    break
                 feedback_result = round_info["feedback"]
                 metadata["rounds"].append({
                     "round": round_idx,
@@ -925,6 +1034,11 @@ class BaseGenerator(ABC):
             if selected is not None:
                 selected["generation_feedback"] = metadata
                 synthetic.append(selected)
+            else:
+                self.last_rejections.append({
+                    "index": sample_idx,
+                    "attempts": [a for rnd in metadata["rounds"] for a in rnd["attempts"]],
+                })
 
         if len(synthetic) < sample_size:
             print(
@@ -932,6 +1046,98 @@ class BaseGenerator(ABC):
                 f"artifacts for {sample_size} requested.",
                 file=sys.stderr,
             )
+        return synthetic
+
+    def generate_structured_seeded(
+        self,
+        golds,
+        build_prompt,
+        parse,
+        verify,
+        *,
+        max_parse_attempts: int = 3,
+        request_delay: float = 0.0,
+    ) -> list[dict]:
+        """One artifact per pre-computed gold, verified rather than trusted.
+
+        The caller has already computed each gold graph exactly. The model's only
+        job is to re-verbalise it, so this loop VERIFIES the response against the
+        gold before keeping anything. What it keeps is the PARSED artifact — the
+        model's names — and that is safe precisely because the verification gate
+        stands in front of it: a record only exists once its structure has been
+        proven to be gold's. Gold contributes provenance, not shape. A model that
+        drifts loses its sample and can never redefine the reference.
+
+        No feedback loop and no sample_size: gold is exact, so there is nothing
+        to iterate toward, and the count is `len(golds)` by construction. A
+        failed verification is a parse attempt, not a feedback round.
+
+        Stays ontology-agnostic like generate_structured: callables and data in,
+        never the task itself.
+        """
+        synthetic: list[dict] = []
+        # Rejected golds used to vanish with their diagnostics, so a run that
+        # rejected everything left nothing to diagnose. The pipeline persists
+        # this; it is reset per call so one run's rejections never leak into
+        # the next.
+        self.last_rejections: list[dict] = []
+        for i, gold in enumerate(golds, 1):
+            attempts, accepted = 0, False
+            diagnostics: list[dict] = []
+            while not accepted and attempts < max_parse_attempts:
+                attempts += 1
+                # Reset every attempt: if this call raises, the previous
+                # attempt's response must not be attributed to it.
+                raw = None
+                try:
+                    raw = self.call_api(build_prompt(gold))
+                    result = parse(raw)
+                    parsed = result["artifact"]
+                    diagnostic = {"attempt": attempts, **result["diagnostic"]}
+                except Exception as e:
+                    parsed = None
+                    diagnostic = {"attempt": attempts,
+                                  "rejection_reason": f"{type(e).__name__}: {e}"}
+                if parsed is not None and not verify(gold, parsed):
+                    parsed = None
+                    diagnostic["rejection_reason"] = "structure does not match gold"
+                if parsed is None and raw is not None:
+                    # What the model actually said, not just that it was wrong.
+                    diagnostic.setdefault("raw_preview", preview_response(raw))
+                diagnostics.append(diagnostic)
+                if parsed is None:
+                    print(f"[{i}/{len(golds)}] [SKIP] "
+                          f"{diagnostic.get('rejection_reason', 'unknown')}", flush=True)
+                else:
+                    accepted = True
+                    # verify() has already proven this graph carries gold's
+                    # structure — a POSITIONAL relabel plus an exact edge-set
+                    # comparison, not an isomorphism search, since rooted-tree
+                    # canonicalisation can accept two structurally different
+                    # DAGs. So the parsed classes AND axioms ARE gold's structure
+                    # under the model's names — keep them together. Splicing
+                    # gold's axioms onto the model's class list would name
+                    # classes the artifact does not contain. Only provenance
+                    # comes from gold.
+                    record = dict(parsed)
+                    record["domain"] = gold["domain"]
+                    record["source_max_depth"] = gold.get("source_max_depth")
+                    # An integer: pairs the record with its real pool subtree.
+                    record["source_pool_index"] = gold.get("source_pool_index")
+                    record["seeded_diagnostics"] = {"attempts": diagnostics}
+                    synthetic.append(record)
+                if request_delay > 0:
+                    time.sleep(request_delay)
+            if not accepted:
+                self.last_rejections.append({
+                    "index": i,
+                    "gold_classes": list(gold.get("classes") or []),
+                    "attempts": diagnostics,
+                })
+
+        if len(synthetic) < len(golds):
+            print(f"[WARN] seeded structured generation produced {len(synthetic)} "
+                  f"artifacts for {len(golds)} golds.", file=sys.stderr)
         return synthetic
 
     @abstractmethod

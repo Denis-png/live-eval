@@ -199,13 +199,18 @@ knobs that together select one of four **cells**:
   The axis is task-shape-independent. Back-translation (generate the target, derive
   the source) and doc2query (pick a document, generate a query for it) are inverse
   under this definition; annotating text you just generated is forward.
-- **`generation.seedless`** (`true` | `false`, default `false`) — *whether real
-  benchmark text ever reaches the generation prompt*. `false` ("seeded") passes a
-  real sample from the dataset as a seed. `true` drops real seeds entirely: a
+- **`generation.seedless`** (`true` | `false`) — *whether real benchmark text ever
+  reaches the generation prompt*. `false` ("seeded") passes a real sample from the
+  dataset as a seed. `true` drops real seeds entirely: a
   benchmark **profile** (built once per clone by `profile_dataset`, see
   "Seedless prerequisite: profiling" below) is sampled instead to synthesize the
   content spec (topic, length, style) that goes into the prompt — the LLM invents
   the text from that spec rather than transforming a real sentence.
+
+  Omitting the key means `false` (seeded) for every strategy except `structured`,
+  which defaults to `true` because its seeded cells need a real-artifact corpus.
+  `pipeline.resolve_seedless` is the single answer the session name, the
+  generation dispatch, the results `meta` and `calibrate` all read.
 
 `mode` and `seedless` combine freely; a task shape only needs to support the cells it
 declares prompts for (see "Fail-fast" below).
@@ -232,13 +237,14 @@ classifier cannot separate them on "was this written by an LLM" artifacts.
 | **`mode: inverse`** (default) | The target label is drawn independently and **imposed** on a seed of any class, via `get_inverse_class_prompts()[label]`. A spam seed rewritten to HAM is a hard negative — spam-like topic, no spam signals. | The same, over carriers synthesized from the profile instead of real messages. |
 | **`mode: forward`** | The seed's own label is **inherited**: each class rewrites a labeled seed of that class into a new one. Needs `forward_prompts`. | Per-label profile content specs, no real seed. Needs `seedless_class_prompts`. Note this cell draws its label from the balance, so it imposes rather than inherits — see Limitations. |
 
-**`structured` (Taxonomy)** — one sample is a whole artifact, so `seedless` is
-pinned to `true` (seeded is unimplemented) and only `mode` varies:
+**`structured` (Taxonomy)** — one sample is a whole artifact. The `mode` and
+`seedless` axes both vary, yielding four cells. Seeded cells verify against a
+computed gold graph rather than parsing one from model output:
 
-| | `seedless: true` |
-|---|---|
-| **`mode: inverse`** (default) | A structural target is sampled from the real profile and imposed; the feedback loop iterates toward it for a bounded number of rounds. |
-| **`mode: forward`** | Only the domain is supplied. Size, depth and branching all emerge, and there is no feedback loop — the baseline for judging what targeting buys. |
+| | `seedless: false` (seeded) | `seedless: true` |
+|---|---|---|
+| **`mode: forward`** | Inherits the seed subtree's structure. No profile needed. | Only the domain is supplied. Size, depth and branching all emerge. |
+| **`mode: inverse`** (default) | Edits the seed toward a target sampled from the profile. | A structural target is sampled from the real profile and imposed; the feedback loop iterates toward it for a bounded number of rounds. |
 
 ### Setting it
 
@@ -276,7 +282,7 @@ profile path is `framework/data/profiles/<task>_profile.json`; override per-run 
 |------|----------|------------|
 | GEC  | `corruption` | forward / inverse × seeded / seedless (see table above) |
 | Spam | `class_conditional` | inverse / forward × seeded / seedless; class balance from `class_balance` |
-| Taxonomy | `structured` | profile-driven, seedless structured taxonomy generation; see [docs/taxonomy_induction.md](docs/taxonomy_induction.md) |
+| Taxonomy | `structured` | forward / inverse × seeded / seedless; seeded cells verify generated structure against computed gold; see [docs/taxonomy_induction.md](docs/taxonomy_induction.md) |
 
 ### Calibration (optional, improves fidelity)
 

@@ -6,7 +6,7 @@ import sys
 import yaml
 
 try:
-    from framework.pipeline import resolve_mode, run_pipeline
+    from framework.pipeline import load_task, resolve_mode, run_pipeline
 except ModuleNotFoundError as exc:
     if exc.name != "framework":
         raise
@@ -125,15 +125,6 @@ def validate_config(config: dict) -> None:
         if gen["num_runs"] < 1:
             problems.append(f"'generation.num_runs' must be >= 1 (got {gen['num_runs']})")
         mode = gen.get("mode", "forward")
-        task_name = (config.get("task") or {}).get("name")
-        if task_name == "taxonomy":
-            if gen.get("seedless") is False:
-                problems.append(
-                    f"seeded structured generation is not implemented for "
-                    f"'{task_name}'; it needs a real-artifact corpus and a "
-                    "perturbation operator. 'generation.seedless' must be "
-                    "omitted or true"
-                )
         if mode not in ("forward", "inverse"):
             problems.append(f"'generation.mode' must be 'forward' or 'inverse' (got '{mode}')")
         seedless = gen.get("seedless", False)
@@ -256,12 +247,28 @@ def format_results_lines(results: dict) -> list[str]:
     return lines
 
 
+def _strategy_of_config(config: dict) -> str | None:
+    """The generation shape the configured task uses, or None if it cannot be
+    loaded (a bad task name is reported by validate_config's own checks, not by
+    an import error raised from inside them)."""
+    try:
+        return load_task((config.get("task") or {}).get("name")).get_generation_strategy()
+    except Exception:
+        return None
+
+
 def _display_generation_mode(config: dict) -> str:
-    """Human-readable mode label for startup output only."""
-    task_name = (config.get("task") or {}).get("name")
-    if task_name == "taxonomy":
-        return resolve_mode(config, "structured")
-    return config["generation"].get("mode", "n/a (class-conditional generation)")
+    """Human-readable mode label for startup output only.
+
+    Every strategy is on the mode axis, so every one resolves the same way.
+    This used to special-case taxonomy by name and answer "n/a
+    (class-conditional generation)" for everything else — which predates
+    class_conditional gaining its four (mode, seedless) cells and contradicted
+    what the run actually did."""
+    strategy = _strategy_of_config(config)
+    if strategy is None:
+        return config["generation"].get("mode", "n/a")
+    return resolve_mode(config, strategy)
 
 
 def main():

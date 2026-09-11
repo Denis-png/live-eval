@@ -5,6 +5,8 @@ whether the model fixes the right *types* of errors, regardless of where.
 """
 from collections import Counter
 
+from framework.evaluators.prf import precision_recall_f
+
 from ._errant_shared import annotate_results
 
 
@@ -19,9 +21,8 @@ def _f05(hyp: dict, ref: dict) -> float:
     tp = sum(min(hyp.get(t, 0), ref.get(t, 0)) for t in types)
     fp = sum(max(hyp.get(t, 0) - ref.get(t, 0), 0) for t in types)
     fn = sum(max(ref.get(t, 0) - hyp.get(t, 0), 0) for t in types)
-    p = tp / (tp + fp) if tp + fp > 0 else 0
-    r = tp / (tp + fn) if tp + fn > 0 else 0
-    return (1.25 * p * r) / (0.25 * p + r) if 0.25 * p + r > 0 else 0
+    # Soft counts: tp/fp/fn here are sums of distribution proportions, not ints.
+    return precision_recall_f(tp, fp, fn, beta=0.5)[2]
 
 
 def compute_errant_dist(results: list[dict]) -> float:

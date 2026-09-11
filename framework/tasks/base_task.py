@@ -173,6 +173,44 @@ class BaseTask(ABC):
             f"{self.get_task_name()} does not support structured generation."
         )
 
+    def build_seeded_artifact(self, seed: dict, mode: str,
+                              profile: dict | None, config: dict, rng) -> dict:
+        """Compute the GOLD artifact for one seeded structured sample.
+
+        `config` is the run config: the target domain a seeded artifact is
+        re-verbalised into is a benchmark property that must be reproducible
+        from results.json alone, so it is read from config rather than chosen
+        by the model.
+
+        `mode` decides where the structure comes from, exactly as elsewhere:
+        `forward` INHERITS the seed's own shape, `inverse` IMPOSES a target
+        sampled from `profile` by editing the seed toward it.
+
+        The result is ground truth. It is computed here and only ever COMPARED
+        to model output, never replaced by it, so a bad generation can produce a
+        skipped sample but never a corrupt reference.
+        """
+        raise NotImplementedError(
+            f"{self.get_task_name()} does not support seeded structured generation."
+        )
+
+    def build_seeded_generation_prompt(self, gold: dict) -> str:
+        """Ask the model to re-verbalise `gold` into its target domain: same
+        shape, new class names. Must not contain the source ontology's names."""
+        raise NotImplementedError(
+            f"{self.get_task_name()} does not support seeded structured generation."
+        )
+
+    def verify_structured_match(self, gold: dict, parsed: dict) -> bool:
+        """Does a parsed artifact have the same structure as `gold`?
+
+        The gate between model output and the benchmark. False means a counted
+        skip, never a new reference.
+        """
+        raise NotImplementedError(
+            f"{self.get_task_name()} does not support seeded structured generation."
+        )
+
     def parse_structured_generation(self, text: str) -> dict | None:
         """Parse and validate one structured generator response.
 

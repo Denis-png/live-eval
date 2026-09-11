@@ -1,14 +1,14 @@
 import json
 import unittest
 
-from framework.evaluators.taxonomy.metrics import (
-    compute_f1,
-    compute_precision,
-    compute_recall,
+from framework.evaluators.taxonomy._taxonomy_shared import (
     compute_taxonomy_scores,
-    parse_prediction_relations,
     score_taxonomy_result,
 )
+from framework.evaluators.taxonomy.f1 import compute_f1
+from framework.evaluators.taxonomy.precision import compute_precision
+from framework.evaluators.taxonomy.recall import compute_recall
+from framework.evaluators.taxonomy.relations import parse_prediction_relations
 
 
 def _result(prediction, gold=None):

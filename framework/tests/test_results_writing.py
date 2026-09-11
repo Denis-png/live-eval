@@ -200,10 +200,76 @@ class SeedlessMetaTests(unittest.TestCase):
         self.assertIn(os.path.join(DEFAULT_PROFILE_DIR, "gec"), meta["profile_path"])
         self.assertIn("_gec_profile.json", meta["profile_path"])
 
+    def test_structured_seeded_run_is_recorded_as_seeded(self):
+        # _build_meta hardcoded True for structured, so a SEEDED run wrote
+        # meta.seedless: true. scripts/analyze_results.py then filed it in the
+        # seedless bucket, where it collided with the real seedless session and
+        # dedup_sessions dropped one of the two -- the archive corruption the
+        # cell slug's own fix was meant to prevent.
+        meta = self._meta(_StructuredTask(), "inverse", False)
+        self.assertEqual(meta["strategy"], "structured")
+        self.assertFalse(meta["seedless"])
+
+    def test_structured_seedless_run_is_still_recorded_as_seedless(self):
+        meta = self._meta(_StructuredTask(), "inverse", True, profile_path="prof.json")
+        self.assertTrue(meta["seedless"])
+        self.assertEqual(meta["profile_path"], "prof.json")
+
+    def test_structured_defaults_to_seedless_when_the_key_is_absent(self):
+        # Seeded structured generation needs a real-artifact corpus, so the
+        # strategy's default stays seedless -- and the recorded default must
+        # match what the dispatch actually runs for the same config.
+        cfg = _config("r.json")
+        meta = _build_meta(cfg, _StructuredTask(), runs_completed=1,
+                           effective_samples_per_run=[1], real_baseline=True)
+        self.assertTrue(meta["seedless"])
+
     def test_profile_path_resolves_per_task_for_class_conditional(self):
         meta = self._meta(_ClassConditionalTask(), "inverse", True)  # no profile_path key
         self.assertIn(os.path.join(DEFAULT_PROFILE_DIR, "spam"), meta["profile_path"])
         self.assertIn("_spam_profile.json", meta["profile_path"])
+
+    def test_an_inverse_seeded_structured_run_records_its_profile(self):
+        # inverse+seeded samples the structure it imposes from the benchmark
+        # profile, so it consults one although it is seeded. Keying the record
+        # on `seedless` left it None, and the run could not be traced back to
+        # the (gitignored) profile that shaped it.
+        meta = self._meta(_StructuredTask(), "inverse", False, profile_path="prof.json")
+        self.assertEqual(meta["profile_path"], "prof.json")
+
+    def test_a_forward_seeded_structured_run_records_no_profile(self):
+        # forward+seeded inherits its structure from the drawn seed.
+        meta = self._meta(_StructuredTask(), "forward", False, profile_path="prof.json")
+        self.assertIsNone(meta["profile_path"])
+
+    def test_a_profile_is_recorded_exactly_when_generation_loads_one(self):
+        # The root cause: _build_meta decided "does this cell use a profile" by
+        # its own rule, apart from the loader's, and the two drifted. Pin them
+        # together over every cell of every strategy.
+        from unittest import mock
+
+        from framework import pipeline
+
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "prof.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({}, f)
+            with mock.patch("framework.profiling.spec_sampler.load_profile",
+                            return_value={"stub": True}):
+                for task in (_CorruptionTask(), _ClassConditionalTask(), _StructuredTask()):
+                    for mode in ("forward", "inverse"):
+                        for seedless in (False, True):
+                            with self.subTest(task=task.get_task_name(), mode=mode,
+                                              seedless=seedless):
+                                cfg = _config("r.json")
+                                cfg["generation"].update(mode=mode, seedless=seedless,
+                                                         profile_path=path)
+                                loaded = pipeline._load_benchmark_profile(cfg, task)
+                                meta = _build_meta(cfg, task, runs_completed=1,
+                                                   effective_samples_per_run=[1],
+                                                   real_baseline=True)
+                                self.assertEqual(meta["profile_path"] is not None,
+                                                 loaded is not None)
 
 
 class WriteResultsTests(unittest.TestCase):

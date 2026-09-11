@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest import mock
 
-from framework.evaluators.taxonomy.metrics import score_taxonomy_result
+from framework.evaluators.taxonomy._taxonomy_shared import score_taxonomy_result
 from framework.models.taxonomy import TaxonomyLLMModel
 from framework.tasks.taxonomy import TaxonomyTask
 

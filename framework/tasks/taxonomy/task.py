@@ -10,18 +10,21 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from typing import Any
 
-from framework.evaluators.taxonomy.metrics import (
-    compute_diagnostics,
-    compute_f1,
-    compute_precision,
-    compute_recall,
+from framework.evaluators.taxonomy.diagnostics import compute_diagnostics
+from framework.evaluators.taxonomy.f1 import compute_f1
+from framework.evaluators.taxonomy.precision import compute_precision
+from framework.evaluators.taxonomy.recall import compute_recall
+from framework.evaluators.taxonomy.relations import (
     normalize_relation_pair,
     normalize_relation_set,
 )
 from framework.tasks.base_task import BaseTask
+from framework.generators.base_generator import extract_json_object, preview_response
+from framework.tasks.taxonomy.graph_ops import (
+    EDIT_OPERATORS, matches_structure, sample_subtrees,
+)
 
 _CONFIG_PATH = os.path.join(
     os.path.dirname(__file__), "..", "..", "configs", "taxonomy", "taxonomy.json"
@@ -47,30 +50,18 @@ _RAW_PREVIEW_LIMIT = 800
 
 
 def _raw_preview(text: Any) -> str | None:
-    """Bounded provider-output preview for diagnostics only."""
-    if text is None:
-        return None
-    preview = text if isinstance(text, str) else repr(text)
-    return preview[:_RAW_PREVIEW_LIMIT]
+    """Bounded provider-output preview for diagnostics only. Keeps the start AND
+    the end: a reasoning model's answer sits after its <think> block."""
+    return preview_response(text, limit=_RAW_PREVIEW_LIMIT)
 
 
 def _extract_json_object(text: str) -> tuple[dict[str, Any] | None, str | None]:
-    """Parse a JSON object, tolerating fenced responses if present."""
-    if not isinstance(text, str):
-        return None, "non_string_response"
-    stripped = text.strip()
-    if not stripped:
-        return None, "empty_response"
-    if stripped.startswith("```"):
-        stripped = re.sub(r"^```(?:json)?\s*", "", stripped, flags=re.IGNORECASE)
-        stripped = re.sub(r"\s*```$", "", stripped)
-    try:
-        payload = json.loads(stripped)
-    except json.JSONDecodeError:
-        return None, "malformed_json"
-    if not isinstance(payload, dict):
-        return None, "malformed_json"
-    return payload, None
+    """Parse the model's JSON answer out of a response that may carry reasoning.
+
+    Delegates to the extractor the evaluation parser also uses, so generation and
+    evaluation read a reasoning model's output identically.
+    """
+    return extract_json_object(text)
 
 
 def _has_cycle(classes: set[str], edges: set[tuple[str, str]]) -> bool:
@@ -133,9 +124,15 @@ class TaxonomyTask(BaseTask):
         if model_type == "llm":
             from framework.models.taxonomy import TaxonomyLLMModel
             return TaxonomyLLMModel(merged)
+        if model_type == "lexical":
+            from framework.models.taxonomy import LexicalHeadMatchModel
+            return LexicalHeadMatchModel(merged)
+        if model_type == "star":
+            from framework.models.taxonomy import StarModel
+            return StarModel(merged)
         raise ValueError(
             f"Unsupported taxonomy model type: '{model_type}'. "
-            "Supported MVP type: llm."
+            "Supported types: llm, lexical, star."
         )
 
     def parse_row(self, row: dict) -> dict | None:
@@ -274,12 +271,177 @@ class TaxonomyTask(BaseTask):
         ]
         return {key: source.get(key) for key in keys if key in source}
 
+    def get_seed_pool(self, config: dict, real_data: list[dict], mode: str,
+                      *, seed_weights: dict | None = None, rng=None) -> list[dict]:
+        """Subtrees of the real ontology, indexed by their own max depth.
+
+        One ontology has to supply the whole pool, so it is sampled rather than
+        used whole. `seed_weights` is accepted for signature compatibility and
+        ignored: reweighting the draw is a calibration concern, and taxonomy has
+        no calibration keys yet.
+
+        Each subtree is stamped with `pool_index`, its position in the pool: ONE
+        numbering over all of `real_data`. sample_subtrees enumerates in sorted
+        order and ignores `rng`, so every caller -- generation with its rng, the
+        real reference with none -- sees the same index on the same subtree.
+        It is also stamped with its row's `ontology_id` and `domain`, so the
+        real reference can take the whole pool in one call and still give each
+        item its own ontology's id and domain.
+        """
+        opts = ((config.get("generation") or {}).get("seed_pool") or {})
+        pool: list[dict] = []
+        for row in real_data:
+            for subtree in sample_subtrees(
+                row.get("classes") or [], row.get("subclass_axioms") or [],
+                max_depth=int(opts.get("max_depth", 4)),
+                min_classes=int(opts.get("min_classes", 5)),
+                rng=rng,
+            ):
+                pool.append({**subtree,
+                             "ontology_id": row.get("ontology_id"),
+                             "domain": row.get("domain"),
+                             "pool_index": len(pool)})
+        return pool
+
+    def _target_domain(self, config_domains, rng) -> str:
+        return rng.choice(list(config_domains)) if config_domains else "general knowledge"
+
+    def build_seeded_artifact(self, seed: dict, mode: str,
+                              profile: dict | None, config: dict, rng) -> dict:
+        classes = list(seed["classes"])
+        axioms = [list(a) for a in seed["subclass_axioms"]]
+
+        if mode == "inverse":
+            if not profile:
+                raise RuntimeError(
+                    f"{self.get_task_name()} inverse+seeded generation requires a "
+                    "profile: the structural target it imposes is sampled from one."
+                )
+            # The spec is what inverse IMPOSES. It is sampled from the real
+            # profile by the same accessor the seedless inverse cell uses, so
+            # both inverse cells target the same distribution.
+            self._generation_spec_from_profile(profile, rng=rng)   # validates the profile
+            # Try operators in a shuffled order until one applies; an operator
+            # returns None when the graph offers it nothing to do. Exactly ONE
+            # edit is applied — that is all it takes to make inverse structurally
+            # differ from forward, which is what this cell has to demonstrate.
+            # Editing toward an exact target depth is targeting, and targeting is
+            # a calibration concern, not this spec's.
+            names = sorted(EDIT_OPERATORS)
+            rng.shuffle(names)
+            for name in names:
+                edited = EDIT_OPERATORS[name](classes, axioms, rng)
+                if edited is not None:
+                    classes, axioms = edited
+                    break
+            if (sorted(classes), sorted(axioms)) == (
+                    sorted(seed["classes"]), sorted(seed["subclass_axioms"])):
+                raise RuntimeError(
+                    f"{self.get_task_name()}: no edit operator could alter this "
+                    f"seed (root {seed.get('root')!r}, {len(seed['classes'])} "
+                    "classes). Raise generation.seed_pool.min_classes."
+                )
+
+        # Run config wins over taxonomy.json's default list, the same
+        # precedence get_feedback_config already uses. One config block,
+        # generation.seed_pool, owns every seeded setting.
+        run_opts = ((config.get("generation") or {}).get("seed_pool") or {})
+        domains = (run_opts.get("domains")
+                   or (self._config.get("seed_pool") or {}).get("domains")
+                   or ["general knowledge"])
+        return {
+            "domain": self._target_domain(domains, rng),
+            "classes": classes,
+            "subclass_axioms": axioms,
+            "source_max_depth": seed.get("max_depth"),
+            # Which pool subtree this gold came from, as an INTEGER: it pairs
+            # the accepted record with its real subtree in the archive, and no
+            # real class name or ontology id ever has to cross over to do it.
+            "source_pool_index": seed.get("pool_index"),
+        }
+
+    def build_seeded_generation_prompt(self, gold: dict) -> str:
+        """Anonymise every class before showing the structure.
+
+        The model must reproduce the SHAPE, not translate the names. Sending the
+        real identifiers would both leak the source ontology into the benchmark
+        and invite the model to recall it rather than build from the structure.
+
+        The anonymised order IS gold["classes"]'s order, because
+        matches_structure maps positionally -- sorting here would silently
+        reject every honest answer whenever gold's classes were not already
+        sorted.
+        """
+        import json
+
+        order = {name: f"C{i}" for i, name in enumerate(gold["classes"])}
+        structure = {
+            "classes": [order[c] for c in gold["classes"]],
+            "subclass_axioms": sorted([order[c], order[p]]
+                                      for c, p in gold["subclass_axioms"]),
+        }
+        template = self._config["seeded_generation_prompt"]
+        return template.format(
+            domain=gold["domain"],
+            structure_json=json.dumps(structure, ensure_ascii=False, indent=2),
+        )
+
+    def verify_structured_match(self, gold: dict, parsed: dict) -> bool:
+        return matches_structure(gold["classes"], gold["subclass_axioms"],
+                                 parsed.get("classes") or [],
+                                 parsed.get("subclass_axioms") or [])
+
     def get_eval_samples(self, synthetic: list[dict]) -> list[dict]:
         """Build eval rows whose model input excludes gold subclass axioms."""
         return [self._eval_sample(row) for row in synthetic]
 
     def get_real_eval_samples(self, config: dict, real_data: list[dict]) -> list[dict]:
-        return [self._eval_sample(row) for row in real_data]
+        """The real side of the comparison, drawn the way this cell's synthetic
+        side is drawn.
+
+        The reference used to be the whole ontology, as one item, for every
+        cell. Seeded cells evaluate on subtrees of it, and F1 on a small graph
+        is far easier than on a large one, so a seeded benchmark looked easier
+        than the real one purely because of size -- with n=1 on the real side.
+        The same reference feeds the structural fidelity profile, so the size
+        confound hit that comparison too.
+
+        Seeded: the real subtrees of the SAME seed pool generation draws from,
+        with their real names and domain. The pool is used exactly as it is --
+        never edited -- because the real side is real data.
+
+        Per ITEM, a forward+seeded synthetic item is one pool subtree's
+        structure under new names. Per SESSION the sides are not paired: the
+        real side is the whole pool, scored once, while each run's synthetic
+        side is what that run drew and what passed verification. So a seeded
+        session's gap mixes the change of vocabulary with draw and verification
+        attrition. The pairing is recoverable from the archive -- each real item
+        carries `pool_index`, each accepted record the `source_pool_index` of its
+        subtree -- but per-run paired scoring is not implemented.
+
+        Seedless: the whole ontology, which is what seedless generation targets.
+        """
+        # Imported here, not at module level: a task must not load the pipeline
+        # merely to be imported, and get_model defers its imports the same way.
+        from framework.pipeline import resolve_mode, resolve_seedless
+
+        strategy = self.get_generation_strategy()
+        if resolve_seedless(config, strategy):
+            return [self._eval_sample(row) for row in real_data]
+        mode = resolve_mode(config, strategy)
+        # ONE call over all of real_data: per-row calls would restart the pool
+        # numbering at 0 for each ontology. Each subtree carries its own row's
+        # ontology_id and domain.
+        return [
+            self._eval_sample({
+                "ontology_id": subtree["ontology_id"],
+                "domain": subtree["domain"],
+                "classes": subtree["classes"],
+                "subclass_axioms": subtree["subclass_axioms"],
+                "pool_index": subtree["pool_index"],
+            })
+            for subtree in self.get_seed_pool(config, real_data, mode)
+        ]
 
     def build_fidelity_profile(self, rows: list[dict]) -> dict:
         """Profile taxonomy artifacts with the same structural profiler for all sides.
@@ -368,7 +530,7 @@ class TaxonomyTask(BaseTask):
         domain = row["domain"]
         classes = list(row["classes"])
         model_input = taxonomy_model_input(domain, classes)
-        return {
+        sample = {
             "ontology_id": row.get("ontology_id"),
             "domain": domain,
             "classes": classes,
@@ -376,3 +538,8 @@ class TaxonomyTask(BaseTask):
             "text": serialize_taxonomy_model_input(domain, classes),
             "subclass_axioms": row.get("subclass_axioms", []),
         }
+        # A seeded reference item's seed-pool position, so real_sample.json
+        # records which subtree each real item is.
+        if "pool_index" in row:
+            sample["pool_index"] = row["pool_index"]
+        return sample

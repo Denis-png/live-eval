@@ -1,8 +1,17 @@
-from .macro_precision import compute_macro_precision
-from .macro_recall import compute_macro_recall
+from framework.evaluators.prf import precision_recall_f
 
 
 def compute_macro_f1(results: list[dict], labels: tuple[str, ...]) -> float:
-    p = compute_macro_precision(results, labels)
-    r = compute_macro_recall(results, labels)
-    return 2 * p * r / (p + r) if (p + r) > 0 else 0.0
+    # The standard macro-F1, sklearn's average="macro": each class's own F1,
+    # averaged. It used to be the F1 of macro precision and macro recall, which
+    # is never lower than this and is higher whenever classes differ in their
+    # precision/recall balance: precision on one class offsets recall on
+    # another. A class never gold and never predicted scores 0, as it does in
+    # macro precision and recall.
+    scores = []
+    for cls in labels:
+        tp = sum(1 for r in results if r["prediction"] == cls and r["label"] == cls)
+        fp = sum(1 for r in results if r["prediction"] == cls and r["label"] != cls)
+        fn = sum(1 for r in results if r["prediction"] != cls and r["label"] == cls)
+        scores.append(precision_recall_f(tp, fp, fn)[2])
+    return sum(scores) / len(scores) if scores else 0.0

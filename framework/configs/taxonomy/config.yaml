@@ -1,27 +1,35 @@
-# Taxonomy Induction — benchmark + task selection.
+# Taxonomy Induction — full pipeline config.
 #
-# This is the config `python -m framework.profile_dataset` and the taxonomy
-# tooling read. It deliberately carries NO `generation:` block by default,
-# unlike the other tasks — but `generation.mode` / `generation.seedless` DO
-# apply here; add a `generation:` block to set them:
+# Read by both `python -m framework.main --config framework/configs/taxonomy/config.yaml`
+# and `python -m framework.profile_dataset --task taxonomy --config <this file>`.
+# The profiler only needs `dataset:`; the rest drives a run.
 #
-#   Taxonomy uses the `structured` strategy — one sample is a whole artifact.
-#   It IS on the mode axis: `inverse` (the default) imposes a structural target
-#   sampled from the real profile and iterates toward it with the feedback loop;
-#   `forward` supplies only the domain and lets every structural property emerge,
-#   which is the baseline for judging what the feedback loop buys. Set it with
-#   `generation.mode: forward`.
+# ── Prerequisites ────────────────────────────────────────────────────────────
+# framework/data/** is gitignored, so the two inputs below are built locally and
+# do not ship with the repo. Both steps are one-off per ontology:
 #
-#   `seedless` is effectively pinned to true: seeded structured generation
-#   (perturb a real ontology subtree, keep the perturbation as ground truth) is
-#   coherent but unimplemented, and `seedless: false` says exactly that.
+#   1. Build the benchmark from an OWL/RDF ontology:
+#        python -m scripts.prepare_taxonomy_benchmark <ontology.owl> \
+#            framework/data/benchmarks/taxonomy/pizza.jsonl \
+#            --ontology-id pizza --domain "pizza"
 #
-# There is also no compare.yaml for this task yet: a multi-model comparison
-# needs a complete pipeline config (generation + task_models), and no working
-# end-to-end taxonomy run config exists in the repo — docs/taxonomy_induction.md
-# points at a `taxonomy_run.yaml` that was never committed, and records that the
-# last end-to-end smoke run did not produce a valid taxonomy.
+#   2. Profile it (the structural target inverse mode samples from):
+#        python -m framework.profile_dataset --task taxonomy \
+#            --config framework/configs/taxonomy/config.yaml
+#
+# `python -m framework.main` fails fast naming the profile if step 2 is missing.
 
+api_keys:
+  groq: "${GROQ_API_KEY}"
+  openai: "${OPENAI_API_KEY}"
+  openrouter: "${OPENROUTER_API_KEY}"
+  mistral: "${MISTRAL_API_KEY}"
+  minimax: "${MINIMAX_API_KEY}"
+  anthropic: "${ANTHROPIC_API_KEY}"
+  google: "${GOOGLE_API_KEY}"
+  huggingface: "${HF_TOKEN}"
+
+# ── Dataset ─────────────────────────────────────────────────────────────────
 dataset:
   source: local
   local:
@@ -30,3 +38,106 @@ dataset:
 
 task:
   name: taxonomy
+
+# ── Generation ──────────────────────────────────────────────────────────────
+# Taxonomy uses the `structured` strategy: one sample is a whole artifact, not a
+# sentence. It IS on the mode axis like every other task —
+#
+#   inverse (default) — a structural target is sampled from the real profile and
+#                       IMPOSED on the artifact, with the feedback loop iterating
+#                       toward it. The loop IS the inverse mechanism.
+#   forward           — only the domain is supplied; every count, depth and
+#                       branching property EMERGES. This is the baseline that
+#                       answers what targeting and the feedback loop actually buy,
+#                       so it runs with feedback off (enabling it here is refused,
+#                       since forward imposes no target for the loop to chase).
+#
+#   `seedless: false` runs the SEEDED cells: a subtree of the real ontology is
+#   sampled, its gold structure is computed exactly (forward keeps the subtree's
+#   own shape; inverse edits it toward a target sampled from the profile), and
+#   the model is asked only to re-verbalise that structure into a new domain.
+#   Output is verified against the gold by an exact positional structure match
+#   (the model is asked for one new name per anonymised class, in order) and
+#   discarded on mismatch, so a bad generation costs a sample and never
+#   corrupts a reference.
+#   forward+seeded needs no profile at all, which makes it the cheapest
+#   end-to-end check this task has.
+generation:
+  mode: inverse
+  seedless: true
+  # profile_path: "framework/data/profiles/taxonomy/<benchmark>_<n>_taxonomy_profile.json"
+  #   Only needed to disambiguate when the task dir holds several profiles;
+  #   otherwise the single profile in that directory is used.
+  provider: "openrouter"           # groq | openai | openrouter | mistral | minimax | anthropic | google
+  model: "minimax-m3"
+  temperature: 1.0
+  max_tokens: 16384            # HARD CAP on the response, honoured by every provider.
+                               # A whole taxonomy is far longer than a sentence, and
+                               # a reasoning model spends budget on <think> before
+                               # emitting any of it — 4096 truncated every artifact
+                               # on the last smoke run (docs/taxonomy_induction.md).
+  num_runs: 3                  # repeat N times → outputs mean ± std
+  sample_size: 10              # whole taxonomies per run; each costs a full artifact
+                               # plus up to max_rounds feedback calls, so this is an
+                               # order of magnitude below the sentence tasks.
+  timeout: 600                 # a whole artifact takes far longer than one sentence
+  max_retries: 2
+  request_delay: 0.0
+
+  # Structural feedback loop. Deliberately NOT enabled here: taxonomy.json already
+  # defaults it on, and the loop only runs in inverse+seedless — the one cell with
+  # an imposed target it can iterate toward. Writing `enabled: true` into THIS
+  # file turns that harmless default into an explicit request, which forward and
+  # seeded cells correctly refuse; the same config could then only ever run one
+  # of the four cells. Tune rounds here; leave `enabled` to the default.
+  feedback:
+    max_rounds: 1
+
+  # Seeded cells only. Subtrees are sampled from the real ontology: max_depth
+  # truncates them (which is what creates structural variation across seeds) and
+  # min_classes drops the ones too small to be a benchmark. `domains` is the
+  # pool of target domains the model re-verbalises into; it is config rather
+  # than a model choice so that a run is reproducible from results.json alone.
+  seed_pool:
+    max_depth: 4
+    min_classes: 5
+    domains: ["marine biology", "musical instruments", "architecture",
+              "textile manufacturing", "meteorology"]
+
+# ── Evaluated models ────────────────────────────────────────────────────────
+# The model under test receives {domain, classes} and must predict the direct
+# subclass axioms. Gold axioms are never in its prompt.
+#
+#   lexical — parent = the class whose name is its longest proper token-suffix
+#             (VegetarianPizza -> Pizza). A cheap strong baseline, and a control:
+#             it reads only names, so it cannot MEMORISE a canonical ontology the
+#             way an LLM can. A gap that opens for the LLMs but not for it points
+#             at recall rather than induction.
+#   star    — every class under one root chosen from names alone. The standard
+#             floor: how much F1 is available for imposing no structure at all.
+#
+# Both are deterministic and free. minimax-m3 is ALSO the generation model above,
+# so it evaluates benchmarks its own family wrote — report it separately.
+task_models:
+  - name: "lexical"
+    type: "lexical"
+  - name: "star"
+    type: "star"
+  - name: "minimax-m3"
+    type: "llm"
+    provider: "openrouter"
+    api_key: "${OPENROUTER_API_KEY}"
+    temperature: 0
+    max_tokens: 32768            # A CAP, not a spend: you pay for tokens used. The real
+                                 # baseline asks for the whole ontology in one answer,
+                                 # the largest single output in the system. At 8192 a
+                                 # reasoning model truncated on Pizza's 99 classes, the
+                                 # error was caught as a malformed prediction, and it
+                                 # scored 0.000. At 32768 it completes: F1 0.804.
+    timeout: 600
+    max_retries: 2
+
+# ── Compute ─────────────────────────────────────────────────────────────────
+compute:
+  device: "cpu"
+  batch_size: 8

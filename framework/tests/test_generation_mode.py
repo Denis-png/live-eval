@@ -67,13 +67,29 @@ class ContextAgreementTests(unittest.TestCase):
 
 
 class CellSlugTests(unittest.TestCase):
-    def test_structured_slug_is_uniform_with_other_strategies(self):
+    def test_structured_slug_names_the_cell_that_actually_ran(self):
+        # Structured is on the seeding axis as well as the mode axis, and the
+        # slug reads that axis through resolve_seedless -- the same answer the
+        # dispatch, _build_meta and build_generation_context use. An omitted
+        # key means SEEDLESS for structured (seeded structured generation needs
+        # a real-artifact corpus), and the slug has to say so: reading it as
+        # "seeded" while the dispatch ran seedless is exactly the disagreement
+        # the resolver exists to end.
         self.assertEqual(
             pipeline.generation_cell_slug({}, "structured"), "inverse_seedless")
         self.assertEqual(
             pipeline.generation_cell_slug(
                 {"generation": {"mode": "forward"}}, "structured"),
             "forward_seedless")
+        self.assertEqual(
+            pipeline.generation_cell_slug(
+                {"generation": {"seedless": False}}, "structured"),
+            "inverse_seeded")
+        self.assertEqual(
+            pipeline.generation_cell_slug(
+                {"generation": {"mode": "forward", "seedless": False}},
+                "structured"),
+            "forward_seeded")
 
     def test_other_strategies_unchanged(self):
         self.assertEqual(
@@ -127,10 +143,16 @@ class StructuredRejectionTests(unittest.TestCase):
                 self.assertEqual(len(out), 1)
                 self.assertIn("classes", out[0])
 
-    def test_seeded_structured_reads_as_unimplemented_not_impossible(self):
+    def test_seeded_structured_without_a_seed_pool_fails_clearly(self):
+        # Seedless: false now reaches the real seeded dispatch instead of a
+        # blanket "not implemented" rejection. This stub task has no
+        # get_seed_pool override, so BaseTask's default (echo real_data, which
+        # is [] here) makes the pool-size guard fire first — before ever
+        # reaching build_seeded_artifact's own NotImplementedError, and before
+        # any API call. The error still names the task and states clearly what
+        # is missing, which is the rule this class is actually about.
         with self.assertRaises(RuntimeError) as ctx:
             self._run({"seedless": False})
         message = str(ctx.exception)
-        self.assertIn("not implemented", message)
         self.assertIn("structured_stub", message)
-        self.assertNotIn("not supported", message)
+        self.assertIn("seed pool", message)

@@ -52,12 +52,19 @@ class MacroPrecisionRecallTests(unittest.TestCase):
 
 
 class MacroF1Tests(unittest.TestCase):
-    def test_is_the_harmonic_mean_of_macro_precision_and_recall(self):
+    def test_is_the_mean_of_the_per_class_f1_scores(self):
+        # NEGATIVE: tp 1, fp 1, fn 0 -> F1 2/3. NEUTRAL: perfect -> 1.
+        # POSITIVE: tp 0, fp 0, fn 1 -> 0. Mean: 5/9, as sklearn's
+        # f1_score(average="macro") gives. The F1 of macro precision (1/2) and
+        # macro recall (2/3) -- the definition this replaced -- would be 4/7.
         results = _results([("NEGATIVE", "NEGATIVE"), ("NEGATIVE", "POSITIVE"),
                             ("NEUTRAL", "NEUTRAL")])
-        p = compute_macro_precision(results, CLASSES)
-        r = compute_macro_recall(results, CLASSES)
-        self.assertAlmostEqual(compute_macro_f1(results, CLASSES), 2 * p * r / (p + r))
+        self.assertAlmostEqual(compute_macro_f1(results, CLASSES), 5 / 9)
+
+    def test_an_absent_class_contributes_zero(self):
+        # Never gold, never predicted: 0, as in macro precision and recall.
+        self.assertAlmostEqual(
+            compute_macro_f1(_results([("NEGATIVE", "NEGATIVE")]), CLASSES), 1 / 3)
 
     def test_zero_precision_and_recall_does_not_divide_by_zero(self):
         self.assertEqual(

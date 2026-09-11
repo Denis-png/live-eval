@@ -285,23 +285,42 @@ def _resolve_benchmark_profile_path(config: dict, task) -> str:
     )
 
 
-def _load_benchmark_profile(config: dict, task) -> dict | None:
-    """Load the benchmark profile that drives seedless generation.
+def _consults_benchmark_profile(config: dict, task) -> bool:
+    """Whether this cell's generation reads the benchmark profile.
 
-    Returns None when generation.seedless is falsy. Runs before the generation
-    loop so a missing or un-topic-profiled profile fails before any API spend."""
-    gen = config.get("generation") or {}
+    Every seedless cell does. Of the seeded cells, only structured `inverse`
+    does: it samples the structure it imposes from the profile, while
+    `forward+seeded` inherits its structure from the drawn seed.
+
+    The one rule both `_load_benchmark_profile` (which loads the file) and
+    `_build_meta` (which records its path) follow. `_build_meta` used to key on
+    `seedless` alone, so inverse+seeded loaded a profile yet recorded
+    `profile_path: None`."""
+    strategy = task.get_generation_strategy()
+    if resolve_seedless(config, strategy):
+        return True
+    return strategy == "structured" and resolve_mode(config, strategy) != "forward"
+
+
+def _load_benchmark_profile(config: dict, task) -> dict | None:
+    """Load the benchmark profile that drives generation.
+
+    Returns None for the cells that consult no profile (see
+    `_consults_benchmark_profile`). Runs before the generation loop so a
+    missing or un-topic-profiled profile fails before any API spend.
+
+    Short-circuiting structured on `seedless is False` once made
+    `inverse+seeded` unreachable: it returned None before
+    `generation.profile_path` was ever consulted, and the dispatch then died
+    asking for a profile the config had no way to supply."""
+    if not _consults_benchmark_profile(config, task):
+        return None
+    path = _resolve_benchmark_profile_path(config, task)
     if task.get_generation_strategy() == "structured":
-        if gen.get("seedless") is False:
-            return None
-        path = _resolve_benchmark_profile_path(config, task)
         with open(path, encoding="utf-8") as f:
             return json.load(f)
-    if not gen.get("seedless"):
-        return None
     from framework.profiling.spec_sampler import load_profile
 
-    path = _resolve_benchmark_profile_path(config, task)
     topics_key = (
         "topics_per_label"
         if task.get_generation_strategy() == "class_conditional"
@@ -377,20 +396,34 @@ def resolve_mode(config: dict, strategy: str) -> str:
     return (config.get("generation") or {}).get("mode", default)
 
 
+def resolve_seedless(config: dict, strategy: str) -> bool:
+    """Whether this run generates without real seeds — the single answer every
+    reader uses.
+
+    Four call sites used to decide independently what an omitted key meant, and
+    they disagreed: the session slug read it as seeded while the dispatch ran
+    seedless, and _build_meta hardcoded True for structured so a seeded run was
+    archived as a seedless one. Structured defaults to seedless because seeded
+    structured generation needs a real-artifact corpus; every other strategy
+    defaults to seeded.
+    """
+    gen = config.get("generation") or {}
+    if "seedless" in gen:
+        return bool(gen["seedless"])
+    return strategy == "structured"
+
+
 def generation_cell_slug(config: dict, strategy: str) -> str:
     """Filesystem-safe label for the generation cell, e.g. "inverse_seeded".
 
     Naming a session after its setup means a directory listing shows what was
     run without opening results.json, and two cells of the same task can never
     collide in one output directory."""
-    # Structured IS on the mode axis — it imposes a sampled target structure
-    # (inverse) or lets structure emerge (forward) — and is seedless until
-    # seeded structured generation is implemented.
-    seeding = (
-        "seedless" if strategy == "structured"
-        or (config.get("generation") or {}).get("seedless")
-        else "seeded"
-    )
+    # Structured IS on the mode axis and, since seeded structured generation
+    # landed, is on the seeding axis too. Hardcoding "seedless" here would write
+    # a seeded session into the seedless session's directory name, making the two
+    # cells indistinguishable in the archive and in analyze_results.
+    seeding = "seedless" if resolve_seedless(config, strategy) else "seeded"
     return f"{resolve_mode(config, strategy)}_{seeding}"
 
 
@@ -422,6 +455,40 @@ def save_synthetic_data(synthetic: list[dict], generated_dir: str, run_idx: int)
     return path
 
 
+def save_rejections(generator, generated_dir: str, run_idx: int) -> str | None:
+    """Archive the samples a run rejected under <session>/generated/run_<N>_rejected.json.
+
+    Only accepted samples used to be archived, so every rejection's diagnostics
+    -- including what the model actually said -- were thrown away. Returns None
+    and writes nothing when there were no rejections, or when the generator's
+    loop does not record them (only the structured loops do so far).
+    """
+    rejections = getattr(generator, "last_rejections", None)
+    if not rejections:
+        return None
+    os.makedirs(generated_dir, exist_ok=True)
+    path = os.path.join(generated_dir, f"run_{run_idx + 1}_rejected.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(rejections, f, indent=2, ensure_ascii=False)
+    return path
+
+
+def run_recording_rejections(generate, generator, generated_dir: str, run_idx: int):
+    """Run `generate()` and persist its rejections whether it succeeds or raises.
+
+    The "0 usable samples" guard raises inside _run_generation, so a run that
+    rejected everything used to abort before anything was saved -- leaving an
+    empty session directory for precisely the run that most needed diagnosing.
+    The `finally` is the point: the evidence is written before the error leaves.
+    """
+    try:
+        return generate()
+    finally:
+        path = save_rejections(generator, generated_dir, run_idx)
+        if path:
+            print(f"Rejected samples archived to {path}")
+
+
 # ── Results writing (with provenance) ────────────────────────
 
 def _build_meta(config: dict, task, runs_completed: int,
@@ -437,15 +504,20 @@ def _build_meta(config: dict, task, runs_completed: int,
     "inverse" — matching `_run_generation`'s own per-strategy default, so
     this echoes the mode that actually ran rather than a stray config value.
 
-    `seedless` mirrors generation.seedless (False when the key is absent).
+    `seedless` is `resolve_seedless`'s answer — the same one the session slug
+    and the generation dispatch use, so a seeded structured run is archived as
+    seeded. Hardcoding True for structured here filed every seeded session into
+    the seedless bucket in scripts/analyze_results.py, where it collided with
+    the real seedless session and one of the two was dropped.
     `profile_path` is the resolved path of the profile that actually drove
-    generation when seedless is true — generation.profile_path if the config
-    set one, else the same default `_load_benchmark_profile` resolves
-    internally (see `_resolve_benchmark_profile_path`, shared by both) — and None when
-    seedless is false. Profiles are gitignored, so this is the only record of
-    what generated a seedless benchmark; it must NOT be left None in the
-    common case where seedless is true and profile_path is left unset (both
-    shipped configs ship it commented out)."""
+    generation, for every cell that consults one (`_consults_benchmark_profile`:
+    all seedless cells, plus structured inverse+seeded) — generation.profile_path
+    if the config set one, else the same default `_load_benchmark_profile`
+    resolves internally (see `_resolve_benchmark_profile_path`, shared by
+    both) — and None for cells that consult none. Profiles are gitignored, so
+    this is the only record of what shaped the benchmark; it must NOT be left
+    None in the common case where profile_path is left unset (both shipped
+    configs ship it commented out)."""
     gen = config["generation"]
     ds = resolve_dataset_config(config.get("dataset") or {})
     judge = config.get("judge") or {}
@@ -453,7 +525,7 @@ def _build_meta(config: dict, task, runs_completed: int,
     num_runs = gen["num_runs"]
     strategy = task.get_generation_strategy()
     mode = resolve_mode(config, strategy)
-    seedless = True if strategy == "structured" else bool(gen.get("seedless"))
+    seedless = resolve_seedless(config, strategy)
     if ds["source"] == "local":
         dataset_meta = {"source": "local", "path": ds["path"],
                         "format": ds["format"] or None,
@@ -467,7 +539,8 @@ def _build_meta(config: dict, task, runs_completed: int,
         "strategy": strategy,
         "mode": mode,
         "seedless": seedless,
-        "profile_path": _resolve_benchmark_profile_path(config, task) if seedless else None,
+        "profile_path": (_resolve_benchmark_profile_path(config, task)
+                         if _consults_benchmark_profile(config, task) else None),
         "provider": gen["provider"],
         "model": gen["model"],
         "num_runs": num_runs,
@@ -519,8 +592,10 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
     the drawn one); forward+seedless drops real seeds entirely via
     seed_policy="none" over per-label profile specs.
 
-    `profile` is the pre-loaded seedless generation profile (None when
-    generation.seedless is falsy). When `generation.seedless` is true, per-sample
+    `profile` is the pre-loaded generation profile, resolved by
+    `_load_benchmark_profile` (None for the cells that consult none: any seeded
+    cell outside structured, and structured's forward+seeded, which inherits
+    its structure from the drawn seed). When `generation.seedless` is true, per-sample
     content specs are drawn from it and no real benchmark text reaches the
     generation prompt: forward mode calls `generate_seedless_pairs` directly;
     inverse mode synthesizes carriers via `generate_carriers` and feeds them into
@@ -531,67 +606,91 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
     _profile_driven = False
 
     if strategy == "structured":
-        if gen_cfg.get("seedless") is False:
-            # Not impossible — perturbing a real ontology subtree and keeping the
-            # perturbation as ground truth is coherent. It is unimplemented, and
-            # saying so is what keeps the design open rather than foreclosed.
-            raise RuntimeError(
-                f"seeded structured generation is not implemented for "
-                f"{task.get_task_name()}; it needs a real-artifact corpus and a "
-                "perturbation operator. Use seedless: true."
-            )
-        if profile is None:
-            raise RuntimeError(
-                f"{task.get_task_name()} structured generation requires a profile."
-            )
         mode = resolve_mode(config, strategy)
-        feedback_cfg = task.get_feedback_config(gen_cfg)
-        feedback_enabled = bool(feedback_cfg.get("enabled", False))
-        if mode == "forward":
-            # get_feedback_config's default is tuned for inverse (the loop drives
-            # an artifact toward an IMPOSED target), so an inherited default of
-            # enabled=true is not itself a contradiction here — forward simply
-            # never runs the loop. Only an explicit request in THIS run's config
-            # is contradictory, since forward imposes no target for it to chase,
-            # and silently ignoring set config is what this framework refuses.
-            explicit_feedback_request = bool((gen_cfg.get("feedback") or {}).get("enabled"))
-            if explicit_feedback_request:
+        seedless = resolve_seedless(config, strategy)
+        if not seedless:
+            if (gen_cfg.get("feedback") or {}).get("enabled"):
                 raise RuntimeError(
-                    f"{task.get_task_name()}: generation.mode=forward cannot use the "
-                    "structured feedback loop — the loop targets an imposed structure "
-                    "and forward imposes none. Set mode=inverse or disable feedback."
+                    f"{task.get_task_name()}: seeded structured generation cannot "
+                    "use the feedback loop — the gold structure is computed exactly "
+                    "and verified, so there is nothing to iterate toward. Disable "
+                    "generation.feedback."
                 )
-            feedback_enabled = False
-        # Fail before the first API call, not mid-round: enabling the loop
-        # without a comparator is a config/implementation error, and the
-        # framework's rule is that an unsupported capability says so up front.
-        if feedback_enabled and (
-            type(task).build_structural_feedback
-            is BaseTask.build_structural_feedback
-        ):
-            raise RuntimeError(
-                f"{task.get_task_name()} enables the structured feedback loop "
-                "(get_feedback_config) but does not implement "
-                "build_structural_feedback()."
+            rng = random.Random()
+            pool = task.get_seed_pool(config, real_data, mode, rng=rng)
+            if len(pool) < sample_size:
+                raise RuntimeError(
+                    f"{task.get_task_name()} seed pool holds {len(pool)} subtrees "
+                    f"but {sample_size} samples were requested — get_seed_pool() "
+                    "needs a larger ontology, a deeper "
+                    "generation.seed_pool.max_depth, or a smaller min_classes."
+                )
+            golds = [task.build_seeded_artifact(seed, mode, profile, config, rng)
+                     for seed in rng.sample(pool, sample_size)]
+            # Assigned, not returned: the shared "0 usable samples" guard below
+            # must fire for this cell too. Returning here let a model that failed
+            # EVERY verification hand run_pipeline an empty benchmark, which then
+            # scored 0.0 across the board for a run that generated nothing.
+            synthetic = generator.generate_structured_seeded(
+                golds,
+                build_prompt=task.build_seeded_generation_prompt,
+                parse=task.parse_structured_generation_with_diagnostics,
+                verify=task.verify_structured_match,
+                max_parse_attempts=gen_cfg.get("max_parse_attempts", 3),
+                request_delay=gen_cfg.get("request_delay", 0.0),
             )
-        # Delegate the loop itself, like every other strategy. The generator
-        # stays ontology-agnostic: it receives callables, never the task.
-        rng = random.Random()
-        synthetic = generator.generate_structured(
-            build_prompt=lambda feedback: task.build_structured_generation_prompt(
-                profile, rng=rng, feedback=feedback, mode=mode
-            ),
-            parse=task.parse_structured_generation_with_diagnostics,
-            build_feedback=(
-                (lambda artifact: task.build_structural_feedback(
-                    profile, artifact, generation_config=gen_cfg))
-                if feedback_enabled else None
-            ),
-            sample_size=sample_size,
-            max_parse_attempts=gen_cfg.get("max_parse_attempts", 3),
-            max_feedback_rounds=int(feedback_cfg.get("max_rounds", 0)),
-            request_delay=gen_cfg.get("request_delay", 0.0),
-        )
+        else:
+            if profile is None:
+                raise RuntimeError(
+                    f"{task.get_task_name()} structured generation requires a profile."
+                )
+            feedback_cfg = task.get_feedback_config(gen_cfg)
+            feedback_enabled = bool(feedback_cfg.get("enabled", False))
+            if mode == "forward":
+                # get_feedback_config's default is tuned for inverse (the loop drives
+                # an artifact toward an IMPOSED target), so an inherited default of
+                # enabled=true is not itself a contradiction here — forward simply
+                # never runs the loop. Only an explicit request in THIS run's config
+                # is contradictory, since forward imposes no target for it to chase,
+                # and silently ignoring set config is what this framework refuses.
+                explicit_feedback_request = bool((gen_cfg.get("feedback") or {}).get("enabled"))
+                if explicit_feedback_request:
+                    raise RuntimeError(
+                        f"{task.get_task_name()}: generation.mode=forward cannot use the "
+                        "structured feedback loop — the loop targets an imposed structure "
+                        "and forward imposes none. Set mode=inverse or disable feedback."
+                    )
+                feedback_enabled = False
+            # Fail before the first API call, not mid-round: enabling the loop
+            # without a comparator is a config/implementation error, and the
+            # framework's rule is that an unsupported capability says so up front.
+            if feedback_enabled and (
+                type(task).build_structural_feedback
+                is BaseTask.build_structural_feedback
+            ):
+                raise RuntimeError(
+                    f"{task.get_task_name()} enables the structured feedback loop "
+                    "(get_feedback_config) but does not implement "
+                    "build_structural_feedback()."
+                )
+            # Delegate the loop itself, like every other strategy. The generator
+            # stays ontology-agnostic: it receives callables, never the task.
+            rng = random.Random()
+            synthetic = generator.generate_structured(
+                build_prompt=lambda feedback: task.build_structured_generation_prompt(
+                    profile, rng=rng, feedback=feedback, mode=mode
+                ),
+                parse=task.parse_structured_generation_with_diagnostics,
+                build_feedback=(
+                    (lambda artifact: task.build_structural_feedback(
+                        profile, artifact, generation_config=gen_cfg))
+                    if feedback_enabled else None
+                ),
+                sample_size=sample_size,
+                max_parse_attempts=gen_cfg.get("max_parse_attempts", 3),
+                max_feedback_rounds=int(feedback_cfg.get("max_rounds", 0)),
+                request_delay=gen_cfg.get("request_delay", 0.0),
+            )
     elif strategy == "class_conditional":
         # No config sets "mode" explicitly today (spam.json's config comment
         # says so) — the default MUST resolve to "inverse" so that omitting
@@ -1029,10 +1128,7 @@ def build_generation_context(config: dict) -> dict:
     strategy = task.get_generation_strategy()
     # One source of truth: resolve_mode also feeds the session name and _build_meta.
     mode = resolve_mode(config, strategy)
-    seedless = (
-        True if strategy == "structured"
-        else bool(config["generation"].get("seedless"))
-    )
+    seedless = resolve_seedless(config, strategy)
     error_dist = (
         load_error_distribution(config, real_data, task)
         if _should_load_error_distribution(strategy, mode, seedless) else None
@@ -1107,8 +1203,11 @@ def run_pipeline(config: dict) -> dict:
 
     for run_idx in range(num_runs):
         print(f"\n{'='*50}\nRUN {run_idx + 1} / {num_runs}\n{'='*50}")
-        synthetic = _run_generation(generator, task, config, real_data, error_dist,
-                                    judge_call, class_prob, profile=profile)
+        synthetic = run_recording_rejections(
+            lambda: _run_generation(generator, task, config, real_data, error_dist,
+                                    judge_call, class_prob, profile=profile),
+            generator, paths["generated_dir"], run_idx,
+        )
         all_generated.extend(synthetic)
 
         eval_samples = task.get_eval_samples(synthetic)
