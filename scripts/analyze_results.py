@@ -16,11 +16,15 @@ answer:
   3. mode impact  — paired forward-vs-inverse deltas for generation models that
                   ran in both modes.
 
+A session that consumed a calibration artifact is its own cell
+(`<cell>+calibrated`), so a calibrated run never shadows the uncalibrated run
+of the same cell. --since keeps only sessions created at or after a date.
+
 Emits figures + analysis.md + analysis.json into --out
 (default: <first-root>/analysis).
 
 Usage:
-    python -m scripts.analyze_results [ROOT ...] [--out DIR]
+    python -m scripts.analyze_results [ROOT ...] [--out DIR] [--since ISO-DATE]
 """
 import argparse
 import glob

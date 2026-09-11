@@ -491,6 +491,23 @@ the first model runs.
 
 ---
 
+## Cross-Session Analysis
+
+`scripts.analyze_results` reads every session under one or more results roots and
+writes the report-level figures plus `analysis.md` / `analysis.json`: generated-vs-real
+fidelity and model ranking (Kendall tau-b), how much score variance the generation model
+explains, the paired forward-vs-inverse mode effect, and each task's fidelity JSDs.
+
+    python -m scripts.analyze_results framework/data/runs --since 2026-09-11 \
+        --out framework/data/runs/analysis
+
+It keeps one session per (task, cell, generation model): the one with the most completed
+runs, then the newest. A run that consumed a calibration artifact is its own cell
+(`<cell>+calibrated`), so a calibration ablation keeps both sides. `--since` limits the
+analysis to one sweep — without it, an older session with more runs outranks a fresh one.
+
+---
+
 ## How to Add a New Task
 
 1. Create `framework/tasks/<task>/task.py` subclassing `BaseTask` and
