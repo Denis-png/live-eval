@@ -161,6 +161,13 @@ class SeedWeightConsumptionTests(_Workspace):
         self.assertIsNone(ctx["seed_weights"])
         self.assertIn("different real reference", err)
 
+    def test_a_malformed_target_is_ignored_with_a_warning_not_a_crash(self):
+        path = self.artifact("c_calibration.json", "not-a-dict",
+                             {"type_dist": {"3": 1.0}, "seed_weights": {"3": 1.0}})
+        ctx, err = self.context(self.config("forward", False, calibration_path=path))
+        self.assertIsNone(ctx["seed_weights"])
+        self.assertIn("malformed", err)
+
 
 if __name__ == "__main__":
     unittest.main()

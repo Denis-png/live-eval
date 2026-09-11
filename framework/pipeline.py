@@ -7,7 +7,6 @@ import sys
 from datetime import datetime
 
 import numpy as np
-from framework.calibration.artifact import targets_match
 from framework.data_loading import iter_local_rows, resolve_dataset_config
 from framework.generators.base_generator import CLASS_CONDITIONAL_SEMANTICS
 from framework.generators.factory import load_generator
@@ -1107,6 +1106,8 @@ def _structured_target_matches(task, payload: dict, real_reference, keys: dict) 
     build_fidelity_profile -- cheap for taxonomy, no model calls. Keys compare
     as strings: load_calibration turns count_dist keys back into ints for GEC's
     edit counts, while taxonomy's structure keys are strings."""
+    from framework.calibration.artifact import targets_match
+
     measured = task.build_fidelity_profile(real_reference or [])
     current = {name: _str_keys(measured.get(key)) for name, key in keys.items()}
     stored = {name: _str_keys((payload.get("target") or {}).get(name)) for name in keys}
@@ -1151,21 +1152,20 @@ def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
         values = [float(w) for w in weights.values()]
         if not any(v > 0 for v in values):
             return None
+        if structured:
+            seed_key = (task.get_seed_calibration_key()
+                        or task.get_calibration_keys()["type_dist"])
+            if not _structured_target_matches(task, payload, real_reference,
+                                              {"type_dist": seed_key}):
+                print(f"[WARN] calibration {path!r} was measured against a "
+                      "different real reference; drawing seeds unweighted. "
+                      "Recalibrate to use it.", file=sys.stderr)
+                return None
     except (OSError, ValueError, AttributeError, TypeError, KeyError) as e:
         print(f"[WARN] calibration {path!r} could not be read or is malformed "
               f"({e}); drawing seeds in the unweighted first-N order.",
               file=sys.stderr)
         return None
-
-    if structured:
-        seed_key = (task.get_seed_calibration_key()
-                    or task.get_calibration_keys()["type_dist"])
-        if not _structured_target_matches(task, payload, real_reference,
-                                          {"type_dist": seed_key}):
-            print(f"[WARN] calibration {path!r} was measured against a different "
-                  "real reference; drawing seeds unweighted. Recalibrate to use it.",
-                  file=sys.stderr)
-            return None
 
     # Provenance, same as _apply_calibration records for every other cell:
     # artifacts are gitignored, so results.json is the only surviving record of

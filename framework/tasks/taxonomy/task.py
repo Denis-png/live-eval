@@ -13,7 +13,6 @@ import os
 import random
 from typing import Any
 
-from framework.calibration.seeds import draw_weighted_seeds
 from framework.evaluators.taxonomy.diagnostics import compute_diagnostics
 from framework.evaluators.taxonomy.f1 import compute_f1
 from framework.evaluators.taxonomy.precision import compute_precision
@@ -308,6 +307,8 @@ class TaxonomyTask(BaseTask):
         # Calibrated: draw sample_size seeds -- a max-depth bucket by weight, then
         # a subtree uniformly within it, with replacement. With the whole pool
         # drawn every run, repeats are the only way a weight can shift the mix.
+        from framework.calibration.seeds import draw_weighted_seeds
+
         index: dict[str, list[int]] = {}
         for i, subtree in enumerate(pool):
             index.setdefault(str(subtree.get("max_depth")), []).append(i)
