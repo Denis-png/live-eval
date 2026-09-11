@@ -168,3 +168,30 @@ class PersistenceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProgressTests(unittest.TestCase):
+    """Every other loop prints `[i/n] ... ✓` per accepted sample; the structured
+    loops printed only skips, so a taxonomy cell -- thirty artifacts of up to a
+    minute each -- ran silent for the better part of an hour."""
+
+    def _stdout(self, fn):
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(io.StringIO()):
+            fn()
+        return out.getvalue()
+
+    def test_an_accepted_seeded_artifact_is_reported(self):
+        gen = _Script(["a", "b", "c"])
+        text = self._stdout(lambda: gen.generate_structured_seeded(
+            _GOLDS, build_prompt=lambda g: "p", parse=_ok, verify=lambda g, p: True))
+        for i in (1, 2, 3):
+            self.assertIn(f"[{i}/3]", text)
+        self.assertEqual(text.count("✓"), 3)
+
+    def test_an_accepted_seedless_artifact_is_reported(self):
+        gen = _Script(["a", "b"])
+        text = self._stdout(lambda: gen.generate_structured(
+            build_prompt=lambda fb: "p", parse=_ok, sample_size=2, max_parse_attempts=1))
+        self.assertIn("[2/2]", text)
+        self.assertEqual(text.count("✓"), 2)
