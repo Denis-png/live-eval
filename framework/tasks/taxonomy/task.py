@@ -443,6 +443,27 @@ class TaxonomyTask(BaseTask):
             for subtree in self.get_seed_pool(config, real_data, mode)
         ]
 
+    def paired_real_indices(self, real_reference: list[dict],
+                            synthetic: list[dict]) -> list[int] | None:
+        """Seeded records carry `source_pool_index`, real items `pool_index`:
+        each record pairs with the real subtree it was re-verbalised from.
+
+        A seedless artifact comes from no particular real item, so a run whose
+        records lack the index is not paired. An index that matches no real item
+        means the session's files disagree, and raises rather than guessing."""
+        if not synthetic or any(type(r.get("source_pool_index")) is not int
+                                for r in synthetic):
+            return None
+        position = {item.get("pool_index"): i for i, item in enumerate(real_reference or [])}
+        indices = []
+        for record in synthetic:
+            index = record["source_pool_index"]
+            if index not in position:
+                raise ValueError(f"source_pool_index {index} matches no real "
+                                 "reference item")
+            indices.append(position[index])
+        return indices
+
     def build_fidelity_profile(self, rows: list[dict]) -> dict:
         """Profile taxonomy artifacts with the same structural profiler for all sides.
 

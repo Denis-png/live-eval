@@ -287,6 +287,17 @@ class BaseTask(ABC):
         None → real baseline skipped."""
         return None
 
+    def paired_real_indices(self, real_reference: list[dict],
+                            synthetic: list[dict]) -> list[int] | None:
+        """For one run's accepted synthetic records, the position in
+        `real_reference` of the real item each record came from -- one entry per
+        record, so a record drawn twice appears twice. The pipeline scores that
+        subset as the run's paired real baseline.
+
+        Default None: the task does not pair, and results keep only the
+        unpaired real block."""
+        return None
+
     def profile_error_distribution(self, real_data: list[dict],
                                    count_max: int = 5, config: dict | None = None) -> dict | None:
         """Empirical inverse-mode error distribution derived from real_data (and
