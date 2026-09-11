@@ -234,6 +234,11 @@ def _strategy_of(meta: dict) -> str:
     strategy = meta.get("strategy") or _task_strategy(meta.get("task"))
     mode = meta.get("mode") or ("inverse" if strategy == "class_conditional" else "forward")
     cell = f"{mode}+seedless" if meta.get("seedless") else mode
+    # A run that consumed a calibration artifact is a different condition from
+    # the uncalibrated run of the same cell -- the calibration ablation compares
+    # exactly those two -- so it gets its own label, ahead of any @semantics.
+    if (meta.get("calibration") or {}).get("path"):
+        cell = f"{cell}+calibrated"
     if strategy != "class_conditional":
         return cell
     semantics = meta.get("class_conditional_semantics") or "asymmetric"
@@ -262,6 +267,14 @@ def discover_sessions(roots):
             sessions.append({"dir": session_dir, "meta": data["meta"],
                              "results": data["results"], "profile": profile})
     return sessions
+
+
+def filter_since(sessions, since: str | None):
+    """Sessions created at or after `since` (an ISO date or timestamp); all of
+    them when it is None. Limits an analysis to one sweep."""
+    if not since:
+        return sessions
+    return [s for s in sessions if (s["meta"].get("created") or "") >= since]
 
 
 def dedup_sessions(sessions):
@@ -702,9 +715,11 @@ def main():
                         default=["/srv/code/data/team_project/results"],
                         help="Results roots to scan recursively for sessions")
     parser.add_argument("--out", help="Output dir (default: <first-root>/analysis)")
+    parser.add_argument("--since", help="Only sessions created at or after this ISO "
+                                        "date/time, e.g. 2026-09-11 for the final sweep")
     args = parser.parse_args()
 
-    sessions = discover_sessions(args.roots)
+    sessions = filter_since(discover_sessions(args.roots), args.since)
     kept, dropped = dedup_sessions(sessions)
     for s in dropped:
         print(f"[dedup] ignoring {s['dir']} "
