@@ -43,10 +43,10 @@ task:
 # Taxonomy uses the `structured` strategy: one sample is a whole artifact, not a
 # sentence. It IS on the mode axis like every other task —
 #
-#   inverse (default) — a structural target is sampled from the real profile and
+#   inverse           — a structural target is sampled from the real profile and
 #                       IMPOSED on the artifact, with the feedback loop iterating
 #                       toward it. The loop IS the inverse mechanism.
-#   forward           — only the domain is supplied; every count, depth and
+#   forward (shipped) — only the domain is supplied; every count, depth and
 #                       branching property EMERGES. This is the baseline that
 #                       answers what targeting and the feedback loop actually buy,
 #                       so it runs with feedback off (enabling it here is refused,
@@ -62,16 +62,17 @@ task:
 #   corrupts a reference.
 #   forward+seeded needs no profile at all, which makes it the cheapest
 #   end-to-end check this task has.
+# Shipped cell: forward + seeded, the baseline. Other cells: --mode, --seedless.
 generation:
-  mode: inverse
-  seedless: true
+  mode: forward
+  seedless: false
   # profile_path: "framework/data/profiles/taxonomy/<benchmark>_<n>_taxonomy_profile.json"
   #   Only needed to disambiguate when the task dir holds several profiles;
   #   otherwise the single profile in that directory is used.
   provider: "openrouter"           # groq | openai | openrouter | mistral | minimax | anthropic | google
   model: "minimax-m3"
   temperature: 1.0
-  max_tokens: 16384            # HARD CAP on the response, honoured by every provider.
+  max_tokens: 32768            # HARD CAP on the response, honoured by every provider.
                                # A whole taxonomy is far longer than a sentence, and
                                # a reasoning model spends budget on <think> before
                                # emitting any of it — 4096 truncated every artifact

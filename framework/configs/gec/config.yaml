@@ -21,6 +21,7 @@ dataset:
     format: m2 # m2 | csv | tsv (optional — inferred from the extension)
 
 # ── Generation (LLM that creates synthetic corrupted sentences) ──
+# Shipped cell: forward + seeded, the baseline. Other cells: --mode, --seedless.
 generation:
   mode: "forward"                  # forward | inverse — the full switch; modes need no extra config
   seedless: false            # true = generate from the profile only, no real seeds
