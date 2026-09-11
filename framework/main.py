@@ -228,11 +228,15 @@ def format_results_lines(results: dict) -> list[str]:
         lines.append(f"\n{model}:")
         gen = blocks.get("generated", {})
         real = blocks.get("real", {})
+        paired = blocks.get("real_paired", {})
         for ev, val in gen.items():
             if isinstance(val, dict) and "mean" in val:
                 base = f"  generated.{ev}: {val['mean']} ± {val['std']}"
                 if ev in real:
                     base += f"   | real.{ev}: {real[ev]}"
+                if isinstance(paired.get(ev), dict) and "mean" in paired[ev]:
+                    base += (f"   | paired real.{ev}: {paired[ev]['mean']} "
+                             f"± {paired[ev]['std']}")
                 lines.append(base)
             else:  # nested metric (e.g. errant.precision)
                 for sub, v in val.items():
@@ -240,6 +244,10 @@ def format_results_lines(results: dict) -> list[str]:
                     real_ev = real.get(ev)
                     if isinstance(real_ev, dict) and sub in real_ev:
                         line += f"   | real.{ev}.{sub}: {real_ev[sub]}"
+                    paired_ev = paired.get(ev)
+                    if isinstance(paired_ev, dict) and isinstance(paired_ev.get(sub), dict):
+                        line += (f"   | paired real.{ev}.{sub}: "
+                                 f"{paired_ev[sub]['mean']} ± {paired_ev[sub]['std']}")
                     lines.append(line)
         for ev, val in real.items():
             if ev not in gen:

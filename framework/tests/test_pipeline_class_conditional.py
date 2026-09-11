@@ -63,6 +63,9 @@ class PipelineClassConditionalTests(unittest.TestCase):
             self.assertIn("fake", final)
             self.assertIn("generated", final["fake"])
             self.assertIn("real", final["fake"])
+            # spam does not pair: no paired keys, results exactly as before
+            self.assertNotIn("real_paired", final["fake"])
+            self.assertNotIn("real_paired_runs", final["fake"])
             task_dir = os.path.join(d, "runs", "spam")
             session = os.listdir(task_dir)[0]
             base = os.path.join(task_dir, session)
@@ -98,12 +101,12 @@ class PipelineClassConditionalTests(unittest.TestCase):
                               lambda self, config: _REAL_REF), \
                  patch.object(SpamTask, "get_model", lambda self, mc: _FakeModel(mc)), \
                  mock.patch.object(
-                     pipeline, "_evaluate_real_baseline",
-                     wraps=pipeline._evaluate_real_baseline,
-                 ) as baseline:
+                     pipeline, "_predict_real",
+                     wraps=pipeline._predict_real,
+                 ) as predict_real:
                 final = pipeline.run_pipeline(config)
 
-            self.assertEqual(baseline.call_count, 1)
+            self.assertEqual(predict_real.call_count, 1)
             self.assertIn("fake", final)
             self.assertIn("generated", final["fake"])
             self.assertIn("real", final["fake"])

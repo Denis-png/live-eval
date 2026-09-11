@@ -983,31 +983,66 @@ def _resolve_class_prob(config: dict, real_reference, task=None) -> dict:
     return {label: 1.0 / len(labels) for label in labels} if labels else {}
 
 
-def _evaluate_real_baseline(task, config, real_reference, evaluator_fns) -> dict:
-    """Evaluate task_models once on the real benchmark (deterministic → no runs)."""
+def _predict_real(task, config, real_reference) -> dict:
+    """Each task model's result rows on the real reference ({**item,
+    "prediction": ...}), keyed by model name -- predicted once per session.
+
+    Kept rather than discarded after scoring: a paired run scores a subset of
+    these same rows, so pairing costs no extra model call."""
     if not real_reference:
         print("[real baseline] skipped — task has no real reference.")
         return {}
     texts = [s["text"] for s in real_reference]
-    out = {}
+    rows = {}
     for model_config in config["task_models"]:
         model = task.get_model(model_config)
         predictions = model.predict(texts)
-        results = [{**s, "prediction": p} for s, p in zip(real_reference, predictions)]
-        out[model_config["name"]] = {
-            name: evaluator_fns[name](results) for name in task.get_evaluators()
-        }
-    return out
+        rows[model_config["name"]] = [{**s, "prediction": p}
+                                      for s, p in zip(real_reference, predictions)]
+    return rows
+
+
+def _score_rows(task, rows: list[dict], evaluator_fns: dict) -> dict:
+    """Every evaluator over one list of result rows -- the same list object, so
+    a memoized evaluator family scores it in one pass."""
+    return {name: evaluator_fns[name](rows) for name in task.get_evaluators()}
+
+
+def _evaluate_real_baseline(task, config, real_reference, evaluator_fns) -> dict:
+    """Evaluate task_models once on the real benchmark (deterministic → no runs)."""
+    return {model: _score_rows(task, rows, evaluator_fns)
+            for model, rows in _predict_real(task, config, real_reference).items()}
+
+
+def _paired_real_scores(task, real_reference, real_rows: dict, synthetic: list[dict],
+                        evaluator_fns: dict) -> dict | None:
+    """This run's paired real baseline: the real items its accepted records came
+    from (task.paired_real_indices), scored with the evaluators that score the
+    run itself. None when the task does not pair or the real baseline did not
+    run. Each subset is a new list, so an identity-keyed memo never serves the
+    unpaired result for it."""
+    if not real_rows:
+        return None
+    indices = task.paired_real_indices(real_reference, synthetic)
+    if indices is None:
+        return None
+    return {model: _score_rows(task, [rows[i] for i in indices], evaluator_fns)
+            for model, rows in real_rows.items()}
 
 
 def _nest_results(generated_agg: dict, real_scores: dict,
-                  all_run_scores: list[dict] | None = None) -> dict:
-    """Group each model's scores as {generated, real?, runs?}.
+                  all_run_scores: list[dict] | None = None,
+                  paired_run_scores: list[dict] | None = None) -> dict:
+    """Group each model's scores as {generated, real?, runs?, real_paired?,
+    real_paired_runs?}.
 
     `runs` lists the model's score dict for each completed run. It is additive —
     the printer and compare_models read only generated/real — and it is what the
-    run-variance figure plots."""
+    run-variance figure plots. `real_paired_runs[k]` is the paired real score of
+    the run scored in `runs[k]`, and `real_paired` aggregates them like
+    `generated`; both appear only for a task that pairs."""
     final = {}
+    paired_agg = aggregate(paired_run_scores) if paired_run_scores else {}
     for model in set(generated_agg) | set(real_scores):
         final[model] = {}
         if model in generated_agg:
@@ -1017,6 +1052,10 @@ def _nest_results(generated_agg: dict, real_scores: dict,
         runs = [run[model] for run in (all_run_scores or []) if model in run]
         if runs:
             final[model]["runs"] = runs
+        if model in paired_agg:
+            final[model]["real_paired"] = paired_agg[model]
+            final[model]["real_paired_runs"] = [run[model] for run in paired_run_scores
+                                                if model in run]
     return final
 
 
@@ -1199,10 +1238,10 @@ def run_pipeline(config: dict) -> dict:
 
     # The real baseline is deterministic (fixed reference sample, fixed task
     # models): compute it once and reuse it in every per-run checkpoint write.
-    real_scores = (
-        _evaluate_real_baseline(task, config, real_reference, evaluator_fns)
-        if real_baseline else {}
-    )
+    real_rows = _predict_real(task, config, real_reference) if real_baseline else {}
+    real_scores = {model: _score_rows(task, rows, evaluator_fns)
+                   for model, rows in real_rows.items()}
+    paired_run_scores: list[dict] = []
 
     for run_idx in range(num_runs):
         print(f"\n{'='*50}\nRUN {run_idx + 1} / {num_runs}\n{'='*50}")
@@ -1226,16 +1265,23 @@ def run_pipeline(config: dict) -> dict:
             for name, score in run_scores[model_config["name"]].items():
                 print(f"  {model_config['name']}  {name}: {score}")
         all_run_scores.append(run_scores)
+        paired = _paired_real_scores(task, real_reference, real_rows, synthetic,
+                                     evaluator_fns)
+        if paired is not None:
+            paired_run_scores.append(paired)
         effective_samples.append(len(eval_samples))
 
         saved_path = save_synthetic_data(synthetic, paths["generated_dir"], run_idx)
         print(f"\nSynthetic data archived to {saved_path}")
 
         generated_agg = aggregate(all_run_scores)
-        final = _nest_results(generated_agg, real_scores, all_run_scores)
+        final = _nest_results(generated_agg, real_scores, all_run_scores,
+                              paired_run_scores)
         meta = _build_meta(config, task, runs_completed=run_idx + 1,
                            effective_samples_per_run=effective_samples,
                            real_baseline=bool(real_scores))
+        if paired_run_scores:
+            meta["paired_real"] = True
         _write_results(final, paths["results"], meta)
         if run_idx + 1 < num_runs:
             print(f"Partial results (run {run_idx + 1}/{num_runs}) saved to {paths['results']}")
