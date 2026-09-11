@@ -8,6 +8,9 @@ from framework.pipeline import _get_field, aggregate, load_real_data, _mean_std,
 
 
 class _SpamLikeTask:
+    def get_generation_strategy(self):
+        return "class_conditional"
+
     def parse_row(self, row):
         if str(row.get("label", "")).lower() in ("spam", "1"):
             return None
@@ -16,6 +19,9 @@ class _SpamLikeTask:
 
 
 class _GecLikeTask:
+    def get_generation_strategy(self):
+        return "corruption"
+
     def parse_row(self, row):
         if row.get("incorrect") and row.get("correct"):
             return {"incorrect": row["incorrect"], "correct": row["correct"]}

@@ -118,7 +118,10 @@ def load_real_data(config: dict, task: BaseTask) -> list[dict]:
             break
 
     print(f"Loaded {len(samples)} real samples.")
-    if len(samples) < sample_size:
+    # A structured sample is a whole generated artifact and a real row a whole
+    # ontology its seed pool is cut from, so fewer rows than samples is normal
+    # there (Pizza is one row) -- warning on it read like a broken benchmark.
+    if len(samples) < sample_size and task.get_generation_strategy() != "structured":
         # sample_size counts USABLE samples (task.parse_row filters rows, e.g.
         # spam keeps HAM only) — the source ran out before filling the pool.
         print(
