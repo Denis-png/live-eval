@@ -1183,6 +1183,54 @@ def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
     return weights
 
 
+def _load_structure_calibration(config: dict, task, strategy: str, mode: str | None,
+                                seedless: bool, real_reference) -> dict | None:
+    """The calibrated depth and child-count request for structured inverse+
+    seedless -- the one structured cell that imposes distributions rather than
+    drawing seeds. None when there is no usable, current artifact."""
+    if strategy != "structured" or mode != "inverse" or not seedless:
+        return None
+    from framework.calibration.artifact import load_calibration, resolve_calibration_path
+
+    path = resolve_calibration_path(config, task, strategy)
+    if not path:
+        print(f"[NOTE] no calibration artifact for "
+              f"{generation_cell_slug(config, strategy)}; imposing the real "
+              f"structure. Build one with: python -m framework.calibrate "
+              f"--config <config.yaml>")
+        return None
+    # Same guard as _load_seed_weights: the stale check lives INSIDE the try so
+    # a structurally corrupt target (e.g. a non-dict "target") takes the
+    # "could not be read or is malformed" path instead of raising out of
+    # _structured_target_matches.
+    try:
+        payload = load_calibration(path)
+        calibrated = payload.get("calibrated") or {}
+        request = {name: calibrated.get(name) for name in ("type_dist", "count_dist")}
+        if not all(isinstance(d, dict) and d for d in request.values()):
+            return None
+        for dist in request.values():
+            [float(v) for v in dist.values()]
+        if not _structured_target_matches(task, payload, real_reference,
+                                          task.get_calibration_keys()):
+            print(f"[WARN] calibration {path!r} was measured against a different real "
+                  "reference; imposing the real structure. Recalibrate to use it.",
+                  file=sys.stderr)
+            return None
+    except (OSError, ValueError, AttributeError, TypeError, KeyError) as e:
+        print(f"[WARN] calibration {path!r} could not be read or is malformed "
+              f"({e}); imposing the real structure.", file=sys.stderr)
+        return None
+
+    global _LAST_CALIBRATION
+    _LAST_CALIBRATION = {"path": path,
+                         "selected_round": payload.get("selected_round"),
+                         "class_prob": None}
+    print(f"Calibration: {path} (round {payload.get('selected_round')}) — "
+          "depth and child-count distributions")
+    return request
+
+
 def build_generation_context(config: dict) -> dict:
     """Everything needed to generate for `config`, resolved once.
 
@@ -1226,6 +1274,13 @@ def build_generation_context(config: dict) -> dict:
                                       real_reference)
     if seed_weights:
         config.setdefault("generation", {})["seed_weights"] = seed_weights
+
+    # inverse+seedless imposes the profile's structure through the prompt AND the
+    # feedback loop, so a calibrated request replaces it in the profile itself.
+    structure = _load_structure_calibration(config, task, strategy, mode, seedless,
+                                            real_reference)
+    if structure:
+        profile = task.apply_calibrated_structure(profile, structure)
 
     return {
         "task": task,

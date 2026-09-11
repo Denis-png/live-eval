@@ -169,5 +169,84 @@ class SeedWeightConsumptionTests(_Workspace):
         self.assertIn("malformed", err)
 
 
+_PROFILE = {"taxonomies": [{"domain": "d", "n_classes": 10, "n_leaves": 6,
+                            "max_depth": 3, "mean_depth": 1.5,
+                            "depth_distribution": {"0": 1, "1": 4, "2": 4, "3": 1},
+                            "child_count_distribution": {"0": 6, "1": 2, "2": 2}}]}
+
+
+class ApplyStructureTests(unittest.TestCase):
+    def setUp(self):
+        self.request = {"type_dist": {"0": 0.1, "1": 0.2, "2": 0.3, "3": 0.4},
+                        "count_dist": {0: 0.5, 1: 0.25, 2: 0.25}}   # int keys, as loaded
+        self.out = TaxonomyTask().apply_calibrated_structure(_PROFILE, self.request)
+        self.target = self.out["taxonomies"][0]
+
+    def test_the_request_becomes_class_counts_summing_to_n_classes(self):
+        self.assertEqual(self.target["depth_distribution"], {"0": 1, "1": 2, "2": 3, "3": 4})
+        self.assertEqual(sum(self.target["child_count_distribution"].values()), 10)
+
+    def test_dependent_fields_are_recomputed(self):
+        self.assertEqual(self.target["mean_depth"], 2.0)       # (0+2+6+12)/10
+        self.assertEqual(self.target["n_leaves"],
+                         self.target["child_count_distribution"]["0"])
+
+    def test_other_fields_and_the_input_are_untouched(self):
+        self.assertEqual((self.target["max_depth"], self.target["domain"]), (3, "d"))
+        self.assertEqual(_PROFILE["taxonomies"][0]["depth_distribution"],
+                         {"0": 1, "1": 4, "2": 4, "3": 1})
+
+    def test_rounding_keeps_the_total_exact(self):
+        out = TaxonomyTask().apply_calibrated_structure(
+            _PROFILE, {"type_dist": {"0": 1 / 3, "1": 1 / 3, "2": 1 / 3},
+                       "count_dist": {"0": 1.0}})
+        self.assertEqual(sum(out["taxonomies"][0]["depth_distribution"].values()), 10)
+
+
+class StructureConsumptionTests(_Workspace):
+    def _target(self):
+        real = TaxonomyTask().get_real_eval_samples(self.config("inverse", True), [_E2E_REAL])
+        measured = TaxonomyTask().build_fidelity_profile(real)
+        return {"type_dist": measured["depth_dist"], "count_dist": measured["child_count_dist"]}
+
+    def test_the_prompt_and_the_feedback_carry_the_calibrated_counts(self):
+        request = {"type_dist": {"0": 0.1, "1": 0.2, "2": 0.3, "3": 0.4},
+                   "count_dist": {"0": 0.6, "1": 0.2, "2": 0.2}}
+        path = self.artifact("c_calibration.json", self._target(), request)
+        ctx, _ = self.context(self.config("inverse", True, calibration_path=path))
+        self.assertEqual(ctx["profile"]["taxonomies"][0]["depth_distribution"],
+                         {"0": 1, "1": 2, "2": 3, "3": 4})
+        prompt = TaxonomyTask().build_structured_generation_prompt(ctx["profile"],
+                                                                   mode="inverse")
+        self.assertIn('"3": 4', prompt)
+        artifact = {"domain": "d", "classes": ["A", "B"], "subclass_axioms": [["B", "A"]]}
+        feedback = TaxonomyTask().build_structural_feedback(ctx["profile"], artifact)
+        # The loop compares each artifact against the substituted reference.
+        self.assertEqual(
+            feedback["comparison"]["distribution_characteristics"]
+            ["depth_distribution"]["real"],
+            {"0": 1, "1": 2, "2": 3, "3": 4})
+
+    def test_a_stale_artifact_leaves_the_real_structure(self):
+        path = self.artifact("d_calibration.json",
+                             {"type_dist": {"9": 1.0}, "count_dist": {"0": 1.0}},
+                             {"type_dist": {"0": 1.0}, "count_dist": {"0": 1.0}})
+        ctx, err = self.context(self.config("inverse", True, calibration_path=path))
+        self.assertEqual(ctx["profile"]["taxonomies"][0]["depth_distribution"],
+                         json.load(open(self.profile_path))["taxonomies"][0]["depth_distribution"])
+        self.assertIn("different real reference", err)
+
+    def test_a_malformed_target_is_ignored_with_a_warning_not_a_crash(self):
+        # A structurally corrupt target ("not-a-dict") must not crash
+        # _structured_target_matches -- it takes the "malformed" path instead
+        # of the "different real reference" one (task-3 decision 1).
+        path = self.artifact("e_calibration.json", "not-a-dict",
+                             {"type_dist": {"0": 1.0}, "count_dist": {"0": 1.0}})
+        ctx, err = self.context(self.config("inverse", True, calibration_path=path))
+        self.assertEqual(ctx["profile"]["taxonomies"][0]["depth_distribution"],
+                         json.load(open(self.profile_path))["taxonomies"][0]["depth_distribution"])
+        self.assertIn("malformed", err)
+
+
 if __name__ == "__main__":
     unittest.main()

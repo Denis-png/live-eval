@@ -47,6 +47,21 @@ def serialize_taxonomy_model_input(domain: str, classes: list[str]) -> str:
     return json.dumps(taxonomy_model_input(domain, classes), ensure_ascii=False, sort_keys=True)
 
 
+def _counts_from_fractions(fractions: dict, total: int) -> dict[str, int]:
+    """Class counts summing exactly to `total`, by largest remainder, keyed by
+    the string form the profiler writes. Empty bins are dropped."""
+    weights = {str(k): max(0.0, float(v)) for k, v in (fractions or {}).items()}
+    mass = sum(weights.values())
+    if total <= 0 or mass <= 0:
+        return {}
+    exact = {k: total * w / mass for k, w in weights.items()}
+    counts = {k: int(x) for k, x in exact.items()}
+    shortfall = total - sum(counts.values())
+    for k in sorted(exact, key=lambda k: (exact[k] - counts[k], k), reverse=True)[:shortfall]:
+        counts[k] += 1
+    return {k: counts[k] for k in sorted(counts, key=int) if counts[k] > 0}
+
+
 _RAW_PREVIEW_LIMIT = 800
 
 
@@ -511,6 +526,31 @@ class TaxonomyTask(BaseTask):
         # Seeded cells steer which subtrees are drawn, by max-depth bucket, so
         # what they measure is the delivered mix of those same buckets.
         return "max_depth_mix"
+
+    def apply_calibrated_structure(self, profile: dict, request: dict) -> dict:
+        """A copy of the benchmark profile imposing a calibration request.
+
+        inverse+seedless imposes taxonomies[0]'s structure, through both the
+        prompt and the feedback loop. Calibration replaces its depth and
+        child-count distributions with the request -- class counts summing to
+        n_classes -- and recomputes mean_depth and n_leaves so the imposed spec
+        stays self-consistent. Every other field is kept; `profile` is not
+        mutated."""
+        import copy
+
+        out = copy.deepcopy(profile)
+        target = out["taxonomies"][0]
+        n = int(target.get("n_classes") or 0)
+        if request.get("type_dist"):
+            depth = _counts_from_fractions(request["type_dist"], n)
+            target["depth_distribution"] = depth
+            target["mean_depth"] = (round(sum(int(d) * c for d, c in depth.items()) / n, 4)
+                                    if n else 0.0)
+        if request.get("count_dist"):
+            children = _counts_from_fractions(request["count_dist"], n)
+            target["child_count_distribution"] = children
+            target["n_leaves"] = children.get("0", 0)
+        return out
 
     def get_feedback_config(self, generation_config: dict | None = None) -> dict:
         """Return taxonomy feedback settings, letting run config override defaults."""
