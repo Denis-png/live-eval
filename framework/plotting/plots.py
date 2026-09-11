@@ -289,6 +289,46 @@ def plot_fidelity(profile: dict, meta: dict | None = None):
     return fig
 
 
+def plot_sentiment_fidelity(profile: dict, meta: dict | None = None):
+    """Real vs generated label balance and word-count histogram, with the JSD
+    scores in the title. The generic figure reads spam's signal rates and SPAM
+    fraction, which a sentiment profile does not have."""
+    real = (profile or {}).get("real") or {}
+    gen = (profile or {}).get("generated") or {}
+    fid = (profile or {}).get("fidelity") or {}
+
+    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.4), gridspec_kw={"width_ratios": [1, 2]})
+    fig.patch.set_facecolor(SURFACE)
+    width = 0.38
+    panels = (
+        ("label_dist", "fraction of samples", "label balance", 0),
+        ("word_count_hist", "fraction of samples", "length (words)", 20),
+    )
+    for ax, (key, ylabel, title, rotation) in zip(axes, panels):
+        apply_axes_style(ax)
+        bins = list(dict.fromkeys([*(real.get(key) or {}), *(gen.get(key) or {})]))
+        x = range(len(bins))
+        for offset, side, color, name in ((-1, real, SERIES_REAL, "real"),
+                                          (1, gen, SERIES_GENERATED, "generated")):
+            ax.bar([i + offset * (width / 2 + 0.01) for i in x],
+                   [(side.get(key) or {}).get(b, 0.0) for b in bins], width,
+                   label=name, color=color)
+        ax.set_xticks(list(x))
+        ax.set_xticklabels(bins, rotation=rotation, ha="right" if rotation else "center")
+        ax.set_ylabel(ylabel, color=INK_MUTED)
+        ax.set_title(title, color=INK, fontsize=10)
+        ax.margins(y=0.18)
+    axes[0].legend(frameon=False, labelcolor=INK_MUTED, fontsize=9)
+
+    jsd = (f"JSD label {fid.get('label_dist_jsd', float('nan')):.3f}  ·  "
+           f"JSD length {fid.get('length_jsd', float('nan')):.3f}  "
+           f"(0 = identical, 1 = disjoint)")
+    fig.suptitle(f"real vs generated fidelity — {jsd}\n{_subtitle(meta)}".strip(),
+                 color=INK, fontsize=11)
+    fig.tight_layout()
+    return fig
+
+
 def plot_taxonomy_fidelity(profile: dict, meta: dict | None = None):
     """Structural real-vs-synthetic taxonomy fidelity.
 

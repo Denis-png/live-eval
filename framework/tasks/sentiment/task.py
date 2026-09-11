@@ -132,54 +132,55 @@ class SentimentTask(BaseTask):
             if r.get("incorrect") and r.get("sentiment_label")
         ]
 
-    def profile_dataset(self, rows: list[dict]) -> dict | None:
+    def build_fidelity_profile(self, rows: list[dict]) -> dict:
+        """Label balance and text length/style, measured the same way on both sides.
+
+        The pipeline passes real eval samples ({"text", "label"}) and raw generated
+        records ({"original", "corrupted", "error_type"}). A generated record is
+        labelled by its error type -- the label evaluation scores it against -- and
+        one with no deterministic label (paraphrase) is left out, as evaluation
+        leaves it out. Real tweets carry no error type, so the error-type mix has
+        nothing to be compared with; error_type_dist.png shows it on its own.
+        """
         from collections import Counter
+
         from framework.profiling.dataset_profiler import tokenize
         from framework.profiling.text_stats import WORD_BINS, length_distribution, style_profile
 
-        texts = [r.get("text") or r.get("corrupted") or r.get("incorrect") for r in rows]
-        texts = [t for t in texts if t]
-        if not texts:
-            return None
-
-        error_types = [r.get("error_type") for r in rows if r.get("error_type")]
-        type_counts = Counter(error_types)
-        total = max(sum(type_counts.values()), 1)
-
-        label_counts = Counter(r.get("label") for r in rows if r.get("label"))
-
+        pairs = [(r.get("text") or r.get("corrupted"), r.get("label") or self.get_label(r))
+                 for r in rows]
+        pairs = [(text, label) for text, label in pairs if text and label]
+        texts = [text for text, _ in pairs]
+        counts = Counter(label for _, label in pairs)
+        n = len(pairs)
         return {
-            "num_samples": len(rows),
-            "error_type_dist": {k: round(v / total, 4) for k, v in type_counts.most_common()},
-            "label_dist": dict(label_counts),
+            "num_samples": n,
+            "label_dist": {label: round(counts[label] / n, 4) if n else 0.0
+                           for label in sorted(set(self._CLASSES) | set(counts))},
             "word_count_hist": length_distribution(
-                [len(tokenize(t)) for t in texts], WORD_BINS
-            )["bins"],
+                [len(tokenize(t)) for t in texts], WORD_BINS)["bins"],
             "style": style_profile(texts),
         }
 
-    def compare_profiles(self, real: dict, generated: dict) -> dict:
+    def compare_fidelity_profiles(self, real: dict, generated: dict) -> dict:
+        """Real->generated divergences over labels and lengths, plus per-label and
+        style deltas. `profile_type` routes the session plot to its own figure."""
         from framework.profiling.fidelity import jensen_shannon_divergence
+
+        def deltas(key: str) -> dict:
+            r, g = real.get(key) or {}, generated.get(key) or {}
+            return {k: round(g.get(k, 0.0) - r.get(k, 0.0), 4) for k in sorted(set(r) | set(g))}
+
+        def jsd(key: str) -> float:
+            return round(jensen_shannon_divergence(real.get(key) or {},
+                                                   generated.get(key) or {}), 6)
+
         return {
-            "type_dist_jsd": jensen_shannon_divergence(
-                real.get("error_type_dist", {}), generated.get("error_type_dist", {})
-            ),
-            "label_dist_jsd": jensen_shannon_divergence(
-                {k: v for k, v in (real.get("label_dist") or {}).items()},
-                {k: v for k, v in (generated.get("label_dist") or {}).items()},
-            ),
-            "length_jsd": jensen_shannon_divergence(
-                real.get("word_count_hist", {}), generated.get("word_count_hist", {})
-            ),
-            "style_deltas": {
-                key: round(
-                    generated.get("style", {}).get(key, 0.0)
-                    - real.get("style", {}).get(key, 0.0), 4
-                )
-                for key in sorted(
-                    set(real.get("style", {})) | set(generated.get("style", {}))
-                )
-            },
+            "profile_type": "sentiment_fidelity",
+            "label_dist_jsd": jsd("label_dist"),
+            "length_jsd": jsd("word_count_hist"),
+            "label_deltas": deltas("label_dist"),
+            "style_deltas": deltas("style"),
         }
 
     def get_task_name(self) -> str:

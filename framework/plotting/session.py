@@ -144,6 +144,12 @@ def render_session(session_dir: str, out_dir: str | None = None) -> list[str]:
                     plots.plot_taxonomy_fidelity_distributions(profile, meta),
                     os.path.join(out_dir, filename), plt,
                 ))
+            elif fidelity_type == "sentiment_fidelity":
+                filename = "sentiment_fidelity.png"
+                written.append(_save(
+                    plots.plot_sentiment_fidelity(profile, meta),
+                    os.path.join(out_dir, filename), plt,
+                ))
             else:
                 written.append(_save(plots.plot_fidelity(profile, meta),
                                      os.path.join(out_dir, filename), plt))
