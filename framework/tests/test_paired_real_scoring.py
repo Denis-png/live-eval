@@ -148,5 +148,89 @@ class PrinterTests(unittest.TestCase):
         self.assertIn("paired real.f1: 0.85 ± 0.02", text)
 
 
+class RealPointTests(unittest.TestCase):
+    def test_the_paired_mean_wins_where_a_session_paired(self):
+        from framework.real_baseline import real_point
+        blocks = {"real": {"f1": 0.8, "diagnostics": {"tp": 10}},
+                  "real_paired": {"f1": {"mean": 0.85, "std": 0.02},
+                                  "diagnostics": {"tp": {"mean": 8.0, "std": 1.0}}}}
+        self.assertEqual(real_point(blocks), {"f1": 0.85, "diagnostics": {"tp": 8.0}})
+
+    def test_the_unpaired_real_otherwise(self):
+        from framework.real_baseline import real_point
+        self.assertEqual(real_point({"real": {"f1": 0.8}}), {"f1": 0.8})
+        self.assertEqual(real_point({}), {})
+
+
+class AnalysisTests(unittest.TestCase):
+    def test_session_rows_compare_against_the_paired_real(self):
+        import sys
+        sys.path.insert(0, "scripts")
+        import analyze_results as ar
+        session = {"meta": {"task": "taxonomy", "strategy": "structured", "mode": "forward",
+                            "seedless": False, "model": "m"},
+                   "results": {"lexical": {
+                       "generated": {"f1": {"mean": 0.5, "std": 0.1}},
+                       "real": {"f1": 0.3},
+                       "real_paired": {"f1": {"mean": 0.4, "std": 0.05}}}}}
+        row = [r for r in ar.session_rows(session) if r["metric"] == "f1"][0]
+        self.assertEqual((row["real"], row["real_unpaired"]), (0.4, 0.3))
+
+
+class PlotTests(unittest.TestCase):
+    def test_the_session_figure_uses_the_paired_real(self):
+        from framework.plotting import plots
+        from framework.plotting import session as S
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "results.json"), "w", encoding="utf-8") as f:
+                json.dump({"meta": {"task": "taxonomy", "mode": "forward", "model": "m"},
+                           "results": {"lexical": {
+                               "generated": {"f1": {"mean": 0.5, "std": 0.1}},
+                               "real": {"f1": 0.3},
+                               "real_paired": {"f1": {"mean": 0.4, "std": 0.05}}}}}, f)
+            with mock.patch.object(plots, "plot_generated_vs_real",
+                                   wraps=plots.plot_generated_vs_real) as spy, \
+                    redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                S.render_session(d)
+        self.assertEqual(spy.call_args.args[2], {"f1": 0.4})
+
+
+class CompareTableTests(unittest.TestCase):
+    def test_a_paired_real_is_labelled_as_such(self):
+        from scripts.compare_models import _flatten
+        flat = _flatten({"generated": {"f1": {"mean": 0.5, "std": 0.1}},
+                         "real": {"f1": 0.3},
+                         "real_paired": {"f1": {"mean": 0.4, "std": 0.05}}})
+        self.assertEqual(flat["real_paired.f1"], "0.400")
+        self.assertNotIn("real.f1", flat)
+
+
+class RescoreTests(unittest.TestCase):
+    def test_rescoring_and_merging_reproduce_the_paired_block(self):
+        from scripts.merge_sessions import merge_sessions
+        from scripts.rescore_session import rescore_session
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        cfg, first = _session(tmp, "a", _RejectLargest())
+        _, second = _session(tmp, "b", _RejectLargest())
+        session = os.path.join(tmp, "taxonomy", "a")
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            rescore_session(session, cfg)
+        with open(os.path.join(session, "results.json"), encoding="utf-8") as f:
+            rescored = json.load(f)
+        for model, scores in first["results"].items():
+            self.assertEqual(rescored["results"][model]["real_paired_runs"],
+                             scores["real_paired_runs"])
+        self.assertIs(rescored["meta"]["paired_real"], True)
+
+        merged = os.path.join(tmp, "merged")
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            merge_sessions([session, os.path.join(tmp, "taxonomy", "b")], merged, cfg)
+        with open(os.path.join(merged, "results.json"), encoding="utf-8") as f:
+            combined = json.load(f)["results"]
+        for model in first["results"]:
+            self.assertEqual(len(combined[model]["real_paired_runs"]), 4)
+
+
 if __name__ == "__main__":
     unittest.main()

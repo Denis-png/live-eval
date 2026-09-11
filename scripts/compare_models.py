@@ -24,6 +24,7 @@ from framework.main import (
     validate_config,
 )
 from framework.pipeline import generation_cell_slug, load_task, run_pipeline
+from framework.real_baseline import real_point
 
 
 def parse_compare_args(argv=None):
@@ -102,9 +103,10 @@ def _flatten(blocks: dict) -> dict:
             for sub, sv in v.items():
                 if isinstance(sv, dict) and "mean" in sv:
                     flat[f"gen.{ev}.{sub}"] = f"{sv['mean']:.3f}±{sv['std']:.3f}"
-    for ev, val in (blocks.get("real") or {}).items():
+    label = "real_paired" if blocks.get("real_paired") else "real"
+    for ev, val in real_point(blocks).items():
         if isinstance(val, (int, float)):
-            flat[f"real.{ev}"] = f"{val:.3f}"
+            flat[f"{label}.{ev}"] = f"{val:.3f}"
     return flat
 
 

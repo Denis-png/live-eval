@@ -9,6 +9,8 @@ import os
 import re
 import sys
 
+from framework.real_baseline import real_point
+
 _FIG_DPI = 150
 
 
@@ -115,7 +117,7 @@ def render_session(session_dir: str, out_dir: str | None = None) -> list[str]:
         jobs = [(
             f"generated_vs_real_{slug}.png",
             lambda m=model, b=blocks: plots.plot_generated_vs_real(
-                m, b.get("generated") or {}, b.get("real"), meta),
+                m, b.get("generated") or {}, real_point(b) or None, meta),
         )]
         if blocks.get("runs"):
             jobs.append((

@@ -38,6 +38,7 @@ from functools import lru_cache
 
 from framework.generators.base_generator import CLASS_CONDITIONAL_SEMANTICS
 from framework.plotting.plots import flatten_mean_std, flatten_point, _visible
+from framework.real_baseline import real_point
 
 # ── Fixed entity colors (validated: Okabe-Ito subset, all-pairs CVD-checked;
 #    pink/amber/sky carry a contrast WARN whose relief is the direct labels on
@@ -303,12 +304,17 @@ def dedup_sessions(sessions):
 
 def session_rows(session):
     """Flatten one session into rows:
-    {task, strategy, gen_model, eval_model, metric, gen_mean, gen_std, real, runs}."""
+    {task, strategy, gen_model, eval_model, metric, gen_mean, gen_std, real,
+    real_unpaired, runs}."""
     meta = session["meta"]
     rows = []
     for eval_model, blocks in session["results"].items():
         gen = flatten_mean_std(blocks.get("generated") or {})
-        real = flatten_point(blocks.get("real") or {})
+        # The paired mean where the session paired its real side -- the items
+        # each run actually delivered -- so every gap, tau and table compares
+        # like with like. The whole-reference point stays as real_unpaired.
+        real = flatten_point(real_point(blocks))
+        real_unpaired = flatten_point(blocks.get("real") or {})
         per_run = [flatten_point(r) for r in blocks.get("runs") or []]
         for metric in _visible(gen.keys()):
             mean, std = gen[metric]
@@ -317,6 +323,7 @@ def session_rows(session):
                 "gen_model": meta["model"], "eval_model": eval_model,
                 "metric": metric, "gen_mean": mean, "gen_std": std,
                 "real": real.get(metric),
+                "real_unpaired": real_unpaired.get(metric),
                 "runs": [r[metric] for r in per_run if metric in r],
             })
     return rows
