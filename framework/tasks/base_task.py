@@ -280,6 +280,20 @@ class BaseTask(ABC):
         """
         return None
 
+    def get_seed_calibration_key(self) -> str | None:
+        """The build_fidelity_profile() key seed-mode calibration measures, when
+        it differs from get_calibration_keys()["type_dist"] (the default, None).
+        A task whose seeds are drawn by a bucket other than its type_dist
+        categories names that bucket's measurement here."""
+        return None
+
+    def apply_calibrated_structure(self, profile: dict, request: dict) -> dict:
+        """A copy of `profile` carrying a calibration request, for structured
+        tasks whose cells impose a structural target. Unsupported by default."""
+        raise NotImplementedError(
+            f"{self.get_task_name()} does not support structural calibration "
+            "(apply_calibrated_structure).")
+
     def get_real_eval_samples(self, config: dict, real_data: list[dict]) -> list[dict] | None:
         """Eval-ready rows for the REAL benchmark, carrying the same schema the
         evaluators expect (classification: text+label; text→text: text+corrupted+

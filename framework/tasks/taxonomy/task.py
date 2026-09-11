@@ -471,16 +471,34 @@ class TaxonomyTask(BaseTask):
         fields (roots, leaves, class_depths) so fidelity reporting cannot expose
         real ontology class identifiers or URI provenance.
         """
-        from framework.profiling.taxonomy_fidelity import sanitize_taxonomy_profile
+        from framework.profiling.taxonomy_fidelity import (
+            sanitize_taxonomy_profile,
+            structure_measurements,
+        )
         from framework.profiling.taxonomy_profiler import profile_taxonomy_rows
 
-        return sanitize_taxonomy_profile(profile_taxonomy_rows(rows))
+        profile = sanitize_taxonomy_profile(profile_taxonomy_rows(rows))
+        # Top-level class measurements for calibration. The fidelity comparison
+        # and its plots read `taxonomies`, never these.
+        profile.update(structure_measurements(profile["taxonomies"]))
+        return profile
 
     def compare_fidelity_profiles(self, real: dict, generated: dict) -> dict:
         """Real-vs-synthetic structural fidelity for taxonomy profiles."""
         from framework.profiling.taxonomy_fidelity import compare_taxonomy_profiles
 
         return compare_taxonomy_profiles(real, generated)
+
+    def get_calibration_keys(self) -> dict[str, str]:
+        # The framework's two control slots, reused: per-class depth and
+        # per-class child count, the two structural distributions inverse+
+        # seedless imposes. Parent count (multiple inheritance) is left out.
+        return {"type_dist": "depth_dist", "count_dist": "child_count_dist"}
+
+    def get_seed_calibration_key(self) -> str:
+        # Seeded cells steer which subtrees are drawn, by max-depth bucket, so
+        # what they measure is the delivered mix of those same buckets.
+        return "max_depth_mix"
 
     def get_feedback_config(self, generation_config: dict | None = None) -> dict:
         """Return taxonomy feedback settings, letting run config override defaults."""

@@ -43,8 +43,11 @@ class CalibrationKeysTests(unittest.TestCase):
             {"type_dist": "error_type_dist", "count_dist": "error_count_dist"},
         )
 
-    def test_uncalibratable_tasks_opt_out(self):
-        self.assertIsNone(TaxonomyTask().get_calibration_keys())
+    def test_taxonomy_maps_control_inputs_to_its_structure_keys(self):
+        self.assertEqual(
+            TaxonomyTask().get_calibration_keys(),
+            {"type_dist": "depth_dist", "count_dist": "child_count_dist"},
+        )
 
     def test_spam_profile_keys_exist_and_are_shape_correct(self):
         # The mapping is only useful if build_fidelity_profile actually emits them with
