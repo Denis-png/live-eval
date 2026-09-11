@@ -316,6 +316,25 @@ model under test cannot score by recalling a canonical tutorial ontology.
 Seeded cells run no feedback loop — the gold is exact, so there is nothing to
 iterate toward.
 
+## Calibration
+
+`python -m framework.calibrate --config framework/configs/taxonomy/config.yaml
+--mode <forward|inverse> --[no-]seedless` calibrates one cell and writes an
+artifact under `framework/data/profiles/taxonomy/`, which later runs of that cell
+pick up automatically.
+
+| cell | steered | measured against the real reference |
+|---|---|---|
+| forward+seeded, inverse+seeded | seed weights over max-depth buckets | the class-weighted max-depth mix of the delivered artifacts |
+| inverse+seedless | the imposed depth and child-count distributions | the same distributions over every generated class |
+| forward+seedless | nothing | refuses |
+
+Seeded cells lose their largest subtrees to verification; weighting the draw
+toward those buckets restores the pool's structural mix, drawing with
+replacement. inverse+seedless replaces the imposed distributions in the profile
+the prompt and the feedback loop both read. An artifact measured against a
+different real reference is ignored with a warning.
+
 ## What the Real Baseline Is
 
 Each session compares its synthetic benchmark against a real reference drawn the
