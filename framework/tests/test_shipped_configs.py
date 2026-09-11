@@ -95,6 +95,7 @@ class TaxonomyCellsRunFromTheShippedConfigTests(unittest.TestCase):
                     cfg = dict(base)
                     cfg["generation"] = {**base["generation"], "mode": mode,
                                          "seedless": seedless, "sample_size": 1,
+                                         "request_delay": 0.0,   # dispatch, not pacing
                                          "seed_pool": {"max_depth": 4, "min_classes": 3}}
                     try:
                         pipeline._run_generation(_Refuse(), TaxonomyTask(), cfg, real,
@@ -106,3 +107,40 @@ class TaxonomyCellsRunFromTheShippedConfigTests(unittest.TestCase):
                         self.assertNotIn("feedback", str(e).lower(),
                                          f"{mode}+{'seedless' if seedless else 'seeded'} "
                                          f"refused to start: {e}")
+
+
+class NormalizedConfigsTests(unittest.TestCase):
+    """The final ablation compares tasks under one generator, so the four shipped
+    configs must not drift apart: one provider and model in every LLM slot, one
+    temperature, one request delay, and the same baseline cell."""
+
+    def _configs(self):
+        return {p: yaml.safe_load(open(p)) for p in _CONFIGS}
+
+    def _one(self, values):
+        self.assertEqual(len(set(values.values())), 1, values)
+
+    def test_every_llm_slot_uses_one_provider_and_model(self):
+        slots = {}
+        for path, config in self._configs().items():
+            for block in ("generation", "judge", "profiling"):
+                cfg = config.get(block) or {}
+                if cfg.get("model"):
+                    slots[f"{path}:{block}"] = (cfg.get("provider"), cfg["model"])
+            for model in config.get("task_models") or []:
+                if model.get("type") == "llm":
+                    slots[f"{path}:{model['name']}"] = (model.get("provider"),
+                                                        model["name"])
+        self._one(slots)
+
+    def test_generation_shares_temperature_and_request_delay(self):
+        configs = self._configs()
+        for key in ("temperature", "request_delay"):
+            with self.subTest(key=key):
+                self._one({p: c["generation"].get(key) for p, c in configs.items()})
+
+    def test_every_task_ships_the_forward_seeded_baseline(self):
+        for path, config in self._configs().items():
+            with self.subTest(config=path):
+                gen = config["generation"]
+                self.assertEqual((gen.get("mode"), gen.get("seedless")), ("forward", False))

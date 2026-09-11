@@ -38,7 +38,7 @@ generation:
   sample_size: 150
   timeout: 300
   max_retries: 2
-  request_delay: 1
+  request_delay: 1.0           # seconds between requests; one value for every task
 
 # ── Profiling (LLM used by profile_dataset --topics) ──
 profiling:

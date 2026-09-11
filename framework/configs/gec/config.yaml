@@ -43,7 +43,7 @@ generation:
                               # dataset pool is loaded to match)
   timeout: 300                 # per-request HTTP timeout in seconds (SDK default: 600)
   max_retries: 2               # SDK retries on 5xx/429 (SDK default: 2)
-  request_delay: 10            # seconds to sleep between requests to respect provider TPM limits
+  request_delay: 1.0           # seconds between requests; one value for every task
   # api_key is auto-resolved from api_keys[provider]; uncomment to override:
   # api_key: "..."
 

@@ -83,7 +83,7 @@ generation:
                                # order of magnitude below the sentence tasks.
   timeout: 600                 # a whole artifact takes far longer than one sentence
   max_retries: 2
-  request_delay: 0.0
+  request_delay: 1.0           # seconds between requests; one value for every task
 
   # Structural feedback loop. Deliberately NOT enabled here: taxonomy.json already
   # defaults it on, and the loop only runs in inverse+seedless — the one cell with
