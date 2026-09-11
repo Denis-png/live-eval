@@ -38,6 +38,24 @@ DEFAULT_TOLERANCE = 0.1
 # tolerance: the update would be steering on noise rather than on bias.
 MIN_SAMPLE_SIZE = 100
 MIN_INFORMATIVE = 50
+# Structured tasks: a sample is a whole artifact, and distributions are measured
+# over its classes, so 3 x generation.sample_size artifacts (~1000 classes for
+# taxonomy) estimate them well -- MIN_SAMPLE_SIZE artifacts would cost 100 full
+# generations per round.
+STRUCTURED_SAMPLE_MULTIPLIER = 3
+
+
+def _default_sample_size(config: dict) -> int:
+    gen = config.get("generation") or {}
+    try:
+        from framework.pipeline import load_task
+        structured = load_task((config.get("task") or {}).get("name")) \
+            .get_generation_strategy() == "structured"
+    except Exception:
+        structured = False
+    if structured:
+        return STRUCTURED_SAMPLE_MULTIPLIER * gen.get("sample_size", 0)
+    return max(gen.get("sample_size", 0), MIN_SAMPLE_SIZE)
 
 
 def calibration_settings(config: dict, args=None) -> dict:
@@ -52,9 +70,7 @@ def calibration_settings(config: dict, args=None) -> dict:
         "rounds": block.get("rounds", DEFAULT_ROUNDS),
         "alpha": block.get("alpha", DEFAULT_ALPHA),
         "tolerance": block.get("tolerance", DEFAULT_TOLERANCE),
-        "sample_size": block.get(
-            "sample_size", max(gen.get("sample_size", 0), MIN_SAMPLE_SIZE)
-        ),
+        "sample_size": block.get("sample_size", _default_sample_size(config)),
     }
     for key in settings:
         value = getattr(args, key, None) if args is not None else None
@@ -129,6 +145,9 @@ def informative_count(task, rows: list[dict], profile: dict | None = None,
     if task.get_generation_strategy() == "class_conditional":
         bearing = set(signal_bearing_labels(task, mode=mode, seedless=seedless))
         return sum(1 for r in rows if r.get("label") in bearing)
+    if task.get_generation_strategy() == "structured":
+        # Distributions are measured over classes, not taxonomies.
+        return (profile or {}).get("n_classes_total", 0)
     return (profile or {}).get("n_annotated", 0)
 
 
@@ -184,12 +203,19 @@ def run_calibration(
 
     ctx = pipeline.build_generation_context(base_config)
     task, strategy = ctx["task"], ctx["strategy"]
+    structured = strategy == "structured"
+    if structured and ctx["mode"] == "forward" and ctx["seedless"]:
+        raise RuntimeError(
+            f"Cell {pipeline.generation_cell_slug(config, strategy)} of task "
+            f"'{task.get_task_name()}' imposes no structure -- only a domain is "
+            "supplied -- so there is nothing to calibrate.")
     # Corruption forward+seeded injects no distribution at all — the generator
     # identifies the seed's error itself. Its one control input is WHICH seeds it
-    # sees, so that cell calibrates seed weights instead (Task 8).
-    seed_mode = (strategy == "corruption" and ctx["mode"] == "forward"
-                 and not ctx["seedless"])
-    if ctx["error_dist"] is None and not seed_mode:
+    # sees, so that cell calibrates seed weights instead (Task 8). Every
+    # structured seeded cell is the same: its structure is the drawn subtree's.
+    seed_mode = not ctx["seedless"] and (
+        structured or (strategy == "corruption" and ctx["mode"] == "forward"))
+    if ctx["error_dist"] is None and not seed_mode and not structured:
         raise RuntimeError(
             f"Cell {pipeline.generation_cell_slug(config, strategy)} of task "
             f"'{task.get_task_name()}' samples no error distribution, so there "
@@ -208,10 +234,13 @@ def run_calibration(
         # Forward mode leaves the edit COUNT entirely to the generator, so there
         # is no control input for count_dist: keeping it in the target would make
         # converged() unsatisfiable and burn the whole round budget for nothing.
-        # It stays in the round trace as a diagnostic instead.
-        keys = {"type_dist": keys["type_dist"]}
+        # It stays in the round trace as a diagnostic instead. A task whose seeds
+        # are bucketed differently from its type_dist names that measurement.
+        seed_key = task.get_seed_calibration_key() or keys["type_dist"]
+        keys = {"type_dist": seed_key}
+        measure_keys["type_dist"] = seed_key
         # ctx["error_dist"] is None here, so the setpoint comes from the seed
-        # pool's own ERRANT profile — the same instrument _measure uses on the
+        # pool's own profile — the same instrument _measure uses on the
         # generated rows.
         seed_profile = task.build_fidelity_profile(ctx["real_reference"])
         target = {name: dict(seed_profile.get(key) or {}) for name, key in keys.items()}
@@ -223,6 +252,11 @@ def run_calibration(
                 f"'{task.get_task_name()}' calibrates seed choice, but its real "
                 f"reference has no '{keys['type_dist']}' to aim at, so there is "
                 "nothing to calibrate. Calibrate an inverse or seedless cell.")
+    elif structured:
+        # inverse+seedless imposes the real structure; the setpoint is that
+        # structure measured by the instrument that measures each round.
+        real_profile = task.build_fidelity_profile(ctx["real_reference"])
+        target = {name: dict(real_profile.get(key) or {}) for name, key in keys.items()}
     else:
         target = {name: dict(ctx["error_dist"][name]) for name in keys}
     # Routed through calibration_settings (not read off config["generation"]
@@ -274,16 +308,22 @@ def run_calibration(
     request = {name: dict(dist) for name, dist in target.items()}
     for round_idx in range(rounds + 1):
         print(f"\n{'='*50}\nCALIBRATION ROUND {round_idx} / {rounds}\n{'='*50}")
+        round_profile = ctx["profile"]
         if seed_mode:
             # The control input is the seed draw, not an injected distribution.
             run_config["generation"]["seed_weights"] = request["type_dist"]
             round_dist = ctx["error_dist"]
+        elif structured:
+            # inverse+seedless: the request is imposed through the profile the
+            # prompt and the feedback loop both read.
+            round_dist = None
+            round_profile = task.apply_calibrated_structure(ctx["profile"], request)
         else:
             round_dist = {"type_dist": request["type_dist"],
                           "count_dist": request["count_dist"]}
         synthetic = pipeline._run_generation(
             ctx["generator"], task, run_config, ctx["real_data"], round_dist,
-            ctx["judge_call"], class_prob, profile=ctx["profile"],
+            ctx["judge_call"], class_prob, profile=round_profile,
         )
         profile = _measure(task, synthetic)
         measured_all = {name: (profile.get(key) or {}) for name, key in measure_keys.items()}

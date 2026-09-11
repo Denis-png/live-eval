@@ -16,7 +16,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
-from framework import pipeline
+from framework import calibrate, pipeline
 from framework.calibration.artifact import write_calibration
 from framework.profiling.taxonomy_fidelity import structure_measurements
 from framework.tasks.base_task import BaseTask
@@ -258,6 +258,72 @@ class StructureConsumptionTests(_Workspace):
         self.assertEqual(ctx["profile"]["taxonomies"][0]["depth_distribution"],
                          json.load(open(self.profile_path))["taxonomies"][0]["depth_distribution"])
         self.assertIn("malformed", err)
+
+
+class _RejectDeepFirstRound(_Gen):
+    """Rejects the 10-class (max depth 3) subtree during round 0 only -- its first
+    `limit` calls -- so round 0 measures depth-3 attrition while round 1, drawing
+    the now-favoured deep bucket, still yields usable samples."""
+
+    def __init__(self, limit):
+        super().__init__()
+        self.limit = limit
+
+    def call_api(self, prompt):
+        answer = json.loads(super().call_api(prompt))
+        if self.calls <= self.limit and len(answer["classes"]) >= 10:
+            answer["subclass_axioms"] = answer["subclass_axioms"][1:]
+        return json.dumps(answer)
+
+
+class _Shallow(_Gen):
+    """Always delivers a star: one root, every other class directly beneath it."""
+
+    def call_api(self, prompt):
+        self.calls += 1
+        leaves = [f"L{i}" for i in range(5)]
+        return json.dumps({"domain": "d", "classes": ["Root", *leaves],
+                           "subclass_axioms": [[leaf, "Root"] for leaf in leaves]})
+
+
+class CalibrateLoopTests(_Workspace):
+    def _calibrate(self, cfg, generator, **kwargs):
+        with mock.patch.object(pipeline, "load_generator", return_value=generator), \
+                mock.patch("random.Random", lambda *a, **k: _Random(1234)), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            return calibrate.run_calibration(
+                cfg, output_path=os.path.join(self.tmp, "cal.json"), **kwargs)
+
+    def test_seeded_calibration_raises_the_bucket_verification_depletes(self):
+        payload = self._calibrate(self.config("forward", False, sample_size=12),
+                                  _RejectDeepFirstRound(limit=12), rounds=1, sample_size=12)
+        first, second = (r["request"]["type_dist"] for r in payload["rounds"][:2])
+        self.assertGreater(second["3"], first["3"])
+        self.assertEqual(payload["calibrated"]["seed_weights"],
+                         payload["calibrated"]["type_dist"])
+
+    def test_inverse_seedless_calibration_asks_for_more_depth(self):
+        payload = self._calibrate(self.config("inverse", True), _Shallow(),
+                                  rounds=1, sample_size=3)
+        first, second = (r["request"]["type_dist"] for r in payload["rounds"][:2])
+        deep = lambda d: sum(v for k, v in d.items() if int(k) >= 2)
+        self.assertGreater(deep(second), deep(first))
+
+    def test_forward_seedless_refuses(self):
+        with self.assertRaisesRegex(RuntimeError, "nothing to calibrate"):
+            self._calibrate(self.config("forward", True), _Shallow(), rounds=0, sample_size=3)
+
+    def test_the_informative_count_is_classes(self):
+        profile = TaxonomyTask().build_fidelity_profile([_E2E_REAL])
+        self.assertEqual(calibrate.informative_count(TaxonomyTask(), [], profile), 10)
+
+    def test_structured_calibration_defaults_to_three_times_the_sample(self):
+        settings = calibrate.calibration_settings({"task": {"name": "taxonomy"},
+                                                   "generation": {"sample_size": 10}})
+        self.assertEqual(settings["sample_size"], 30)
+        gec = calibrate.calibration_settings({"task": {"name": "gec"},
+                                              "generation": {"sample_size": 150}})
+        self.assertEqual(gec["sample_size"], 150)
 
 
 if __name__ == "__main__":
