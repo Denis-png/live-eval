@@ -219,33 +219,26 @@ def _profile_gec(config: dict[str, Any], output: str, topic_call=None, topic_sam
 
 
 def _profile_spam(config: dict[str, Any], output: str, topic_call=None, topic_sample_size: int = 200) -> str:
-    """Profile the raw spam dataset without using SpamTask.parse_row()."""
+    """Profile the labelled rows a spam run is scored against.
+
+    Not SpamTask.parse_row(), which keeps HAM seeds only: the labelled reference
+    of both classes, loaded by get_real_eval_samples exactly as the real baseline
+    loads it -- local file or HuggingFace split alike. It once read dataset.name
+    only, so a local benchmark was profiled from the default HuggingFace dataset
+    instead. A config for another task still profiles that default."""
     from framework.profiling.spam_profiler import (
         DEFAULT_SPAM_DATASET,
         DEFAULT_SPAM_SPLIT,
-        profile_spam_dataset,
+        profile_spam_rows,
     )
+    from framework.tasks.spam.task import SpamTask
 
-    dataset_config = config.get("dataset") or {}
-    task_config = config.get("task") or {}
-    use_config_dataset = task_config.get("name") == "spam"
-    dataset_name = dataset_config.get("name") if use_config_dataset else DEFAULT_SPAM_DATASET
-    split = dataset_config.get("split") if use_config_dataset else DEFAULT_SPAM_SPLIT
-    streaming = dataset_config.get("streaming", False) if use_config_dataset else False
-    hf_token = (
-        dataset_config.get("hf_token")
-        or (config.get("api_keys") or {}).get("huggingface")
-        or None
-    )
-
-    profile = profile_spam_dataset(
-        dataset_name=dataset_name or DEFAULT_SPAM_DATASET,
-        split=split or DEFAULT_SPAM_SPLIT,
-        streaming=streaming,
-        hf_token=hf_token,
-        topic_call_api=topic_call,
-        topic_sample_size=topic_sample_size,
-    )
+    if (config.get("task") or {}).get("name") != "spam":
+        config = {**config, "dataset": {"source": "huggingface", "name": DEFAULT_SPAM_DATASET,
+                                        "split": DEFAULT_SPAM_SPLIT}}
+    rows = SpamTask().get_real_eval_samples(config, [])
+    profile = profile_spam_rows(rows, topic_call_api=topic_call,
+                                topic_sample_size=topic_sample_size)
     output_path = save_profile_json(
         profile, output or _default_output(config, "spam", profile["num_samples"]))
     labels = profile["label_distribution"]
