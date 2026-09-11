@@ -144,3 +144,22 @@ class NormalizedConfigsTests(unittest.TestCase):
             with self.subTest(config=path):
                 gen = config["generation"]
                 self.assertEqual((gen.get("mode"), gen.get("seedless")), ("forward", False))
+
+
+class ShippedCompareConfigsTests(unittest.TestCase):
+    """A shipped compare.yaml is its task's config.yaml plus the models to compare
+    -- nothing else, so a comparison differs from a normal run only in the
+    generation model and cannot drift from the run config."""
+
+    def test_every_compare_file_is_its_config_plus_a_model_list(self):
+        from scripts.compare_models import load_compare_config
+        for path in sorted(glob.glob("framework/configs/*/compare.yaml")):
+            with self.subTest(compare=path):
+                raw = yaml.safe_load(open(path))
+                self.assertEqual(set(raw), {"base_config", "generation_models"})
+                self.assertTrue(raw["generation_models"])
+                merged = load_compare_config(path)
+                merged.pop("generation_models")
+                config = yaml.safe_load(open(os.path.join(os.path.dirname(path),
+                                                          "config.yaml")))
+                self.assertEqual(merged, config)

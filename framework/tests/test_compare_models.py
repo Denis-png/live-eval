@@ -202,3 +202,50 @@ class SessionIdIncludesCellTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BaseConfigTests(unittest.TestCase):
+    """A compare file names the run config it compares on, instead of copying it.
+
+    Each compare.yaml used to be a full copy of its task's config.yaml plus a
+    generation_models list, and the copies drifted: max_tokens 1024 (which
+    truncates reasoning models), different judges, sentiment on another dataset.
+    """
+
+    def _write(self, d, name, data):
+        import os
+        import yaml
+        path = os.path.join(d, name)
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f)
+        return path
+
+    def test_the_named_config_supplies_every_setting(self):
+        import tempfile
+        from scripts.compare_models import load_compare_config
+        with tempfile.TemporaryDirectory() as d:
+            self._write(d, "config.yaml", {"task": {"name": "gec"},
+                                           "generation": {"max_tokens": 16384}})
+            path = self._write(d, "compare.yaml", {
+                "base_config": "config.yaml",
+                "generation_models": [{"provider": "p", "model": "m"}]})
+            config = load_compare_config(path)
+        self.assertEqual(config["generation"], {"max_tokens": 16384})
+        self.assertEqual(config["generation_models"], [{"provider": "p", "model": "m"}])
+        self.assertNotIn("base_config", config)
+
+    def test_the_compare_file_wins_where_both_set_a_key(self):
+        import tempfile
+        from scripts.compare_models import load_compare_config
+        with tempfile.TemporaryDirectory() as d:
+            self._write(d, "config.yaml", {"output": {"base_dir": "a"}})
+            path = self._write(d, "compare.yaml", {"base_config": "config.yaml",
+                                                   "output": {"base_dir": "b"}})
+            self.assertEqual(load_compare_config(path)["output"], {"base_dir": "b"})
+
+    def test_a_self_contained_file_still_loads(self):
+        import tempfile
+        from scripts.compare_models import load_compare_config
+        with tempfile.TemporaryDirectory() as d:
+            path = self._write(d, "compare.yaml", {"generation": {"model": "m"}})
+            self.assertEqual(load_compare_config(path), {"generation": {"model": "m"}})
