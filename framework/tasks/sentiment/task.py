@@ -123,7 +123,10 @@ class SentimentTask(BaseTask):
         label = self._normalize_label(row.get("label"))
         if label is None:
             return None
-        return {"incorrect": text, "sentiment_label": label}
+        # The corruption contract is {"incorrect", "correct"}: forward rewrites
+        # the incorrect side, inverse the clean one. A real tweet is both -- the
+        # unmodified source either mode transforms.
+        return {"incorrect": text, "correct": text, "sentiment_label": label}
 
     def get_real_eval_samples(self, config: dict, real_data: list[dict]) -> list[dict]:
         return [
@@ -131,6 +134,39 @@ class SentimentTask(BaseTask):
             for r in real_data
             if r.get("incorrect") and r.get("sentiment_label")
         ]
+
+    def profile_error_distribution(self, real_data: list[dict], count_max: int = 5,
+                                   config: dict | None = None) -> dict | None:
+        """The error mix the inverse and seedless cells impose, from the real data.
+
+        Real tweets carry a sentiment label, not an error type, so the empirical
+        quantity is the benchmark's LABEL balance. Each label's share is spread
+        evenly over the error types that produce it (get_label), so a benchmark
+        drawn from this mix has the real class balance. One transformation per
+        sample: two would contradict each other and leave the label ambiguous.
+        None below 5 labelled rows, as the pipeline expects.
+        """
+        from collections import Counter
+
+        counts = Counter(r.get("sentiment_label") for r in real_data
+                         if r.get("sentiment_label"))
+        producers: dict[str, list[str]] = {}
+        for etype in self.get_error_descriptions():
+            label = self.get_label({"error_type": etype})
+            if label is not None:
+                producers.setdefault(label, []).append(etype)
+        total = sum(counts[label] for label in producers)
+        if sum(counts.values()) < 5 or not total:
+            return None
+        type_dist = {etype: counts[label] / total / len(etypes)
+                     for label, etypes in producers.items() for etype in etypes}
+        return {"type_dist": type_dist, "count_dist": {1: 1.0}}
+
+    def get_calibration_keys(self) -> dict[str, str]:
+        # Measured on the error types generated records carry. In the cells that
+        # impose a mix those are the requested types, so calibration corrects
+        # the uneven attrition of parsing and judging, per type.
+        return {"type_dist": "error_type_dist", "count_dist": "error_count_dist"}
 
     def build_fidelity_profile(self, rows: list[dict]) -> dict:
         """Label balance and text length/style, measured the same way on both sides.
@@ -141,6 +177,8 @@ class SentimentTask(BaseTask):
         one with no deterministic label (paraphrase) is left out, as evaluation
         leaves it out. Real tweets carry no error type, so the error-type mix has
         nothing to be compared with; error_type_dist.png shows it on its own.
+        It is still MEASURED here -- error_type_dist and error_count_dist, empty
+        on the real side -- because calibration steers on it.
         """
         from collections import Counter
 
@@ -153,6 +191,10 @@ class SentimentTask(BaseTask):
         texts = [text for text, _ in pairs]
         counts = Counter(label for _, label in pairs)
         n = len(pairs)
+        typed = [[t.strip() for t in r["error_type"].split(",") if t.strip()]
+                 for r in rows if r.get("error_type")]
+        type_counts = Counter(t for types in typed for t in types)
+        mentions = sum(type_counts.values())
         return {
             "num_samples": n,
             "label_dist": {label: round(counts[label] / n, 4) if n else 0.0
@@ -160,6 +202,14 @@ class SentimentTask(BaseTask):
             "word_count_hist": length_distribution(
                 [len(tokenize(t)) for t in texts], WORD_BINS)["bins"],
             "style": style_profile(texts),
+            "error_type_dist": {t: type_counts[t] / mentions
+                                for t in sorted(type_counts)} if mentions else {},
+            "error_count_dist": {c: k / len(typed) for c, k in
+                                 sorted(Counter(len(types) for types in typed).items())}
+                                if typed else {},
+            # calibrate.informative_count reads this for corruption tasks (GEC:
+            # pairs ERRANT annotated). Here: records carrying an error type.
+            "n_annotated": len(typed),
         }
 
     def compare_fidelity_profiles(self, real: dict, generated: dict) -> dict:

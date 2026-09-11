@@ -215,6 +215,14 @@ def run_calibration(
         # generated rows.
         seed_profile = task.build_fidelity_profile(ctx["real_reference"])
         target = {name: dict(seed_profile.get(key) or {}) for name, key in keys.items()}
+        if not target["type_dist"]:
+            # e.g. sentiment: the model picks the transformation, and real tweets
+            # carry no error type for a seed mix to aim at.
+            raise RuntimeError(
+                f"Cell {pipeline.generation_cell_slug(config, strategy)} of task "
+                f"'{task.get_task_name()}' calibrates seed choice, but its real "
+                f"reference has no '{keys['type_dist']}' to aim at, so there is "
+                "nothing to calibrate. Calibrate an inverse or seedless cell.")
     else:
         target = {name: dict(ctx["error_dist"][name]) for name in keys}
     # Routed through calibration_settings (not read off config["generation"]
