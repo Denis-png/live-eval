@@ -1209,8 +1209,15 @@ def _load_structure_calibration(config: dict, task, strategy: str, mode: str | N
         request = {name: calibrated.get(name) for name in ("type_dist", "count_dist")}
         if not all(isinstance(d, dict) and d for d in request.values()):
             return None
-        for dist in request.values():
-            [float(v) for v in dist.values()]
+        for name, dist in request.items():
+            # Coerces AND checks mass: an all-zero (or all-negative, which
+            # _counts_from_fractions clamps to 0) distribution would otherwise
+            # pass here, print the normal success line, and leave
+            # apply_calibrated_structure imposing {} while n_classes stays --
+            # a silently inconsistent structure, like the sibling check in
+            # _load_seed_weights refuses for a massless seed-weight set.
+            if not any(float(v) > 0 for v in dist.values()):
+                raise ValueError(f"calibrated {name} has no positive mass")
         if not _structured_target_matches(task, payload, real_reference,
                                           task.get_calibration_keys()):
             print(f"[WARN] calibration {path!r} was measured against a different real "

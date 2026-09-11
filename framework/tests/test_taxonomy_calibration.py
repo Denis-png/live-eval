@@ -247,6 +247,18 @@ class StructureConsumptionTests(_Workspace):
                          json.load(open(self.profile_path))["taxonomies"][0]["depth_distribution"])
         self.assertIn("malformed", err)
 
+    def test_a_massless_type_dist_is_ignored_with_a_warning_not_a_crash(self):
+        # A CURRENT artifact (target matches the real reference) can still carry
+        # a degenerate calibrated request: an all-zero type_dist would otherwise
+        # pass validation, print the normal success line, and leave
+        # apply_calibrated_structure imposing {} while n_classes stays.
+        request = {"type_dist": {"0": 0.0, "1": 0.0}, "count_dist": {"0": 1.0}}
+        path = self.artifact("f_calibration.json", self._target(), request)
+        ctx, err = self.context(self.config("inverse", True, calibration_path=path))
+        self.assertEqual(ctx["profile"]["taxonomies"][0]["depth_distribution"],
+                         json.load(open(self.profile_path))["taxonomies"][0]["depth_distribution"])
+        self.assertIn("malformed", err)
+
 
 if __name__ == "__main__":
     unittest.main()
