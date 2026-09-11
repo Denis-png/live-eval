@@ -70,14 +70,10 @@ def profile_sentiment_dataset(
     topic_call_api=None,
     topic_sample_size: int = 200,
 ) -> dict[str, Any]:
-    """Build a generation-ready profile for TweetEval sentiment.
+    """Build a generation-ready profile for TweetEval sentiment, downloaded here.
 
-    Returns a profile_version=2 dict with:
-      - classification stats per label (label_distribution, length, style, vocab)
-      - length_distributions["incorrect"]["words"] — sampled by spec_sampler
-      - style["incorrect"]                          — sampled by spec_sampler
-      - topics                                      — when topic_call_api given
-    """
+    framework.profile_dataset profiles whatever dataset the run config names
+    instead, through profile_sentiment_rows."""
     rows = load_sentiment_rows(
         dataset_name=dataset_name,
         subset=subset,
@@ -86,7 +82,23 @@ def profile_sentiment_dataset(
         sample_size=sample_size,
         hf_token=hf_token,
     )
+    return profile_sentiment_rows(rows, topic_call_api=topic_call_api,
+                                  topic_sample_size=topic_sample_size)
 
+
+def profile_sentiment_rows(
+    rows: list[dict[str, str]],
+    topic_call_api=None,
+    topic_sample_size: int = 200,
+) -> dict[str, Any]:
+    """Build a generation-ready profile from {"text", "label"} rows.
+
+    Returns a profile_version=2 dict with:
+      - classification stats per label (label_distribution, length, style, vocab)
+      - length_distributions["incorrect"]["words"] — sampled by spec_sampler
+      - style["incorrect"]                          — sampled by spec_sampler
+      - topics                                      — when topic_call_api given
+    """
     profile = profile_classification_rows(rows, text_field="text", label_field="label")
 
     grouped: dict[str, list[str]] = defaultdict(list)

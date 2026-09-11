@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
         description="Profile the original benchmark dataset without running GET.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--task", choices=("gec", "spam", "taxonomy"), default="gec", help="Task to profile")
+    parser.add_argument("--task", choices=("gec", "spam", "sentiment", "taxonomy"), default="gec", help="Task to profile")
     parser.add_argument("--config", required=True,
                         help="Path to config YAML (e.g. framework/configs/gec/config.yaml)")
     parser.add_argument("--output",
@@ -283,6 +283,38 @@ def _profile_spam(config: dict[str, Any], output: str, topic_call=None, topic_sa
     return output_path
 
 
+def _profile_sentiment(config: dict[str, Any], output: str | None, topic_call=None,
+                       topic_sample_size: int = 200) -> str:
+    """Profile the rows a sentiment run evaluates against.
+
+    Loaded by pipeline.load_real_data with the task's own parse_row, so a local
+    CSV or a HuggingFace split is read, filtered and labelled exactly as the run
+    reads it, and the profile describes the same real data as the baseline."""
+    from framework.pipeline import load_real_data
+    from framework.profiling.sentiment_profiler import profile_sentiment_rows
+    from framework.tasks.sentiment.task import SentimentTask
+
+    rows = [{"text": r["incorrect"], "label": r["sentiment_label"]}
+            for r in load_real_data(config, SentimentTask())]
+    profile = profile_sentiment_rows(rows, topic_call_api=topic_call,
+                                     topic_sample_size=topic_sample_size)
+    output_path = save_profile_json(
+        profile, output or _default_output(config, "sentiment", profile["num_samples"]))
+
+    print("\nSentiment dataset profile summary")
+    print("=" * 40)
+    print(f"Samples : {profile['num_samples']}")
+    for label, count in profile["label_distribution"].items():
+        print(f"{label:<8}: {count}")
+    words = ((profile.get("length_distributions") or {}).get("incorrect") or {}).get("words")
+    if words:
+        print(f"length  : {_fmt_length(words)}")
+    if profile.get("topics"):
+        print(f"topics  : {_fmt_topics(profile['topics'])}")
+    print(f"\nOutput  : {output_path}")
+    return output_path
+
+
 def _profile_taxonomy(config: dict[str, Any], output: str) -> str:
     """Profile normalized taxonomy JSONL without running the GET pipeline."""
     from framework.data_loading import iter_local_rows, resolve_dataset_config
@@ -331,8 +363,7 @@ def main() -> None:
         _profile_spam(config, args.output,
                       topic_call, args.topic_sample_size)
     elif args.task == "sentiment":
-        _profile_sentiment(config, args.output or DEFAULT_SENTIMENT_OUTPUT,
-                           topic_call, args.topic_sample_size)
+        _profile_sentiment(config, args.output, topic_call, args.topic_sample_size)
     else:
         _profile_gec(config, args.output,
                      topic_call, args.topic_sample_size)
