@@ -1139,9 +1139,9 @@ def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
     ignores one for the other cells.
 
     Without weights a structured cell draws the whole pool, while corruption
-    falls back to the first-N order, and the messages say which. framework.
-    calibrate refuses structured seeded cells, so their messages do not point
-    at it; an existing artifact is still honoured.
+    falls back to the first-N order, and the messages say which. Since
+    `framework.calibrate` refuses structured seeded cells, their messages do
+    not point at it; an existing artifact is still honoured.
     """
     structured = strategy == "structured"
     seed_cell = not seedless and (structured or (strategy == "corruption"
