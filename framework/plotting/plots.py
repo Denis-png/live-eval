@@ -126,9 +126,13 @@ def plot_generated_vs_real(model: str, generated: dict, real: dict | None,
                         textcoords="offset points", ha="center", va="bottom",
                         color=INK_MUTED, fontsize=8)
         if real_flat:
+            # A paired session's real is the items its runs delivered, not the
+            # whole benchmark; say so rather than label it the latter.
+            real_label = ("real (paired)" if (meta or {}).get("paired_real")
+                          else "real benchmark")
             rbars = ax.bar([i + width / 2 + 0.01 for i in x],
                            [real_flat.get(n, 0.0) for n in names], width,
-                           label="real benchmark", color=SERIES_REAL)
+                           label=real_label, color=SERIES_REAL)
             ax.bar_label(rbars, fmt="%.2f", padding=2, color=INK_MUTED, fontsize=8)
         ax.set_xticks(list(x))
         ax.set_xticklabels(names, rotation=20, ha="right")

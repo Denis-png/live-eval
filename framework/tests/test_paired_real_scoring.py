@@ -299,6 +299,47 @@ def _markdown(sessions):
             return f.read()
 
 
+def _table_row(markdown, *cells):
+    """The one headline-table line whose leading cells are `cells`."""
+    prefix = "| " + " | ".join(cells) + " |"
+    lines = [line for line in markdown.splitlines() if line.startswith(prefix)]
+    assert len(lines) == 1, (prefix, lines)
+    return [cell.strip() for cell in lines[0].strip("|").split("|")]
+
+
+class PairedReportTests(unittest.TestCase):
+    """analysis.md shows the whole-reference gap beside the paired one: seeded
+    taxonomy's attrition is what the paired gap leaves out on purpose."""
+
+    def test_a_paired_row_shows_both_reals_and_both_gaps(self):
+        md = _markdown([_analysis_session("gm", {"lexical": (0.4, 0.3)})])
+        self.assertIn("| real (whole ref.) | gap (whole ref.) |", md)
+        self.assertEqual(_table_row(md, "forward", "gm", "lexical")[3:],
+                         ["0.500 ± 0.100", "0.400", "+0.100", "0.300", "+0.200"])
+
+    def test_an_unpaired_row_leaves_the_whole_reference_columns_empty(self):
+        md = _markdown([_analysis_session("gm", {"lexical": (None, 0.3)}, paired=False)])
+        self.assertEqual(_table_row(md, "forward", "gm", "lexical")[3:],
+                         ["0.500 ± 0.100", "0.300", "+0.200", "-", "-"])
+
+    def test_the_report_says_which_gap_answers_which_question(self):
+        md = _markdown([_analysis_session("gm", {"lexical": (0.4, 0.3)})])
+        self.assertIn("the paired gap isolates generation fidelity on the items a run "
+                      "delivered; the whole-reference gap includes what verification "
+                      "dropped", md)
+
+    def test_the_report_notes_which_sessions_real_is_paired(self):
+        md = _markdown([_analysis_session("gm", {"lexical": (0.4, 0.3)}),
+                        _analysis_session("other", {"lexical": (None, 0.3)},
+                                          mode="inverse", paired=False)])
+        note = [line for line in md.splitlines() if line.startswith("`real` is paired")]
+        self.assertEqual(note, ["`real` is paired for: forward/gm."])
+
+    def test_no_pairing_note_without_a_paired_session(self):
+        md = _markdown([_analysis_session("gm", {"lexical": (None, 0.3)}, paired=False)])
+        self.assertNotIn("`real` is paired", md)
+
+
 def _dashed_levels(fig):
     """The y of every dashed reference line in a figure."""
     return {round(line.get_ydata()[0], 6) for ax in fig.axes for line in ax.lines
@@ -366,6 +407,15 @@ class SharedReferenceTests(unittest.TestCase):
 
 
 class PlotTests(unittest.TestCase):
+    def test_the_paired_real_series_is_labelled_paired(self):
+        from framework.plotting.plots import plot_generated_vs_real
+        generated = {"f1": {"mean": 0.5, "std": 0.1}}
+        paired = plot_generated_vs_real("m", generated, {"f1": 0.4}, {"paired_real": True})
+        whole = plot_generated_vs_real("m", generated, {"f1": 0.3}, {})
+        label = lambda fig: [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
+        self.assertIn("real (paired)", label(paired))
+        self.assertIn("real benchmark", label(whole))
+
     def test_the_session_figure_uses_the_paired_real(self):
         from framework.plotting import plots
         from framework.plotting import session as S

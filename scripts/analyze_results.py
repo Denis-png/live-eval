@@ -305,7 +305,7 @@ def dedup_sessions(sessions):
 def session_rows(session):
     """Flatten one session into rows:
     {task, strategy, gen_model, eval_model, metric, gen_mean, gen_std, real,
-    real_unpaired, runs}."""
+    real_unpaired, paired, runs}. `paired` is the session's meta.paired_real."""
     meta = session["meta"]
     rows = []
     for eval_model, blocks in session["results"].items():
@@ -324,6 +324,7 @@ def session_rows(session):
                 "metric": metric, "gen_mean": mean, "gen_std": std,
                 "real": real.get(metric),
                 "real_unpaired": real_unpaired.get(metric),
+                "paired": bool(meta.get("paired_real")),
                 "runs": [r[metric] for r in per_run if metric in r],
             })
     return rows
@@ -681,18 +682,36 @@ def write_markdown(summary, sessions, rows, figures, out_path):
                      f"| {'yes' if s['has_profile'] else 'no'} |")
 
     lines += ["", "## Headline scores (generated vs real)", ""]
+    if any(r.get("paired") for r in rows):
+        lines += ["Where a session paired its real side, `real` is the mean of each run's "
+                  "score on the real items it delivered, and `real (whole ref.)` is the "
+                  "score on the whole matched reference (shown only where the two differ). "
+                  "Which gap answers which question: the paired gap isolates generation "
+                  "fidelity on the items a run delivered; the whole-reference gap includes "
+                  "what verification dropped.", ""]
     for task in sorted({r["task"] for r in rows}):
         metric = _headline(task)
         lines += [f"### {task} — {metric}", "",
-                  "| strategy | generation model | evaluated model | generated | real | gap |",
-                  "|---|---|---|---|---|---|"]
+                  "| strategy | generation model | evaluated model | generated | real | gap "
+                  "| real (whole ref.) | gap (whole ref.) |",
+                  "|---|---|---|---|---|---|---|---|"]
         sel = [r for r in rows if r["task"] == task and r["metric"] == metric]
         for r in sorted(sel, key=lambda r: (r["strategy"], r["gen_model"], r["eval_model"])):
             real = f"{r['real']:.3f}" if r["real"] is not None else "-"
             gap = (f"{r['gen_mean'] - r['real']:+.3f}" if r["real"] is not None else "-")
+            whole = r.get("real_unpaired")
+            if whole is None or whole == r["real"]:
+                whole_real = whole_gap = "-"
+            else:
+                whole_real, whole_gap = f"{whole:.3f}", f"{r['gen_mean'] - whole:+.3f}"
             lines.append(f"| {r['strategy']} | {_short(r['gen_model'])} "
                          f"| {_short(r['eval_model'])} "
-                         f"| {r['gen_mean']:.3f} ± {r['gen_std']:.3f} | {real} | {gap} |")
+                         f"| {r['gen_mean']:.3f} ± {r['gen_std']:.3f} | {real} | {gap} "
+                         f"| {whole_real} | {whole_gap} |")
+        paired = sorted({f"{r['strategy']}/{_short(r['gen_model'])}"
+                         for r in sel if r.get("paired")})
+        if paired:
+            lines += ["", f"`real` is paired for: {', '.join(paired)}."]
         lines.append("")
 
     lines += ["## Fidelity gaps & rank preservation", "",
