@@ -1013,12 +1013,6 @@ def _score_rows(task, rows: list[dict], evaluator_fns: dict) -> dict:
     return {name: evaluator_fns[name](rows) for name in task.get_evaluators()}
 
 
-def _evaluate_real_baseline(task, config, real_reference, evaluator_fns) -> dict:
-    """Evaluate task_models once on the real benchmark (deterministic → no runs)."""
-    return {model: _score_rows(task, rows, evaluator_fns)
-            for model, rows in _predict_real(task, config, real_reference).items()}
-
-
 def _paired_real_scores(task, real_reference, real_rows: dict, synthetic: list[dict],
                         evaluator_fns: dict) -> dict | None:
     """This run's paired real baseline: the real items its accepted records came
