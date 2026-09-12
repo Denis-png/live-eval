@@ -138,6 +138,101 @@ class UnpairedSessionTests(unittest.TestCase):
         self.assertEqual(set(final["m"]), {"generated", "real", "runs"})
 
 
+def _assert_unpaired(test, results):
+    """No paired block anywhere: pairing is all runs or none."""
+    for scores in results["results"].values():
+        test.assertNotIn("real_paired", scores)
+        test.assertNotIn("real_paired_runs", scores)
+    test.assertNotIn("paired_real", results["meta"])
+
+
+class AllOrNonePairingTests(unittest.TestCase):
+    """real_paired_runs[k] must be the paired score of runs[k]. Dropping the runs
+    that could not be paired shifted every later entry onto the wrong run."""
+
+    def test_the_helper_keeps_a_fully_paired_session(self):
+        per_run = [{"m": {"f1": 1.0}}, {"m": {"f1": 0.5}}]
+        self.assertEqual(pipeline._all_or_no_pairing(per_run), per_run)
+
+    def test_the_helper_drops_a_session_where_no_run_paired(self):
+        self.assertIsNone(pipeline._all_or_no_pairing([None, None]))
+        self.assertIsNone(pipeline._all_or_no_pairing([]))
+
+    def test_the_helper_drops_a_mixed_session_with_a_warning(self):
+        err = io.StringIO()
+        with redirect_stderr(err):
+            out = pipeline._all_or_no_pairing([{"m": {"f1": 1.0}}, None])
+        self.assertIsNone(out)
+        self.assertIn("1 of 2 runs", err.getvalue())
+
+    def test_a_pipeline_session_with_an_unpairable_run_pairs_nothing(self):
+        original = TaxonomyTask.paired_real_indices
+        calls = []
+
+        def second_run_unpairable(task, real_reference, synthetic):
+            calls.append(1)
+            return original(task, real_reference, synthetic) if len(calls) == 1 else None
+
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        with mock.patch.object(TaxonomyTask, "paired_real_indices", second_run_unpairable):
+            _, results = _session(tmp, "mixed", _Gen())
+        self.assertEqual(len(calls), 2)
+        _assert_unpaired(self, results)
+
+    def test_a_rescore_with_one_run_unpairable_pairs_nothing_and_warns(self):
+        # A pre-0e8ccc7 run's records carry no source_pool_index -- reachable by
+        # merging an archived session with a current one.
+        from scripts.rescore_session import rescore_session
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        cfg, _ = _session(tmp, "a", _Gen())
+        session = os.path.join(tmp, "taxonomy", "a")
+        run_2 = os.path.join(session, "generated", "run_2.json")
+        with open(run_2, encoding="utf-8") as f:
+            records = json.load(f)
+        for record in records:
+            del record["source_pool_index"]
+        with open(run_2, "w", encoding="utf-8") as f:
+            json.dump(records, f)
+
+        err = io.StringIO()
+        with redirect_stdout(io.StringIO()), redirect_stderr(err):
+            rescore_session(session, cfg)
+        with open(os.path.join(session, "results.json"), encoding="utf-8") as f:
+            rescored = json.load(f)
+        for scores in rescored["results"].values():
+            self.assertEqual(len(scores["runs"]), 2)
+        _assert_unpaired(self, rescored)
+        self.assertIn("1 of 2 runs", err.getvalue())
+
+    def test_merging_sessions_with_differing_real_samples_pairs_nothing(self):
+        # Indices from the second session would map into the first's pool.
+        from scripts.merge_sessions import merge_sessions
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        cfg, _ = _session(tmp, "a", _Gen())
+        _session(tmp, "b", _Gen())
+        other = os.path.join(tmp, "taxonomy", "b", "real_sample.json")
+        with open(other, encoding="utf-8") as f:
+            real = json.load(f)
+        real[0]["domain"] = "somewhere else"
+        with open(other, "w", encoding="utf-8") as f:
+            json.dump(real, f)
+
+        merged = os.path.join(tmp, "merged")
+        err = io.StringIO()
+        with redirect_stdout(io.StringIO()), redirect_stderr(err):
+            merge_sessions([os.path.join(tmp, "taxonomy", "a"),
+                            os.path.join(tmp, "taxonomy", "b")], merged, cfg)
+        with open(os.path.join(merged, "results.json"), encoding="utf-8") as f:
+            combined = json.load(f)
+        for scores in combined["results"].values():
+            self.assertEqual(len(scores["runs"]), 4)
+        _assert_unpaired(self, combined)
+        self.assertIn("not paired", err.getvalue())
+
+
 class PrinterTests(unittest.TestCase):
     def test_the_paired_real_is_printed_beside_the_real(self):
         from framework.main import format_results_lines

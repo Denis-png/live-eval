@@ -1035,6 +1035,26 @@ def _paired_real_scores(task, real_reference, real_rows: dict, synthetic: list[d
             for model, rows in real_rows.items()}
 
 
+def _all_or_no_pairing(per_run: list[dict | None]) -> list[dict] | None:
+    """The session's paired real scores -- one per run, in run order -- or None.
+
+    `real_paired_runs[k]` is read as the paired score of `runs[k]`, so a session
+    whose runs did not ALL pair (e.g. merge_sessions combining an archived run
+    that predates source_pool_index with a current one) pairs none of them:
+    dropping only the unpaired runs would shift every later entry onto the
+    wrong run. Warns when that discards pairing some runs had."""
+    paired = [scores for scores in per_run if scores is not None]
+    if not paired:
+        return None
+    if len(paired) < len(per_run):
+        print(f"[WARN] {len(per_run) - len(paired)} of {len(per_run)} runs could "
+              "not be paired with the real items they delivered; writing no paired "
+              "real scores for this session (real_paired would misalign with runs).",
+              file=sys.stderr)
+        return None
+    return paired
+
+
 def _nest_results(generated_agg: dict, real_scores: dict,
                   all_run_scores: list[dict] | None = None,
                   paired_run_scores: list[dict] | None = None) -> dict:
@@ -1343,7 +1363,9 @@ def run_pipeline(config: dict) -> dict:
     real_rows = _predict_real(task, config, real_reference) if real_baseline else {}
     real_scores = {model: _score_rows(task, rows, evaluator_fns)
                    for model, rows in real_rows.items()}
-    paired_run_scores: list[dict] = []
+    # One entry per run, None where a run could not be paired: pairing is
+    # written for all runs or for none (_all_or_no_pairing).
+    paired_per_run: list[dict | None] = []
 
     for run_idx in range(num_runs):
         print(f"\n{'='*50}\nRUN {run_idx + 1} / {num_runs}\n{'='*50}")
@@ -1367,10 +1389,9 @@ def run_pipeline(config: dict) -> dict:
             for name, score in run_scores[model_config["name"]].items():
                 print(f"  {model_config['name']}  {name}: {score}")
         all_run_scores.append(run_scores)
-        paired = _paired_real_scores(task, real_reference, real_rows, synthetic,
-                                     evaluator_fns)
-        if paired is not None:
-            paired_run_scores.append(paired)
+        paired_per_run.append(_paired_real_scores(task, real_reference, real_rows,
+                                                  synthetic, evaluator_fns))
+        paired_run_scores = _all_or_no_pairing(paired_per_run)
         effective_samples.append(len(eval_samples))
 
         saved_path = save_synthetic_data(synthetic, paths["generated_dir"], run_idx)

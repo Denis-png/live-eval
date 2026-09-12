@@ -70,6 +70,9 @@ class PipelineClassConditionalTests(unittest.TestCase):
             session = os.listdir(task_dir)[0]
             base = os.path.join(task_dir, session)
             self.assertTrue(os.path.exists(os.path.join(base, "results.json")))
+            # ...and no pairing claimed in the provenance either.
+            meta = json.load(open(os.path.join(base, "results.json")))["meta"]
+            self.assertNotIn("paired_real", meta)
             self.assertTrue(os.path.exists(os.path.join(base, "generated", "run_1.json")))
             self.assertTrue(os.path.exists(os.path.join(base, "real_sample.json")))
             self.assertTrue(os.path.exists(os.path.join(base, "profile.json")))

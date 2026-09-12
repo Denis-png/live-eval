@@ -54,10 +54,16 @@ def merge_sessions(session_dirs, out_dir, config, *, plots=False):
 
     real_samples = [_load_json(os.path.join(d, "real_sample.json"))
                     for d in session_dirs if os.path.exists(os.path.join(d, "real_sample.json"))]
-    if real_samples and any(rs != real_samples[0] for rs in real_samples[1:]):
+    # A run pairs with the real items it delivered by index into ITS session's
+    # real sample; against another session's sample those indices would point
+    # at the wrong items, so differing samples also switch pairing off.
+    samples_differ = bool(real_samples) and any(rs != real_samples[0]
+                                                for rs in real_samples[1:])
+    if samples_differ:
         print(f"[WARN] source sessions have differing real_sample.json — using "
               f"{session_dirs[0]}'s (same dataset/reference sample should make these "
-              f"identical; a mismatch means they weren't really replicate runs).",
+              f"identical; a mismatch means they weren't really replicate runs). "
+              f"Runs are not paired with the real items they delivered.",
               file=sys.stderr)
 
     os.makedirs(os.path.join(out_dir, "generated"), exist_ok=True)
@@ -85,7 +91,7 @@ def merge_sessions(session_dirs, out_dir, config, *, plots=False):
         json.dump(seed, f, indent=2)
 
     print(f"Merged {len(session_dirs)} sessions ({total_runs} runs total) into {out_dir}")
-    rescore_session(out_dir, config, plots=plots)
+    rescore_session(out_dir, config, plots=plots, pair=not samples_differ)
     return out_dir
 
 

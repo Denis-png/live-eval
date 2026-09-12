@@ -25,6 +25,7 @@ import yaml
 
 from framework.main import _expand_env_vars, _load_dotenv
 from framework.pipeline import (
+    _all_or_no_pairing,
     _nest_results,
     _paired_real_scores,
     _predict_real,
@@ -72,7 +73,10 @@ def _drift_report(old_results, new_results):
 
 
 def rescore_session(session_dir, config, *, skip_eval=False, skip_profile=False,
-                    plots=False):
+                    plots=False, pair=True):
+    """Rescore one session in place. `pair=False` writes no paired real scores
+    at all: merge_sessions passes it when its sources' real samples differ, since
+    a run's source_pool_index would then map into another session's pool."""
     results_path = os.path.join(session_dir, "results.json")
     old = _load_json(results_path)
     meta = old["meta"]
@@ -111,12 +115,12 @@ def rescore_session(session_dir, config, *, skip_eval=False, skip_profile=False,
         real_rows = _predict_real(task, config, real_reference) if real_reference else {}
         real_scores = {model: _score_rows(task, rows, evaluator_fns)
                        for model, rows in real_rows.items()}
-        paired_run_scores = [
-            p for p in (_paired_real_scores(task, real_reference, real_rows, synthetic,
-                                            evaluator_fns)
-                        for synthetic in runs_data)
-            if p is not None
-        ]
+        # All runs or none, exactly as run_pipeline writes them: real_paired_runs[k]
+        # must be the paired score of runs[k].
+        paired_run_scores = _all_or_no_pairing([
+            _paired_real_scores(task, real_reference, real_rows, synthetic, evaluator_fns)
+            for synthetic in runs_data
+        ]) if pair else None
         final = _nest_results(aggregate(all_run_scores), real_scores, all_run_scores,
                               paired_run_scores)
 
