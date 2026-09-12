@@ -699,8 +699,11 @@ def write_markdown(summary, sessions, rows, figures, out_path):
         for r in sorted(sel, key=lambda r: (r["strategy"], r["gen_model"], r["eval_model"])):
             real = f"{r['real']:.3f}" if r["real"] is not None else "-"
             gap = (f"{r['gen_mean'] - r['real']:+.3f}" if r["real"] is not None else "-")
+            # Only where it differs as shown: real_paired is aggregated
+            # (rounded), so an unattrited paired real differs from the whole
+            # reference only past this table's precision.
             whole = r.get("real_unpaired")
-            if whole is None or whole == r["real"]:
+            if whole is None or f"{whole:.3f}" == real:
                 whole_real = whole_gap = "-"
             else:
                 whole_real, whole_gap = f"{whole:.3f}", f"{r['gen_mean'] - whole:+.3f}"

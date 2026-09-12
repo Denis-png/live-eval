@@ -317,6 +317,13 @@ class PairedReportTests(unittest.TestCase):
         self.assertEqual(_table_row(md, "forward", "gm", "lexical")[3:],
                          ["0.500 ± 0.100", "0.400", "+0.100", "0.300", "+0.200"])
 
+    def test_a_paired_real_equal_to_the_whole_reference_as_shown_is_not_repeated(self):
+        # real_paired is aggregated (rounded) while real is not, so with nothing
+        # rejected the two differ only past the precision the table shows.
+        md = _markdown([_analysis_session("gm", {"lexical": (0.3, 0.1 + 0.2)})])
+        self.assertEqual(_table_row(md, "forward", "gm", "lexical")[3:],
+                         ["0.500 ± 0.100", "0.300", "+0.200", "-", "-"])
+
     def test_an_unpaired_row_leaves_the_whole_reference_columns_empty(self):
         md = _markdown([_analysis_session("gm", {"lexical": (None, 0.3)}, paired=False)])
         self.assertEqual(_table_row(md, "forward", "gm", "lexical")[3:],
