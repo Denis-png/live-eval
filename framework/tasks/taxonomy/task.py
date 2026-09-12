@@ -438,13 +438,14 @@ class TaxonomyTask(BaseTask):
         never edited -- because the real side is real data.
 
         Per ITEM, a forward+seeded synthetic item is one pool subtree's
-        structure under new names. Per SESSION the sides are not paired: the
-        real side is the whole pool, scored once, while each run's synthetic
-        side is what that run drew and what passed verification. So a seeded
-        session's gap mixes the change of vocabulary with draw and verification
-        attrition. The pairing is recoverable from the archive -- each real item
-        carries `pool_index`, each accepted record the `source_pool_index` of its
-        subtree -- but per-run paired scoring is not implemented.
+        structure under new names. Per SESSION this reference is the whole pool,
+        scored once (results' `real`), while each run's synthetic side is what
+        that run drew and what passed verification, so that gap mixes the change
+        of vocabulary with draw and verification attrition. Each real item
+        therefore carries `pool_index`, which each accepted record's
+        `source_pool_index` names (paired_real_indices): the pipeline also scores
+        every run against the real items it delivered -- `real_paired_runs`, one
+        per run, aggregated as `real_paired` -- and keeps `real` unchanged.
 
         Seedless: the whole ontology, which is what seedless generation targets.
         """

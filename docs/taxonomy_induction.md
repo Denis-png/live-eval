@@ -363,15 +363,23 @@ real side of the structural fidelity profile, so it keeps that comparison
 like-for-like too.
 
 Per item, a `forward+seeded` synthetic item is one pool subtree's structure with
-only the names and domain changed. Per session the two sides are not paired: the
-real side is the whole pool, scored once, while each run's synthetic side is the
-subtrees that run drew and that passed verification. Verification drops the
-largest subtrees most often, and they dominate micro-averaged scores. A seeded
-session's gap therefore mixes the change of vocabulary with draw and verification
-attrition; it does not measure name reliance alone. The pairing can be recovered
-from the archive -- each item in `real_sample.json` carries its `pool_index`, and
-each generated record carries the `source_pool_index` of the subtree it
-re-verbalises -- but per-run paired scoring is not implemented.
+only the names and domain changed. Per session, `real` is the whole pool, scored
+once, while each run's synthetic side is the subtrees that run drew and that
+passed verification. Verification drops the largest subtrees most often, and they
+dominate micro-averaged scores, so the gap against `real` mixes the change of
+vocabulary with draw and verification attrition.
+
+Seeded sessions are therefore also scored per run against the real items each
+run delivered. Each item in `real_sample.json` carries its `pool_index`, and each
+generated record the `source_pool_index` of the subtree it re-verbalises.
+`real_paired_runs[k]` is run k's task models scored on the matching real subtrees
+(a subtree drawn twice counts twice), reusing the real predictions, so pairing
+costs no model call. `real_paired` aggregates those as `mean ± std`, like
+`generated`, and `meta.paired_real: true` marks the session. The paired gap
+isolates generation fidelity on the items a run delivered; the gap against
+`real`, which is kept unchanged, still includes what verification dropped. A
+session pairs all its runs or none. Seedless sessions are not paired: a seedless
+artifact comes from no particular real item.
 
 The pool's subtrees overlap: they are one ontology reweighted, not independent
 taxonomies. On the current Pizza benchmark the 10 subtrees cover all 98 distinct

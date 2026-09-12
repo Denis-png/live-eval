@@ -575,6 +575,14 @@ Each run session gets its own directory under `output.base_dir/<task>/<session>/
         "real":      { "f1": 0.90, ... }
       }
 
+  A seeded taxonomy session also scores each run against the real items it delivered
+  (see [docs/taxonomy_induction.md](docs/taxonomy_induction.md)); `real` stays the whole
+  reference:
+
+  - `real_paired` — `mean ± std` across runs of each run's score on the real items it delivered.
+  - `real_paired_runs` — one paired score per run; entry k belongs to `runs[k]`.
+  - `meta.paired_real` — `true` when the session carries both blocks (all runs are paired, or none).
+
 `results.json` is rewritten after **every** run, so a crash or Ctrl-C in run N keeps the
 aggregated results of runs 1..N-1. A run that generates zero usable samples aborts
 instead of writing misleading all-zero scores.
