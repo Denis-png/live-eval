@@ -350,6 +350,18 @@ class _Shallow(_Gen):
                            "subclass_axioms": [[leaf, "Root"] for leaf in leaves]})
 
 
+class _RecordingShallow(_Shallow):
+    """_Shallow, keeping every prompt it was sent."""
+
+    def __init__(self):
+        super().__init__()
+        self.prompts = []
+
+    def call_api(self, prompt):
+        self.prompts.append(prompt)
+        return super().call_api(prompt)
+
+
 class CalibrateLoopTests(_Workspace):
     def _calibrate(self, cfg, generator, **kwargs):
         with mock.patch.object(pipeline, "load_generator", return_value=generator), \
@@ -381,6 +393,27 @@ class CalibrateLoopTests(_Workspace):
         first, second = (r["request"]["type_dist"] for r in payload["rounds"][:2])
         deep = lambda d: sum(v for k, v in d.items() if int(k) >= 2)
         self.assertGreater(deep(second), deep(first))
+
+    def test_each_inverse_seedless_round_prompts_with_its_own_request(self):
+        # The request must reach the model: a round that measured at a new
+        # request while still prompting with the old one would steer nothing.
+        generator = _RecordingShallow()
+        payload = self._calibrate(self.config("inverse", True), generator,
+                                  rounds=1, sample_size=3)
+        with open(self.profile_path, encoding="utf-8") as f:
+            ctx_profile = json.load(f)
+        task = TaxonomyTask()
+        prompts = [task.build_structured_generation_prompt(
+                       task.apply_calibrated_structure(ctx_profile, r["request"]),
+                       mode="inverse")
+                   for r in payload["rounds"][:2]]
+        self.assertNotEqual(prompts[0], prompts[1])
+        self.assertEqual(generator.prompts[0], prompts[0])
+        self.assertEqual(generator.prompts[-1], prompts[1])
+        depths = task.apply_calibrated_structure(
+            ctx_profile, payload["rounds"][1]["request"])["taxonomies"][0]["depth_distribution"]
+        for depth, count in depths.items():
+            self.assertIn(f'"{depth}": {count}', generator.prompts[-1])
 
     def test_forward_seedless_refuses(self):
         with self.assertRaisesRegex(RuntimeError, "nothing to calibrate"):
