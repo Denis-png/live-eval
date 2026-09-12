@@ -1137,6 +1137,11 @@ def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
     be resolved here instead. A structured artifact is checked against
     `real_reference` first -- a stale one is ignored, as _apply_calibration
     ignores one for the other cells.
+
+    Without weights a structured cell draws the whole pool, while corruption
+    falls back to the first-N order, and the messages say which. framework.
+    calibrate refuses structured seeded cells, so their messages do not point
+    at it; an existing artifact is still honoured.
     """
     structured = strategy == "structured"
     seed_cell = not seedless and (structured or (strategy == "corruption"
@@ -1145,12 +1150,14 @@ def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
         return None
     from framework.calibration.artifact import load_calibration, resolve_calibration_path
 
+    fallback = ("drawing seeds from the whole pool" if structured
+                else "drawing seeds in the unweighted first-N order")
     path = resolve_calibration_path(config, task, strategy)
     if not path:
+        hint = ("" if structured else " Build one with: python -m "
+                "framework.calibrate --config <config.yaml>")
         print(f"[NOTE] no calibration artifact for "
-              f"{generation_cell_slug(config, strategy)}; drawing seeds in the "
-              f"unweighted first-N order. Build one with: python -m "
-              f"framework.calibrate --config <config.yaml>")
+              f"{generation_cell_slug(config, strategy)}; {fallback}.{hint}")
         return None
     # Same guard as _apply_calibration: a JSON-valid but structurally corrupt
     # artifact must fall back to today's behavior, never crash the run.
@@ -1172,13 +1179,11 @@ def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
             if not _structured_target_matches(task, payload, real_reference,
                                               {"type_dist": seed_key}):
                 print(f"[WARN] calibration {path!r} was measured against a "
-                      "different real reference; drawing seeds unweighted. "
-                      "Recalibrate to use it.", file=sys.stderr)
+                      f"different real reference; {fallback}.", file=sys.stderr)
                 return None
     except (OSError, ValueError, AttributeError, TypeError, KeyError) as e:
         print(f"[WARN] calibration {path!r} could not be read or is malformed "
-              f"({e}); drawing seeds in the unweighted first-N order.",
-              file=sys.stderr)
+              f"({e}); {fallback}.", file=sys.stderr)
         return None
 
     # Provenance, same as _apply_calibration records for every other cell:

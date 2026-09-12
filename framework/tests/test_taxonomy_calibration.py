@@ -171,6 +171,55 @@ class SeedWeightConsumptionTests(_Workspace):
         self.assertIn("malformed", err)
 
 
+class SeedWeightMessageTests(_Workspace):
+    """Without weights a structured seeded run draws the WHOLE pool; only GEC's
+    corruption cell falls back to a first-N order. And seeded taxonomy cannot
+    be calibrated, so its note must not point at a command that refuses."""
+
+    def _load(self, task, strategy, cfg, real=None):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            weights = pipeline._load_seed_weights(cfg, task, strategy, "forward", False,
+                                                  real)
+        self.assertIsNone(weights)
+        return out.getvalue() + err.getvalue()
+
+    def test_a_structured_cell_without_an_artifact_draws_the_whole_pool(self):
+        text = self._load(TaxonomyTask(), "structured",
+                          self.config("forward", False, calibration_path=None))
+        self.assertIn("the whole pool", text)
+        self.assertNotIn("first-N", text)
+        self.assertNotIn("framework.calibrate", text)
+
+    def test_a_structured_cell_with_a_malformed_artifact_draws_the_whole_pool(self):
+        path = os.path.join(self.tmp, "broken_calibration.json")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("{not json")
+        text = self._load(TaxonomyTask(), "structured",
+                          self.config("forward", False, calibration_path=path))
+        self.assertIn("malformed", text)
+        self.assertIn("the whole pool", text)
+        self.assertNotIn("first-N", text)
+
+    def test_a_structured_cell_with_a_stale_artifact_draws_the_whole_pool(self):
+        path = self.artifact("stale_calibration.json", {"type_dist": {"9": 1.0}},
+                             {"type_dist": {"3": 1.0}, "seed_weights": {"3": 1.0}})
+        cfg = self.config("forward", False, calibration_path=path)
+        text = self._load(TaxonomyTask(), "structured", cfg,
+                          TaxonomyTask().get_real_eval_samples(cfg, [_E2E_REAL]))
+        self.assertIn("different real reference", text)
+        self.assertIn("the whole pool", text)
+        self.assertNotIn("Recalibrate", text)
+
+    def test_gec_keeps_its_first_n_wording_and_its_build_hint(self):
+        from framework.tasks.gec.task import GECTask
+        cfg = {"generation": {"mode": "forward", "seedless": False,
+                              "calibration_path": None}}
+        text = self._load(GECTask(), "corruption", cfg)
+        self.assertIn("unweighted first-N order", text)
+        self.assertIn("python -m framework.calibrate", text)
+
+
 _PROFILE = {"taxonomies": [{"domain": "d", "n_classes": 10, "n_leaves": 6,
                             "max_depth": 3, "mean_depth": 1.5,
                             "depth_distribution": {"0": 1, "1": 4, "2": 4, "3": 1},
