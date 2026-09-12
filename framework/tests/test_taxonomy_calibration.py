@@ -194,9 +194,38 @@ class ApplyStructureTests(unittest.TestCase):
                          self.target["child_count_distribution"]["0"])
 
     def test_other_fields_and_the_input_are_untouched(self):
-        self.assertEqual((self.target["max_depth"], self.target["domain"]), (3, "d"))
+        self.assertEqual((self.target["domain"], self.target["n_classes"]), ("d", 10))
         self.assertEqual(_PROFILE["taxonomies"][0]["depth_distribution"],
                          {"0": 1, "1": 4, "2": 4, "3": 1})
+        self.assertNotIn("n_roots", _PROFILE["taxonomies"][0])
+
+    def test_roots_and_max_depth_follow_the_requested_depths(self):
+        # A request that moves mass off the deepest level and onto the roots
+        # must not leave the spec claiming the real ontology's max depth and
+        # root count beside counts that contradict them.
+        out = TaxonomyTask().apply_calibrated_structure(
+            _PROFILE, {"type_dist": {"0": 0.2, "1": 0.5, "2": 0.3}})
+        target = out["taxonomies"][0]
+        self.assertEqual(target["depth_distribution"], {"0": 2, "1": 5, "2": 3})
+        self.assertEqual((target["n_roots"], target["max_depth"]), (2, 2))
+
+    def test_max_depth_is_the_deepest_non_empty_bin(self):
+        # A zero-mass bin is dropped by the rounding and sets no depth.
+        out = TaxonomyTask().apply_calibrated_structure(
+            _PROFILE, {"type_dist": {"0": 0.1, "1": 0.4, "4": 0.5, "5": 0.0}})
+        self.assertEqual(out["taxonomies"][0]["max_depth"], 4)
+
+    def test_a_request_with_no_roots_still_imposes_one(self):
+        out = TaxonomyTask().apply_calibrated_structure(
+            _PROFILE, {"type_dist": {"1": 0.5, "2": 0.5}})
+        self.assertEqual(out["taxonomies"][0]["n_roots"], 1)
+
+    def test_a_count_only_request_leaves_roots_and_depth(self):
+        out = TaxonomyTask().apply_calibrated_structure(
+            {"taxonomies": [{**_PROFILE["taxonomies"][0], "n_roots": 3}]},
+            {"count_dist": {"0": 1.0}})
+        self.assertEqual((out["taxonomies"][0]["n_roots"],
+                          out["taxonomies"][0]["max_depth"]), (3, 3))
 
     def test_rounding_keeps_the_total_exact(self):
         out = TaxonomyTask().apply_calibrated_structure(

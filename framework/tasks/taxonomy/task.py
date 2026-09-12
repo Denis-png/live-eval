@@ -535,9 +535,12 @@ class TaxonomyTask(BaseTask):
         inverse+seedless imposes taxonomies[0]'s structure, through both the
         prompt and the feedback loop. Calibration replaces its depth and
         child-count distributions with the request -- class counts summing to
-        n_classes -- and recomputes mean_depth and n_leaves so the imposed spec
-        stays self-consistent. Every other field is kept; `profile` is not
-        mutated."""
+        n_classes -- and recomputes the fields they determine so the imposed
+        spec stays self-consistent: mean_depth, n_roots (the depth-0 count, at
+        least 1) and max_depth (the deepest non-empty depth bin) from the
+        depths, n_leaves from the child counts. Every other field is kept
+        (n_subclass_axioms and the parent-count distribution stay the real
+        ontology's); `profile` is not mutated."""
         import copy
 
         out = copy.deepcopy(profile)
@@ -548,6 +551,9 @@ class TaxonomyTask(BaseTask):
             target["depth_distribution"] = depth
             target["mean_depth"] = (round(sum(int(d) * c for d, c in depth.items()) / n, 4)
                                     if n else 0.0)
+            if depth:
+                target["n_roots"] = max(1, depth.get("0", 0))
+                target["max_depth"] = max(int(d) for d in depth)
         if request.get("count_dist"):
             children = _counts_from_fractions(request["count_dist"], n)
             target["child_count_distribution"] = children
