@@ -209,12 +209,25 @@ def run_calibration(
             f"Cell {pipeline.generation_cell_slug(config, strategy)} of task "
             f"'{task.get_task_name()}' imposes no structure -- only a domain is "
             "supplied -- so there is nothing to calibrate.")
+    # A structured seeded cell's only control input would be seed weights over
+    # max-depth buckets. Those are DRAW probabilities while the measured mix is
+    # class-weighted, and on a pool of ~10 subtrees weighted draws with
+    # replacement add more structural noise than the verification attrition
+    # they are meant to correct -- a seeded calibration shipped a worse mix and
+    # reported convergence. So both seeded cells refuse, like forward+seedless.
+    # (A seeded run still consumes an existing artifact; see _load_seed_weights.)
+    if structured and not ctx["seedless"]:
+        raise RuntimeError(
+            f"Cell {pipeline.generation_cell_slug(config, strategy)} of task "
+            f"'{task.get_task_name()}' cannot be calibrated: seeds are drawn from a "
+            "small pool of subtrees, so bucket weights drawn with replacement add "
+            "more structural noise than the verification attrition they would "
+            "correct. Calibrate inverse+seedless instead.")
     # Corruption forward+seeded injects no distribution at all — the generator
     # identifies the seed's error itself. Its one control input is WHICH seeds it
-    # sees, so that cell calibrates seed weights instead (Task 8). Every
-    # structured seeded cell is the same: its structure is the drawn subtree's.
-    seed_mode = not ctx["seedless"] and (
-        structured or (strategy == "corruption" and ctx["mode"] == "forward"))
+    # sees, so that cell calibrates seed weights instead (Task 8).
+    seed_mode = (not ctx["seedless"] and strategy == "corruption"
+                 and ctx["mode"] == "forward")
     if ctx["error_dist"] is None and not seed_mode and not structured:
         raise RuntimeError(
             f"Cell {pipeline.generation_cell_slug(config, strategy)} of task "

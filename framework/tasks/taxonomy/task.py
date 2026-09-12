@@ -523,8 +523,10 @@ class TaxonomyTask(BaseTask):
         return {"type_dist": "depth_dist", "count_dist": "child_count_dist"}
 
     def get_seed_calibration_key(self) -> str:
-        # Seeded cells steer which subtrees are drawn, by max-depth bucket, so
-        # what they measure is the delivered mix of those same buckets.
+        # A seed-weight artifact steers which subtrees are drawn, by max-depth
+        # bucket, so it is checked against the mix of those same buckets.
+        # Seeded calibration itself refuses (framework.calibrate); a seeded run
+        # still consumes an existing artifact.
         return "max_depth_mix"
 
     def apply_calibrated_structure(self, profile: dict, request: dict) -> dict:

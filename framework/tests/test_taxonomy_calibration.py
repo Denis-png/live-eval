@@ -1,10 +1,12 @@
 """Taxonomy calibration: measurements, keys, actuators, and the calibrate loop.
 
 Taxonomy used to opt out of calibration, so the ablation's phase B skipped it.
-Seeded cells lose their largest subtrees to verification; inverse+seedless
-imposes the real ontology's structure and the model honours some depth and
-branching bins more readily than others. Both are measurable, so both can be
-steered: seed weights over max-depth buckets, and the imposed distributions.
+inverse+seedless imposes the real ontology's structure and the model honours
+some depth and branching bins more readily than others, so the imposed
+distributions are steered. Seeded cells refuse: their only control input would
+be seed weights over max-depth buckets, and on a pool of ~10 subtrees weighted
+draws with replacement add more structural noise than the verification
+attrition they would correct. A seeded run still consumes an existing artifact.
 """
 import io
 import json
@@ -260,22 +262,6 @@ class StructureConsumptionTests(_Workspace):
         self.assertIn("malformed", err)
 
 
-class _RejectDeepFirstRound(_Gen):
-    """Rejects the 10-class (max depth 3) subtree during round 0 only -- its first
-    `limit` calls -- so round 0 measures depth-3 attrition while round 1, drawing
-    the now-favoured deep bucket, still yields usable samples."""
-
-    def __init__(self, limit):
-        super().__init__()
-        self.limit = limit
-
-    def call_api(self, prompt):
-        answer = json.loads(super().call_api(prompt))
-        if self.calls <= self.limit and len(answer["classes"]) >= 10:
-            answer["subclass_axioms"] = answer["subclass_axioms"][1:]
-        return json.dumps(answer)
-
-
 class _Shallow(_Gen):
     """Always delivers a star: one root, every other class directly beneath it."""
 
@@ -294,13 +280,22 @@ class CalibrateLoopTests(_Workspace):
             return calibrate.run_calibration(
                 cfg, output_path=os.path.join(self.tmp, "cal.json"), **kwargs)
 
-    def test_seeded_calibration_raises_the_bucket_verification_depletes(self):
-        payload = self._calibrate(self.config("forward", False, sample_size=12),
-                                  _RejectDeepFirstRound(limit=12), rounds=1, sample_size=12)
-        first, second = (r["request"]["type_dist"] for r in payload["rounds"][:2])
-        self.assertGreater(second["3"], first["3"])
-        self.assertEqual(payload["calibrated"]["seed_weights"],
-                         payload["calibrated"]["type_dist"])
+    def test_both_seeded_cells_refuse_before_generating(self):
+        # Seed weights are bucket DRAW probabilities while the target mix is
+        # class-weighted, and on a small pool weighted draws with replacement add
+        # more structural noise than the attrition they would correct: a seeded
+        # calibration shipped a worse mix and called it converged. Both seeded
+        # cells refuse, and before a single generation is paid for.
+        for mode in ("forward", "inverse"):
+            with self.subTest(mode=mode):
+                generator = _Gen()
+                with self.assertRaisesRegex(RuntimeError, "cannot be calibrated") as err:
+                    self._calibrate(self.config(mode, False, sample_size=12), generator,
+                                    rounds=1, sample_size=12)
+                self.assertIn(f"{mode}_seeded", str(err.exception))
+                self.assertIn("inverse+seedless", str(err.exception))
+                self.assertEqual(generator.calls, 0)
+                self.assertFalse(os.path.exists(os.path.join(self.tmp, "cal.json")))
 
     def test_inverse_seedless_calibration_asks_for_more_depth(self):
         payload = self._calibrate(self.config("inverse", True), _Shallow(),

@@ -319,21 +319,32 @@ iterate toward.
 ## Calibration
 
 `python -m framework.calibrate --config framework/configs/taxonomy/config.yaml
---mode <forward|inverse> --[no-]seedless` calibrates one cell and writes an
+--mode inverse --seedless` calibrates the one calibratable cell and writes an
 artifact under `framework/data/profiles/taxonomy/`, which later runs of that cell
 pick up automatically.
 
 | cell | steered | measured against the real reference |
 |---|---|---|
-| forward+seeded, inverse+seeded | seed weights over max-depth buckets | the class-weighted max-depth mix of the delivered artifacts |
 | inverse+seedless | the imposed depth and child-count distributions | the same distributions over every generated class |
+| forward+seeded, inverse+seeded | nothing | refuses |
 | forward+seedless | nothing | refuses |
 
-Seeded cells lose their largest subtrees to verification; weighting the draw
-toward those buckets restores the pool's structural mix, drawing with
-replacement. inverse+seedless replaces the imposed distributions in the profile
-the prompt and the feedback loop both read. An artifact measured against a
-different real reference is ignored with a warning.
+inverse+seedless replaces the imposed distributions in the profile the prompt
+and the feedback loop both read. An artifact measured against a different real
+reference is ignored with a warning.
+
+forward+seedless refuses because it imposes no structure: only a domain is
+supplied. The seeded cells refuse because their only control input would be seed
+weights over max-depth buckets. Seeds are drawn from a small pool of subtrees
+(10 on Pizza), so bucket weights drawn with replacement add more structural
+noise than the verification attrition they would correct. The weights are also
+draw probabilities, while the measured mix is weighted by class count, so the
+first round over-draws the deep buckets. Both refusals happen before any
+generation. A seeded run still honours a seed-weight artifact if one exists
+(for example, one written before seeded calibration was refused). Verification
+attrition therefore still shifts a seeded benchmark's structural mix. Per-run
+paired scoring (see "What the Real Baseline Is") keeps that attrition out of the
+paired generated-vs-real gap, and the whole-reference gap still shows it.
 
 ## What the Real Baseline Is
 

@@ -311,12 +311,13 @@ select the cell, `--output` overrides the artifact path. Runs then pick the arti
 automatically for the same benchmark and cell, printing `Calibration: <path> (round N)`.
 Every calibratable cell with no artifact prints a `[NOTE]` naming the command that would
 build one. `structured` (taxonomy) reuses the two slots for class-level structure: `type_dist` is
-the per-class depth distribution and `count_dist` the per-class child count. Its seeded
-cells steer seed weights over max-depth buckets (a calibrated seeded run may draw a
-subtree more than once), inverse+seedless steers the depth and branching it imposes,
-and forward+seedless -- which imposes nothing -- refuses. Structured calibration
-defaults to `3 * generation.sample_size` artifacts per round. Pin an artifact with
-`generation.calibration_path`, or set that key to `null` to opt out.
+the per-class depth distribution and `count_dist` the per-class child count. Only
+inverse+seedless is calibrated: it steers the depth and branching it imposes. The other
+three cells refuse. forward+seedless imposes nothing. The seeded cells draw their seeds
+from a small pool of subtrees, so bucket weights drawn with replacement would add more
+structural noise than the verification attrition they are meant to correct. Structured
+calibration defaults to `3 * generation.sample_size` artifacts per round. Pin an artifact
+with `generation.calibration_path`, or set that key to `null` to opt out.
 
 A calibrated `class_prob` only ever corrects the **`empirical`** balance for differential
 attrition: an explicit float or mapping in `generation.class_balance` is a user instruction
