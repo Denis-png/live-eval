@@ -272,6 +272,99 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual((row["real"], row["real_unpaired"]), (0.4, 0.3))
 
 
+def _analysis_session(model, reals, *, mode="forward", gen=0.5, paired=True):
+    """A taxonomy session as analyze_results discovers it. `reals` maps each
+    evaluated model to (paired real f1, whole-reference real f1)."""
+    results = {}
+    for eval_model, (paired_f1, whole_f1) in reals.items():
+        results[eval_model] = {"generated": {"f1": {"mean": gen, "std": 0.1}},
+                               "real": {"f1": whole_f1},
+                               "runs": [{"f1": gen - 0.05}, {"f1": gen + 0.05}]}
+        if paired:
+            results[eval_model]["real_paired"] = {"f1": {"mean": paired_f1, "std": 0.0}}
+    meta = {"task": "taxonomy", "strategy": "structured", "mode": mode, "seedless": False,
+            "model": model, "runs_completed": 2, "created": "2026-09-12T00:00:00"}
+    if paired:
+        meta["paired_real"] = True
+    return {"dir": f"{model}_{mode}", "meta": meta, "results": results, "profile": None}
+
+
+def _markdown(sessions):
+    import scripts.analyze_results as ar
+    rows = [r for s in sessions for r in ar.session_rows(s)]
+    with tempfile.TemporaryDirectory() as d:
+        path = ar.write_markdown(ar.build_summary(sessions, rows), sessions, rows, [],
+                                 os.path.join(d, "analysis.md"))
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+
+
+def _dashed_levels(fig):
+    """The y of every dashed reference line in a figure."""
+    return {round(line.get_ydata()[0], 6) for ax in fig.axes for line in ax.lines
+            if line.get_linestyle() == "--"}
+
+
+class SharedReferenceTests(unittest.TestCase):
+    """A paired real differs per generator and per cell, so a line drawn as THE
+    real benchmark for several sessions must be the whole matched reference."""
+
+    def _figure(self, plot, *args):
+        import scripts.analyze_results as ar
+        captured = {}
+
+        def keep(fig, path):
+            captured["fig"] = fig
+            return path
+
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(ar, "_save", side_effect=keep):
+            self.assertIsNotNone(plot(*args, d))
+        return captured["fig"]
+
+    def test_model_impact_draws_one_reference_for_two_generators(self):
+        import scripts.analyze_results as ar
+        sessions = [_analysis_session("gm1", {"lexical": (0.4, 0.3)}),
+                    _analysis_session("gm2", {"lexical": (0.35, 0.3)})]
+        rows = [r for s in sessions for r in ar.session_rows(s)]
+        fig = self._figure(ar.plot_model_impact, rows, "taxonomy", "forward")
+        self.assertEqual(_dashed_levels(fig), {0.3})
+
+    def test_model_impact_falls_back_to_real_for_archived_rows(self):
+        import scripts.analyze_results as ar
+        sessions = [_analysis_session("gm1", {"lexical": (None, 0.3)}, paired=False),
+                    _analysis_session("gm2", {"lexical": (None, 0.3)}, paired=False)]
+        rows = [r for s in sessions for r in ar.session_rows(s)]
+        for row in rows:
+            row["real_unpaired"] = None          # an archived row
+        fig = self._figure(ar.plot_model_impact, rows, "taxonomy", "forward")
+        self.assertEqual(_dashed_levels(fig), {0.3})
+
+    def test_mode_effect_draws_the_whole_reference_for_both_modes(self):
+        import scripts.analyze_results as ar
+        sessions = [_analysis_session("gm", {"lexical": (0.4, 0.3)}, mode="forward"),
+                    _analysis_session("gm", {"lexical": (0.35, 0.3)}, mode="inverse")]
+        rows = [r for s in sessions for r in ar.session_rows(s)]
+        fig = self._figure(ar.plot_mode_effect, rows, "taxonomy")
+        self.assertEqual(_dashed_levels(fig), {0.3})
+
+    def test_one_real_benchmark_order_for_sessions_with_different_paired_orders(self):
+        # Paired: star > lexical for gm1, lexical > star for gm2. Whole
+        # reference: lexical > star for both -- one real benchmark, one order.
+        md = _markdown([_analysis_session("gm1", {"lexical": (0.4, 0.3), "star": (0.5, 0.2)}),
+                        _analysis_session("gm2", {"lexical": (0.6, 0.3), "star": (0.5, 0.2)})])
+        orders = [line for line in md.splitlines() if line.startswith("Real-benchmark order")]
+        self.assertEqual(orders, ["Real-benchmark order: **lexical > star**"])
+
+    def test_kendall_tau_keeps_the_paired_real(self):
+        import scripts.analyze_results as ar
+        session = _analysis_session("gm", {"lexical": (0.4, 0.3), "star": (0.5, 0.2)})
+        rows = ar.session_rows(session)
+        # generated ties, so compare the orders tau is computed from.
+        rp = ar.rank_preservation(rows, "taxonomy", "forward", "gm")
+        self.assertEqual(rp["real_order"], ["star", "lexical"])
+
+
 class PlotTests(unittest.TestCase):
     def test_the_session_figure_uses_the_paired_real(self):
         from framework.plotting import plots

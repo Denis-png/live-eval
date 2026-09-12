@@ -329,6 +329,19 @@ def session_rows(session):
     return rows
 
 
+def _reference(row):
+    """The real score to draw as a reference SHARED by several sessions.
+
+    A paired `real` is specific to one session (the items its runs delivered),
+    so it differs per generator and per cell. `real_unpaired` -- the whole
+    matched reference -- is the same across generators within a cell, and
+    across forward/inverse within a seeded or seedless pair. Rows without it
+    (archived sessions, whose `real` is already unpaired) fall back to `real`.
+    Per-session comparisons (gaps, Kendall tau) keep the paired `real`."""
+    unpaired = row.get("real_unpaired")
+    return unpaired if unpaired is not None else row["real"]
+
+
 def _short(name):
     return name.split("/")[-1]
 
@@ -416,8 +429,8 @@ def plot_model_impact(rows, task, strategy, out_dir):
                        color=_color(gm), edgecolor="white", linewidth=0.5)
             mean = sum(r["runs"]) / len(r["runs"])
             ax.hlines(mean, i - 0.22, i + 0.22, color=_color(gm), linewidth=2, zorder=4)
-            if r["real"] is not None:
-                ax.axhline(r["real"], linestyle="--", color=SERIES_REAL,
+            if _reference(r) is not None:
+                ax.axhline(_reference(r), linestyle="--", color=SERIES_REAL,
                            linewidth=1, zorder=2)
         e2 = eta_squared(groups)
         title = "\n".join(textwrap.wrap(_short(ev), 24))
@@ -470,7 +483,9 @@ def plot_mode_effect(rows, task, out_dir):
                             yerr=[pts["forward"]["gen_std"], pts["inverse"]["gen_std"]],
                             marker="o", markersize=5, linewidth=2, capsize=2,
                             color=_color(gm), markeredgecolor="white", markeredgewidth=0.5)
-                real = pts["forward"]["real"]
+                # The whole matched reference, shared by both modes: the
+                # forward session's paired real is not the inverse one's.
+                real = _reference(pts["forward"])
                 if real is not None:
                     ax.axhline(real, linestyle="--", color=SERIES_REAL, linewidth=1, zorder=1)
         ax.set_xticks([0, 1])
@@ -560,8 +575,12 @@ def rank_preservation(rows, task, strategy, gen_model):
     return {
         "tau_b": tau,
         "n_eval_models": len(sel),
+        # The order tau is computed against: this session's (paired) real.
         "real_order": [_short(r["eval_model"])
                        for r in sorted(sel, key=lambda r: -r["real"])],
+        # The real benchmark's own order, shared by every session of the cell.
+        "reference_order": [_short(r["eval_model"])
+                            for r in sorted(sel, key=lambda r: -_reference(r))],
         "generated_order": [_short(r["eval_model"])
                             for r in sorted(sel, key=lambda r: -r["gen_mean"])],
     }
@@ -690,7 +709,7 @@ def write_markdown(summary, sessions, rows, figures, out_path):
                      f"| {' > '.join(rp.get('generated_order', [])) or '-'} |")
     reals = {}
     for key, rp in summary["rank_preservation"].items():
-        reals[" > ".join(rp["real_order"])] = rp["n_eval_models"]
+        reals[" > ".join(rp["reference_order"])] = rp["n_eval_models"]
     for order in reals:
         lines.append(f"\nReal-benchmark order: **{order}**")
 
