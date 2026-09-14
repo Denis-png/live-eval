@@ -72,16 +72,20 @@ generation:
   provider: "openrouter"           # groq | openai | openrouter | mistral | minimax | anthropic | google
   model: "minimax-m3"
   temperature: 1.0
-  max_tokens: 32768            # HARD CAP on the response, honoured by every provider.
-                               # A whole taxonomy is far longer than a sentence, and
-                               # a reasoning model spends budget on <think> before
-                               # emitting any of it — 4096 truncated every artifact
-                               # on the last smoke run (docs/taxonomy_induction.md).
+  max_tokens: 65536            # HARD CAP on the response, honoured by every provider
+                               # (a cap, not a spend: you pay for tokens used). A whole
+                               # taxonomy is far longer than a sentence, and a reasoning
+                               # model spends budget on <think> before emitting any of
+                               # it. inverse+seedless imposes all 99 of Pizza's classes:
+                               # at 32768 it truncated 9 of 9 attempts (2026-09-14),
+                               # while a completed answer ran ~91,000 characters.
   num_runs: 3                  # repeat N times → outputs mean ± std
   sample_size: 10              # whole taxonomies per run; each costs a full artifact
                                # plus up to max_rounds feedback calls, so this is an
                                # order of magnitude below the sentence tasks.
-  timeout: 600                 # a whole artifact takes far longer than one sentence
+  timeout: 1200                # a whole artifact takes far longer than one sentence:
+                               # a truncated 32768-token call took ~4 min, so a full
+                               # 65536-token answer can approach 8
   max_retries: 2
   request_delay: 1.0           # seconds between requests; one value for every task
 
@@ -129,13 +133,15 @@ task_models:
     provider: "openrouter"
     api_key: "${OPENROUTER_API_KEY}"
     temperature: 0
-    max_tokens: 32768            # A CAP, not a spend: you pay for tokens used. The real
+    max_tokens: 65536            # A CAP, not a spend: you pay for tokens used. The real
                                  # baseline asks for the whole ontology in one answer,
                                  # the largest single output in the system. At 8192 a
-                                 # reasoning model truncated on Pizza's 99 classes, the
-                                 # error was caught as a malformed prediction, and it
-                                 # scored 0.000. At 32768 it completes: F1 0.804.
-    timeout: 600
+                                 # reasoning model truncated on Pizza's 99 classes and
+                                 # scored 0.000. At 32768 it completed on some runs
+                                 # (F1 0.722) but not others (2026-09-14: truncated,
+                                 # real F1 0.0), so a seedless cell's real baseline
+                                 # was a coin toss.
+    timeout: 1200
     max_retries: 2
 
 # ── Compute ─────────────────────────────────────────────────────────────────
