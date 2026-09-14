@@ -230,8 +230,8 @@ generation:
   model: minimax-m3
   num_runs: 3
   sample_size: 10           # whole taxonomies per run
-  max_tokens: 32768         # a reasoning model thinks before it emits the artifact
-  timeout: 600
+  max_tokens: 65536         # a reasoning model thinks before it emits the artifact
+  timeout: 1200
   feedback:
     max_rounds: 1           # leave `enabled` to taxonomy.json's default: an explicit
                             # `enabled: true` makes three of the four cells refuse
@@ -242,7 +242,7 @@ generation:
 task_models:
   - {name: lexical, type: lexical}
   - {name: star, type: star}
-  - {name: minimax-m3, type: llm, provider: openrouter, max_tokens: 32768}
+  - {name: minimax-m3, type: llm, provider: openrouter, max_tokens: 65536}
 ```
 
 `sample_size: 10` and `num_runs: 3` mean ten synthetic taxonomies per run, across
@@ -279,11 +279,23 @@ taxonomies against their computed gold, and scored the LLM task model at real
 F1 0.886 on the matched seed-pool reference (lexical 0.30, star 0.17). Every stage
 -- generation, evaluation, fidelity and plots -- completed.
 
+Live smoke runs on 2026-09-14 raised both limits to 65536:
+
+- inverse+seedless imposes all 99 of Pizza's classes. At 32768 it truncated on 9 of
+  9 attempts. At 65536 it delivered 3 of 3 taxonomies, though one needed three
+  attempts (one returned duplicate class names, one still truncated) and took 23
+  minutes. The cell's 3 samples took 38 minutes in all.
+- forward+seedless delivered 3 of 3 (52, 101 and 82 classes) in about 8 minutes.
+- The LLM task model's answer on the whole 99-class ontology -- the seedless cells'
+  real baseline -- truncated at 32768 in one session (real F1 0.0) and completed in
+  another (0.722). At 65536, three independent calls all completed in 41-57 seconds
+  (F1 0.839-0.895).
+
 History: an earlier Xiaomi/MiMo smoke run at `generation.max_tokens = 4096` never
 produced an artifact. Both attempts ended with `finish_reason = length` and
 `message.content = None` after spending the whole budget on reasoning; the same
-truncation later hit minimax at 16384 on the largest seeds, which is why both
-limits now sit at 32768.
+truncation later hit minimax at 16384 on the largest seeds, then at 32768 on
+inverse+seedless and on the whole-ontology evaluation.
 
 ## Seeded Generation
 
