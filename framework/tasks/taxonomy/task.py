@@ -124,6 +124,22 @@ class TaxonomyTask(BaseTask):
     def get_evaluators(self) -> list[str]:
         return self._config["evaluators"]
 
+    def get_judge_prompt(self) -> str | None:
+        return self._config.get("judge_prompt")
+
+    def build_structured_judge_prompt(self, artifact: dict) -> str | None:
+        """The whole artifact as the judge reads it: its domain, its classes and
+        one line per subclass axiom. The model under test later sees only the
+        domain and the classes; the judge needs the axioms to check them."""
+        template = self.get_judge_prompt()
+        if not template:
+            return None
+        axioms = "\n".join(f"- {child} is a kind of {parent}"
+                           for child, parent in artifact.get("subclass_axioms") or [])
+        return template.format(domain=artifact.get("domain", ""),
+                               classes=", ".join(artifact.get("classes") or []),
+                               axioms=axioms or "(none)")
+
     def get_evaluator_fns(self) -> dict[str, Any]:
         return {
             "precision": compute_precision,
