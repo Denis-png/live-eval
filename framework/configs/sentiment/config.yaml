@@ -11,10 +11,13 @@ api_keys:
 # ── Dataset ─────────────────────────────────────────────────────────────────
 # TweetEval sentiment: 3-class Twitter data (NEG=0, NEU=1, POS=2).
 # Same benchmark used to train the bertweet and RoBERTa sentiment models below.
+# The benchmark is the first 150 tweets of its test split. framework/data/** is
+# gitignored, so build the CSV once:
+#   python -m scripts.prepare_sentiment_benchmark
 dataset:
   source: local
   local:
-    path: "framework/data/sentiment/tweeteval_base_150.csv"
+    path: "framework/data/benchmarks/sentiment/tweeteval_test_150.csv"
     format: csv
 
 # ── Generation ───────────────────────────────────────────────────────────────

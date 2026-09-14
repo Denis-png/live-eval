@@ -598,7 +598,7 @@ GEC (Grammatical Error Correction) — implemented (corruption: forward + invers
 Spam Detection — implemented (class-conditional generation + real baseline + fidelity)
 Taxonomy Induction — implemented (structured generation + subclass evaluation + structural fidelity); see [docs/taxonomy_induction.md](docs/taxonomy_induction.md)
 Hate Speech Detection — planned
-Sentiment Analysis — implemented (corruption: forward + inverse, seeded + seedless; label-balance fidelity)
+Sentiment Analysis — implemented (corruption: forward + inverse, seeded + seedless; label-balance fidelity); build its benchmark CSV (first 150 TweetEval test tweets) with `python -m scripts.prepare_sentiment_benchmark`
 
 ## Current Evaluators (GEC)
 
