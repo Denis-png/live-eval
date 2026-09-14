@@ -40,17 +40,27 @@ from framework.generators.base_generator import CLASS_CONDITIONAL_SEMANTICS
 from framework.plotting.plots import flatten_mean_std, flatten_point, _visible
 from framework.real_baseline import real_point
 
-# ── Fixed entity colors (validated: Okabe-Ito subset, all-pairs CVD-checked;
-#    pink/amber/sky carry a contrast WARN whose relief is the direct labels on
-#    the figures and the tables in analysis.md). Real stays the repo's orange
-#    and only ever appears as a dashed, directly-labeled reference. ──
+# ── Fixed entity colors: the plotting style's categorical palette (slot 1 blue
+#    is also SERIES_GENERATED; slot 2 orange is reserved for the real series),
+#    assigned in fixed slot order -- the sweep's generator first, then the
+#    compare.yaml models in list order. Validated with the dataviz palette
+#    checker (light surface #fcfcfb): adjacent pairs pass (worst CVD dE 9.1,
+#    normal-vision 19.6); all pairs pass for the first three only, so
+#    plot_identity -- the one figure where color alone names the generator --
+#    facets past three. aqua/yellow/magenta sit below 3:1 contrast; their relief
+#    is the tick labels, facet titles and legends on every figure, and the
+#    tables in analysis.md. ──
 MODEL_COLORS = {
-    "minimax-m3": "#0072B2",
-    "z-ai/glm-5.2": "#009E73",
-    "xiaomi/mimo-v2.5": "#CC79A7",
-    "tencent/hy3:free": "#E69F00",
-    "deepseek/deepseek-v4-flash": "#56B4E9",
+    "minimax-m3": "#2a78d6",                        # 1 blue
+    "z-ai/glm-5.3-flash": "#1baf7a",                # 3 aqua
+    "deepseek/deepseek-v4-flash-0731": "#eda100",   # 4 yellow
+    "xiaomi/mimo-v2.5": "#e87ba4",                  # 5 magenta
+    "tencent/hy3": "#008300",                       # 6 green
+    "openai/gpt-5.6-luna": "#4a3aa7",               # 7 violet
 }
+# More generators than this share one categorical scheme only by folding or
+# faceting -- never a generated hue.
+IDENTITY_COLOR_ONLY_MAX = 3
 FALLBACK_COLOR = "#52514e"
 MODE_MARKERS = {"forward": "o", "inverse": "^",
                 "forward+seedless": "D", "inverse+seedless": "v"}
@@ -362,40 +372,57 @@ def _plt():
 
 def plot_identity(rows, task, out_dir):
     """Generated vs real scatter with the y=x fidelity diagonal, one panel per
-    metric. Color = generation model, marker = strategy, error bar = run std."""
+    metric. Color = generation model, marker = strategy, error bar = run std.
+
+    Color is the only cue naming the generator here, and past
+    IDENTITY_COLOR_ONLY_MAX generators the palette cannot keep every pair
+    distinct -- so each generator then gets its own row of panels, titled with
+    its name."""
     from framework.plotting.style import INK_MUTED, SURFACE, apply_axes_style
     plt = _plt()
     metrics = [m for m in _identity_metrics(task)
                if any(r["metric"] == m and r["real"] is not None for r in rows)]
     if not metrics:
         return None
-    fig, axes = plt.subplots(1, len(metrics), figsize=(3.4 * len(metrics), 3.8),
-                             sharex=True, sharey=True)
-    axes = [axes] if len(metrics) == 1 else list(axes)
+    gen_models = sorted({r["gen_model"] for r in rows})
+    row_models = gen_models if len(gen_models) > IDENTITY_COLOR_ONLY_MAX else [None]
+    height = 3.8 * len(row_models)
+    fig, grid = plt.subplots(len(row_models), len(metrics),
+                             figsize=(3.4 * len(metrics), height),
+                             sharex=True, sharey=True, squeeze=False)
     fig.patch.set_facecolor(SURFACE)
-    for ax, metric in zip(axes, metrics):
-        apply_axes_style(ax)
-        ax.plot([0, 1], [0, 1], linestyle="--", color=INK_MUTED, linewidth=1, zorder=1)
-        for r in rows:
-            if r["metric"] != metric or r["real"] is None:
-                continue
-            ax.errorbar(r["real"], r["gen_mean"], yerr=r["gen_std"],
-                        marker=MODE_MARKERS.get(r["strategy"], "s"), linestyle="none",
-                        markersize=6, color=_color(r["gen_model"]),
-                        markeredgecolor="white", markeredgewidth=0.5,
-                        elinewidth=1, capsize=2, zorder=3)
-        ax.set_title(metric, fontsize=10)
-        ax.set_xlim(-0.03, 1.03)
-        ax.set_ylim(-0.03, 1.03)
+    for row_axes, gm in zip(grid, row_models):
+        for ax, metric in zip(row_axes, metrics):
+            apply_axes_style(ax)
+            ax.plot([0, 1], [0, 1], linestyle="--", color=INK_MUTED, linewidth=1, zorder=1)
+            for r in rows:
+                if r["metric"] != metric or r["real"] is None:
+                    continue
+                if gm is not None and r["gen_model"] != gm:
+                    continue
+                ax.errorbar(r["real"], r["gen_mean"], yerr=r["gen_std"],
+                            marker=MODE_MARKERS.get(r["strategy"], "s"), linestyle="none",
+                            markersize=6, color=_color(r["gen_model"]),
+                            markeredgecolor="white", markeredgewidth=0.5,
+                            elinewidth=1, capsize=2, zorder=3)
+            ax.set_title(metric if gm is None else f"{_short(gm)} · {metric}", fontsize=10)
+            ax.set_xlim(-0.03, 1.03)
+            ax.set_ylim(-0.03, 1.03)
+        row_axes[0].set_ylabel("generated score", fontsize=9)
+    for ax in grid[-1]:
         ax.set_xlabel("real score", fontsize=9)
-    axes[0].set_ylabel("generated score", fontsize=9)
     # Only show the strategy legend/marker split when the task actually has
     # more than one distinct strategy present (a single-strategy task gets one
     # marker shape, encoded by color alone — same treatment spam gets today).
     has_strategy_axis = len({r["strategy"] for r in rows}) > 1
     _legend_models_modes(fig, rows, modes=has_strategy_axis)
+    # Headroom is fixed in inches. The default top margin is a fraction of the
+    # figure's height, so on a faceted (tall) figure it floated the title rows
+    # away from the panels; one row keeps the old look.
+    fig.subplots_adjust(top=1 - 0.46 / height)
     fig.suptitle(f"{task}: generated vs real (diagonal = perfect fidelity; "
-                 f"below = generated harder)", fontsize=11, y=1.04)
+                 f"below = generated harder)", fontsize=11,
+                 y=1 + 0.15 / height)
     return _save(fig, os.path.join(out_dir, f"identity_{task}.png"))
 
 
