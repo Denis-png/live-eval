@@ -118,7 +118,10 @@ def load_real_data(config: dict, task: BaseTask) -> list[dict]:
             break
 
     print(f"Loaded {len(samples)} real samples.")
-    if len(samples) < sample_size:
+    # A structured sample is a whole generated artifact and a real row a whole
+    # ontology its seed pool is cut from, so fewer rows than samples is normal
+    # there (Pizza is one row) -- warning on it read like a broken benchmark.
+    if len(samples) < sample_size and task.get_generation_strategy() != "structured":
         # sample_size counts USABLE samples (task.parse_row filters rows, e.g.
         # spam keeps HAM only) — the source ran out before filling the pool.
         print(
@@ -617,7 +620,12 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                     "generation.feedback."
                 )
             rng = random.Random()
-            pool = task.get_seed_pool(config, real_data, mode, rng=rng)
+            # A calibrated seeded cell draws by bucket weight (with repeats);
+            # without weights the whole pool is drawn, as before.
+            seed_weights = (gen_cfg.get("seed_weights")
+                            if isinstance(gen_cfg.get("seed_weights"), dict) else None)
+            pool = task.get_seed_pool(config, real_data, mode,
+                                      seed_weights=seed_weights, rng=rng)
             if len(pool) < sample_size:
                 raise RuntimeError(
                     f"{task.get_task_name()} seed pool holds {len(pool)} subtrees "
@@ -980,31 +988,80 @@ def _resolve_class_prob(config: dict, real_reference, task=None) -> dict:
     return {label: 1.0 / len(labels) for label in labels} if labels else {}
 
 
-def _evaluate_real_baseline(task, config, real_reference, evaluator_fns) -> dict:
-    """Evaluate task_models once on the real benchmark (deterministic → no runs)."""
+def _predict_real(task, config, real_reference) -> dict:
+    """Each task model's result rows on the real reference ({**item,
+    "prediction": ...}), keyed by model name -- predicted once per session.
+
+    Kept rather than discarded after scoring: a paired run scores a subset of
+    these same rows, so pairing costs no extra model call."""
     if not real_reference:
         print("[real baseline] skipped — task has no real reference.")
         return {}
     texts = [s["text"] for s in real_reference]
-    out = {}
+    rows = {}
     for model_config in config["task_models"]:
         model = task.get_model(model_config)
         predictions = model.predict(texts)
-        results = [{**s, "prediction": p} for s, p in zip(real_reference, predictions)]
-        out[model_config["name"]] = {
-            name: evaluator_fns[name](results) for name in task.get_evaluators()
-        }
-    return out
+        rows[model_config["name"]] = [{**s, "prediction": p}
+                                      for s, p in zip(real_reference, predictions)]
+    return rows
+
+
+def _score_rows(task, rows: list[dict], evaluator_fns: dict) -> dict:
+    """Every evaluator over one list of result rows -- the same list object, so
+    a memoized evaluator family scores it in one pass."""
+    return {name: evaluator_fns[name](rows) for name in task.get_evaluators()}
+
+
+def _paired_real_scores(task, real_reference, real_rows: dict, synthetic: list[dict],
+                        evaluator_fns: dict) -> dict | None:
+    """This run's paired real baseline: the real items its accepted records came
+    from (task.paired_real_indices), scored with the evaluators that score the
+    run itself. None when the task does not pair or the real baseline did not
+    run. Each subset is a new list, so an identity-keyed memo never serves the
+    unpaired result for it."""
+    if not real_rows:
+        return None
+    indices = task.paired_real_indices(real_reference, synthetic)
+    if indices is None:
+        return None
+    return {model: _score_rows(task, [rows[i] for i in indices], evaluator_fns)
+            for model, rows in real_rows.items()}
+
+
+def _all_or_no_pairing(per_run: list[dict | None]) -> list[dict] | None:
+    """The session's paired real scores -- one per run, in run order -- or None.
+
+    `real_paired_runs[k]` is read as the paired score of `runs[k]`, so a session
+    whose runs did not ALL pair (e.g. merge_sessions combining an archived run
+    that predates source_pool_index with a current one) pairs none of them:
+    dropping only the unpaired runs would shift every later entry onto the
+    wrong run. Warns when that discards pairing some runs had."""
+    paired = [scores for scores in per_run if scores is not None]
+    if not paired:
+        return None
+    if len(paired) < len(per_run):
+        print(f"[WARN] {len(per_run) - len(paired)} of {len(per_run)} runs could "
+              "not be paired with the real items they delivered; writing no paired "
+              "real scores for this session (real_paired would misalign with runs).",
+              file=sys.stderr)
+        return None
+    return paired
 
 
 def _nest_results(generated_agg: dict, real_scores: dict,
-                  all_run_scores: list[dict] | None = None) -> dict:
-    """Group each model's scores as {generated, real?, runs?}.
+                  all_run_scores: list[dict] | None = None,
+                  paired_run_scores: list[dict] | None = None) -> dict:
+    """Group each model's scores as {generated, real?, runs?, real_paired?,
+    real_paired_runs?}.
 
     `runs` lists the model's score dict for each completed run. It is additive —
     the printer and compare_models read only generated/real — and it is what the
-    run-variance figure plots."""
+    run-variance figure plots. `real_paired_runs[k]` is the paired real score of
+    the run scored in `runs[k]`, and `real_paired` aggregates them like
+    `generated`; both appear only for a task that pairs."""
     final = {}
+    paired_agg = aggregate(paired_run_scores) if paired_run_scores else {}
     for model in set(generated_agg) | set(real_scores):
         final[model] = {}
         if model in generated_agg:
@@ -1014,6 +1071,10 @@ def _nest_results(generated_agg: dict, real_scores: dict,
         runs = [run[model] for run in (all_run_scores or []) if model in run]
         if runs:
             final[model]["runs"] = runs
+        if model in paired_agg:
+            final[model]["real_paired"] = paired_agg[model]
+            final[model]["real_paired_runs"] = [run[model] for run in paired_run_scores
+                                                if model in run]
     return final
 
 
@@ -1049,24 +1110,54 @@ def _render_plots(config: dict, paths: dict) -> None:
 
 # ── Generation context ────────────────────────────────────────
 
-def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
-                       seedless: bool) -> dict | None:
-    """Calibrated seed weights for cells whose only control input is seed choice.
+def _str_keys(dist) -> dict:
+    return {str(key): value for key, value in (dist or {}).items()}
 
-    GEC forward+seeded never reaches load_error_distribution (the generator picks
-    its own error type, so _should_load_error_distribution is False), so its
-    calibration artifact has to be resolved here instead.
+
+def _structured_target_matches(task, payload: dict, real_reference, keys: dict) -> bool:
+    """Whether a structured calibration artifact was built against THIS real
+    reference: its target is re-measured with the instrument calibration used,
+    build_fidelity_profile -- cheap for taxonomy, no model calls. Keys compare
+    as strings: load_calibration turns count_dist keys back into ints for GEC's
+    edit counts, while taxonomy's structure keys are strings."""
+    from framework.calibration.artifact import targets_match
+
+    measured = task.build_fidelity_profile(real_reference or [])
+    current = {name: _str_keys(measured.get(key)) for name, key in keys.items()}
+    stored = {name: _str_keys((payload.get("target") or {}).get(name)) for name in keys}
+    return targets_match(stored, current)
+
+
+def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
+                       seedless: bool, real_reference=None) -> dict | None:
+    """Calibrated seed weights for cells whose only control input is seed choice:
+    corruption forward+seeded (GEC) and every structured seeded cell (taxonomy).
+
+    Neither reaches load_error_distribution, so their calibration artifact has to
+    be resolved here instead. A structured artifact is checked against
+    `real_reference` first -- a stale one is ignored, as _apply_calibration
+    ignores one for the other cells.
+
+    Without weights a structured cell draws the whole pool, while corruption
+    falls back to the first-N order, and the messages say which. Since
+    `framework.calibrate` refuses structured seeded cells, their messages do
+    not point at it; an existing artifact is still honoured.
     """
-    if strategy != "corruption" or mode != "forward" or seedless:
+    structured = strategy == "structured"
+    seed_cell = not seedless and (structured or (strategy == "corruption"
+                                                 and mode == "forward"))
+    if not seed_cell:
         return None
     from framework.calibration.artifact import load_calibration, resolve_calibration_path
 
+    fallback = ("drawing seeds from the whole pool" if structured
+                else "drawing seeds in the unweighted first-N order")
     path = resolve_calibration_path(config, task, strategy)
     if not path:
+        hint = ("" if structured else " Build one with: python -m "
+                "framework.calibrate --config <config.yaml>")
         print(f"[NOTE] no calibration artifact for "
-              f"{generation_cell_slug(config, strategy)}; drawing seeds in the "
-              f"unweighted first-N order. Build one with: python -m "
-              f"framework.calibrate --config <config.yaml>")
+              f"{generation_cell_slug(config, strategy)}; {fallback}.{hint}")
         return None
     # Same guard as _apply_calibration: a JSON-valid but structurally corrupt
     # artifact must fall back to today's behavior, never crash the run.
@@ -1082,10 +1173,17 @@ def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
         values = [float(w) for w in weights.values()]
         if not any(v > 0 for v in values):
             return None
+        if structured:
+            seed_key = (task.get_seed_calibration_key()
+                        or task.get_calibration_keys()["type_dist"])
+            if not _structured_target_matches(task, payload, real_reference,
+                                              {"type_dist": seed_key}):
+                print(f"[WARN] calibration {path!r} was measured against a "
+                      f"different real reference; {fallback}.", file=sys.stderr)
+                return None
     except (OSError, ValueError, AttributeError, TypeError, KeyError) as e:
         print(f"[WARN] calibration {path!r} could not be read or is malformed "
-              f"({e}); drawing seeds in the unweighted first-N order.",
-              file=sys.stderr)
+              f"({e}); {fallback}.", file=sys.stderr)
         return None
 
     # Provenance, same as _apply_calibration records for every other cell:
@@ -1098,9 +1196,65 @@ def _load_seed_weights(config: dict, task, strategy: str, mode: str | None,
     _LAST_CALIBRATION = {"path": path,
                          "selected_round": payload.get("selected_round"),
                          "class_prob": None}
+    what = "depth buckets" if structured else "edit types"
     print(f"Calibration: {path} (round {payload.get('selected_round')}) — "
-          f"seed weights over {len(weights)} edit types")
+          f"seed weights over {len(weights)} {what}")
     return weights
+
+
+def _load_structure_calibration(config: dict, task, strategy: str, mode: str | None,
+                                seedless: bool, real_reference) -> dict | None:
+    """The calibrated depth and child-count request for structured inverse+
+    seedless -- the one structured cell that imposes distributions rather than
+    drawing seeds. None when there is no usable, current artifact."""
+    if strategy != "structured" or mode != "inverse" or not seedless:
+        return None
+    from framework.calibration.artifact import load_calibration, resolve_calibration_path
+
+    path = resolve_calibration_path(config, task, strategy)
+    if not path:
+        print(f"[NOTE] no calibration artifact for "
+              f"{generation_cell_slug(config, strategy)}; imposing the real "
+              f"structure. Build one with: python -m framework.calibrate "
+              f"--config <config.yaml>")
+        return None
+    # Same guard as _load_seed_weights: the stale check lives INSIDE the try so
+    # a structurally corrupt target (e.g. a non-dict "target") takes the
+    # "could not be read or is malformed" path instead of raising out of
+    # _structured_target_matches.
+    try:
+        payload = load_calibration(path)
+        calibrated = payload.get("calibrated") or {}
+        request = {name: calibrated.get(name) for name in ("type_dist", "count_dist")}
+        if not all(isinstance(d, dict) and d for d in request.values()):
+            return None
+        for name, dist in request.items():
+            # Coerces AND checks mass: an all-zero (or all-negative, which
+            # _counts_from_fractions clamps to 0) distribution would otherwise
+            # pass here, print the normal success line, and leave
+            # apply_calibrated_structure imposing {} while n_classes stays --
+            # a silently inconsistent structure, like the sibling check in
+            # _load_seed_weights refuses for a massless seed-weight set.
+            if not any(float(v) > 0 for v in dist.values()):
+                raise ValueError(f"calibrated {name} has no positive mass")
+        if not _structured_target_matches(task, payload, real_reference,
+                                          task.get_calibration_keys()):
+            print(f"[WARN] calibration {path!r} was measured against a different real "
+                  "reference; imposing the real structure. Recalibrate to use it.",
+                  file=sys.stderr)
+            return None
+    except (OSError, ValueError, AttributeError, TypeError, KeyError) as e:
+        print(f"[WARN] calibration {path!r} could not be read or is malformed "
+              f"({e}); imposing the real structure.", file=sys.stderr)
+        return None
+
+    global _LAST_CALIBRATION
+    _LAST_CALIBRATION = {"path": path,
+                         "selected_round": payload.get("selected_round"),
+                         "class_prob": None}
+    print(f"Calibration: {path} (round {payload.get('selected_round')}) — "
+          "depth and child-count distributions")
+    return request
 
 
 def build_generation_context(config: dict) -> dict:
@@ -1135,15 +1289,24 @@ def build_generation_context(config: dict) -> dict:
     )
     profile = _load_benchmark_profile(config, task)
 
+    # Real reference feeds class balance, the real baseline, profiling -- and
+    # the stale check of a structured calibration artifact.
+    real_reference = task.get_real_eval_samples(config, real_data)
+
     # Published onto the config so _run_generation's forward+seeded branch (which
     # reads generation.seed_weights) sees them: that cell never calls
     # _apply_calibration, so this is the only place its artifact can be resolved.
-    seed_weights = _load_seed_weights(config, task, strategy, mode, seedless)
+    seed_weights = _load_seed_weights(config, task, strategy, mode, seedless,
+                                      real_reference)
     if seed_weights:
         config.setdefault("generation", {})["seed_weights"] = seed_weights
 
-    # Real reference feeds class balance, the real baseline, and profiling.
-    real_reference = task.get_real_eval_samples(config, real_data)
+    # inverse+seedless imposes the profile's structure through the prompt AND the
+    # feedback loop, so a calibrated request replaces it in the profile itself.
+    structure = _load_structure_calibration(config, task, strategy, mode, seedless,
+                                            real_reference)
+    if structure:
+        profile = task.apply_calibrated_structure(profile, structure)
 
     return {
         "task": task,
@@ -1196,10 +1359,12 @@ def run_pipeline(config: dict) -> dict:
 
     # The real baseline is deterministic (fixed reference sample, fixed task
     # models): compute it once and reuse it in every per-run checkpoint write.
-    real_scores = (
-        _evaluate_real_baseline(task, config, real_reference, evaluator_fns)
-        if real_baseline else {}
-    )
+    real_rows = _predict_real(task, config, real_reference) if real_baseline else {}
+    real_scores = {model: _score_rows(task, rows, evaluator_fns)
+                   for model, rows in real_rows.items()}
+    # One entry per run, None where a run could not be paired: pairing is
+    # written for all runs or for none (_all_or_no_pairing).
+    paired_per_run: list[dict | None] = []
 
     for run_idx in range(num_runs):
         print(f"\n{'='*50}\nRUN {run_idx + 1} / {num_runs}\n{'='*50}")
@@ -1223,16 +1388,22 @@ def run_pipeline(config: dict) -> dict:
             for name, score in run_scores[model_config["name"]].items():
                 print(f"  {model_config['name']}  {name}: {score}")
         all_run_scores.append(run_scores)
+        paired_per_run.append(_paired_real_scores(task, real_reference, real_rows,
+                                                  synthetic, evaluator_fns))
+        paired_run_scores = _all_or_no_pairing(paired_per_run)
         effective_samples.append(len(eval_samples))
 
         saved_path = save_synthetic_data(synthetic, paths["generated_dir"], run_idx)
         print(f"\nSynthetic data archived to {saved_path}")
 
         generated_agg = aggregate(all_run_scores)
-        final = _nest_results(generated_agg, real_scores, all_run_scores)
+        final = _nest_results(generated_agg, real_scores, all_run_scores,
+                              paired_run_scores)
         meta = _build_meta(config, task, runs_completed=run_idx + 1,
                            effective_samples_per_run=effective_samples,
                            real_baseline=bool(real_scores))
+        if paired_run_scores:
+            meta["paired_real"] = True
         _write_results(final, paths["results"], meta)
         if run_idx + 1 < num_runs:
             print(f"Partial results (run {run_idx + 1}/{num_runs}) saved to {paths['results']}")

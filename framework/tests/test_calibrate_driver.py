@@ -696,9 +696,25 @@ class CalibrationSupportGuardTests(unittest.TestCase):
                            "local": {"path": "does/not/exist.jsonl", "format": "jsonl"}},
                "generation": {"provider": "openai", "model": "m", "num_runs": 1,
                               "sample_size": 5, "seedless": True}}
-        with mock.patch.object(pipeline, "build_generation_context") as ctx:
+        with mock.patch("framework.tasks.taxonomy.task.TaxonomyTask.get_calibration_keys",
+                        return_value=None), \
+                mock.patch.object(pipeline, "build_generation_context") as ctx:
             with self.assertRaises(RuntimeError) as err:
                 calibrate.run_calibration(cfg, rounds=1, alpha=0.5, tolerance=0.1)
         ctx.assert_not_called()
         self.assertIn("does not support calibration", str(err.exception))
         self.assertIn("taxonomy", str(err.exception))
+
+    def test_taxonomy_now_supports_calibration(self):
+        # Taxonomy now has calibration keys and should pass the guard check.
+        # It will raise a different error (dataset not found), but not the
+        # "does not support calibration" error from the guard.
+        cfg = {"task": {"name": "taxonomy"},
+               "dataset": {"source": "local",
+                           "local": {"path": "does/not/exist.jsonl", "format": "jsonl"}},
+               "generation": {"provider": "openai", "model": "m", "num_runs": 1,
+                              "sample_size": 5, "seedless": True}}
+        with self.assertRaises((RuntimeError, ValueError)) as err:
+            calibrate.run_calibration(cfg, rounds=1, alpha=0.5, tolerance=0.1)
+        # Should not be the calibration support guard error - should be dataset not found
+        self.assertNotIn("does not support calibration", str(err.exception))

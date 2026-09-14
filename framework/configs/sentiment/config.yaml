@@ -18,32 +18,45 @@ dataset:
     format: csv
 
 # ── Generation ───────────────────────────────────────────────────────────────
-# Strategy: "corruption" (default) — the LLM rewrites a real tweet, injecting
-# one of the sentiment error types defined in configs/sentiment/sentiment.json.
-# Only "forward" mode is meaningful for corruption tasks (text→text, no class
-# conditioning). Judge is disabled — the prompt format is deterministic enough.
+# Strategy: "corruption" — the LLM rewrites a real tweet, injecting one of the
+# sentiment error types defined in configs/sentiment/sentiment.json.
+# Shipped cell: forward + seeded, the baseline. Other cells: --mode, --seedless.
+# Seedless cells need a profile with topics:
+#   python -m framework.profile_dataset --task sentiment --topics \
+#       --config framework/configs/sentiment/config.yaml
 generation:
   mode: forward
-  seedless: true
+  seedless: false
   provider: "openrouter"
-  model: "google/gemini-2.5-flash"
-  temperature: 0.9
-  max_tokens: 4096            # HARD CAP on the response, honoured by every provider.
+  model: "minimax-m3"
+  temperature: 1.0
+  max_tokens: 16384           # HARD CAP on the response, honoured by every provider.
                              # A tweet rewrite is short, but a reasoning model spends
                              # its budget on <think> before emitting any of it: at 512
                              # it returns finish_reason=length and the sample is lost.
   num_runs: 3
   sample_size: 150
-  timeout: 60
+  timeout: 300
   max_retries: 2
-  request_delay: 1
+  request_delay: 1.0           # seconds between requests; one value for every task
+
+# ── Profiling (LLM used by profile_dataset --topics) ──
+profiling:
+  provider: "openrouter"
+  model: "minimax-m3"
+  temperature: 0
+  max_tokens: 8192
+  timeout: 300
+  max_retries: 2
 
 judge:
   enabled: true
   provider: "openrouter"
-  model: "google/gemini-2.5-flash"
-  temperature: 0.0
-  max_tokens: 64
+  model: "minimax-m3"
+  temperature: 0
+  max_tokens: 4096
+  timeout: 300
+  max_retries: 1
 
 evaluation:
   real_baseline: true

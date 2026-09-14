@@ -95,6 +95,7 @@ class TaxonomyCellsRunFromTheShippedConfigTests(unittest.TestCase):
                     cfg = dict(base)
                     cfg["generation"] = {**base["generation"], "mode": mode,
                                          "seedless": seedless, "sample_size": 1,
+                                         "request_delay": 0.0,   # dispatch, not pacing
                                          "seed_pool": {"max_depth": 4, "min_classes": 3}}
                     try:
                         pipeline._run_generation(_Refuse(), TaxonomyTask(), cfg, real,
@@ -106,3 +107,59 @@ class TaxonomyCellsRunFromTheShippedConfigTests(unittest.TestCase):
                         self.assertNotIn("feedback", str(e).lower(),
                                          f"{mode}+{'seedless' if seedless else 'seeded'} "
                                          f"refused to start: {e}")
+
+
+class NormalizedConfigsTests(unittest.TestCase):
+    """The final ablation compares tasks under one generator, so the four shipped
+    configs must not drift apart: one provider and model in every LLM slot, one
+    temperature, one request delay, and the same baseline cell."""
+
+    def _configs(self):
+        return {p: yaml.safe_load(open(p)) for p in _CONFIGS}
+
+    def _one(self, values):
+        self.assertEqual(len(set(values.values())), 1, values)
+
+    def test_every_llm_slot_uses_one_provider_and_model(self):
+        slots = {}
+        for path, config in self._configs().items():
+            for block in ("generation", "judge", "profiling"):
+                cfg = config.get(block) or {}
+                if cfg.get("model"):
+                    slots[f"{path}:{block}"] = (cfg.get("provider"), cfg["model"])
+            for model in config.get("task_models") or []:
+                if model.get("type") == "llm":
+                    slots[f"{path}:{model['name']}"] = (model.get("provider"),
+                                                        model["name"])
+        self._one(slots)
+
+    def test_generation_shares_temperature_and_request_delay(self):
+        configs = self._configs()
+        for key in ("temperature", "request_delay"):
+            with self.subTest(key=key):
+                self._one({p: c["generation"].get(key) for p, c in configs.items()})
+
+    def test_every_task_ships_the_forward_seeded_baseline(self):
+        for path, config in self._configs().items():
+            with self.subTest(config=path):
+                gen = config["generation"]
+                self.assertEqual((gen.get("mode"), gen.get("seedless")), ("forward", False))
+
+
+class ShippedCompareConfigsTests(unittest.TestCase):
+    """A shipped compare.yaml is its task's config.yaml plus the models to compare
+    -- nothing else, so a comparison differs from a normal run only in the
+    generation model and cannot drift from the run config."""
+
+    def test_every_compare_file_is_its_config_plus_a_model_list(self):
+        from scripts.compare_models import load_compare_config
+        for path in sorted(glob.glob("framework/configs/*/compare.yaml")):
+            with self.subTest(compare=path):
+                raw = yaml.safe_load(open(path))
+                self.assertEqual(set(raw), {"base_config", "generation_models"})
+                self.assertTrue(raw["generation_models"])
+                merged = load_compare_config(path)
+                merged.pop("generation_models")
+                config = yaml.safe_load(open(os.path.join(os.path.dirname(path),
+                                                          "config.yaml")))
+                self.assertEqual(merged, config)

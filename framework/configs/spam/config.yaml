@@ -33,27 +33,28 @@ dataset:
 #   forward — each class imitates within itself: a labeled real seed of that
 #     class (SPAM or HAM) is rewritten into a new message of the same kind.
 # Either can be combined with seedless (below) to drop real seeds entirely
-# and draw content instead from the benchmark profile. `generation.mode` may
-# be set explicitly to "inverse" or "forward"; omitting it (as below)
-# defaults to "inverse", matching today's behavior.
+# and draw content instead from the benchmark profile. Omitting
+# `generation.mode` defaults to "inverse".
+# Shipped cell: forward + seeded, the baseline. Other cells: --mode, --seedless.
 generation:
-  mode: "inverse"              # forward | inverse — the generation cell,
+  mode: "forward"              # forward | inverse — the generation cell,
                                #   together with `seedless` below
   seedless: false              # true = generate from the profile only, no real seeds
   # profile_path: "framework/data/profiles/spam/<benchmark>_<n>_spam_profile.json"
   #   Only needed to disambiguate when the task dir holds several profiles;
   #   otherwise the single profile in that directory is used.
   provider: "openrouter"           # groq | openai | openrouter | mistral | minimax | anthropic | google
-  model: "deepseek/deepseek-v4-flash"
+  model: "minimax-m3"
   temperature: 1.0             # CoT 3-step prompt benefits from higher T
-  max_tokens: 1024             # required by Anthropic; ignored by OpenAI-compatible providers
+  max_tokens: 16384            # HARD CAP on the response, honoured by every provider;
+                              # minimax-m3 reasons before it answers (see gec/config.yaml)
   num_runs: 3                  # repeat N times → outputs mean ± std
   sample_size: 150             # synthetic samples per run (single source of truth;
                               # dataset pool is loaded to match)
   class_balance: empirical     # P(SPAM) for class-conditional generation: empirical | a float 0-1
   timeout: 300                 # per-request HTTP timeout in seconds (SDK default: 600)
   max_retries: 2               # SDK retries on 5xx/429 (SDK default: 2)
-  request_delay: 10            # seconds to sleep between requests to respect provider TPM limits
+  request_delay: 1.0           # seconds between requests; one value for every task
   # api_key is auto-resolved from api_keys[provider]; uncomment to override:
   # api_key: "..."
 
@@ -65,7 +66,7 @@ profiling:
   provider: "openrouter"
   model: "minimax-m3"
   temperature: 0
-  max_tokens: 1024
+  max_tokens: 8192
   timeout: 300
   max_retries: 2
 
@@ -73,11 +74,11 @@ profiling:
 # If omitted or enabled=false → judging is skipped.
 # Same shape as `generation`. api_key auto-resolved from api_keys[provider].
 judge:
-  enabled: false
-  provider: "groq"
-  model: "llama-3.1-8b-instant"
+  enabled: true
+  provider: "openrouter"
+  model: "minimax-m3"
   temperature: 0
-  max_tokens: 1024
+  max_tokens: 4096
   timeout: 300
   max_retries: 1
 

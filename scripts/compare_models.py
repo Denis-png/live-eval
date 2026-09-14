@@ -1,9 +1,11 @@
 """Run several generation models over the SAME benchmark sample and compare.
 
-Reads a normal config YAML plus a top-level `generation_models:` list; runs the
-unmodified pipeline once per entry, writing a per-model results file, then a
-combined comparison file and a printed table. The same-sample guarantee comes
-from the framework's deterministic first-N sampling (dataset.* held constant).
+Reads a config holding a top-level `generation_models:` list -- normally a
+compare.yaml whose `base_config:` names the task's run config, so every other
+setting is the run's own -- and runs the unmodified pipeline once per entry,
+writing a per-model results file, then a combined comparison file and a
+printed table. The same-sample guarantee comes from the framework's
+deterministic first-N sampling (dataset.* held constant).
 """
 import argparse
 import copy
@@ -22,6 +24,7 @@ from framework.main import (
     validate_config,
 )
 from framework.pipeline import generation_cell_slug, load_task, run_pipeline
+from framework.real_baseline import real_point
 
 
 def parse_compare_args(argv=None):
@@ -35,13 +38,31 @@ def parse_compare_args(argv=None):
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--config",      required=True,
-                        help="Path to config YAML (must contain generation_models, "
+                        help="Path to a compare config (a generation_models list, "
+                             "normally with base_config naming the run config, "
                              "e.g. framework/configs/gec/compare.yaml)")
     parser.add_argument("--task",        help="Task name (e.g. gec)")
     parser.add_argument("--runs",        type=int, help="Number of GET runs per model")
     parser.add_argument("--sample-size", type=int, dest="sample_size",
                         help="Synthetic samples per run")
     return parser.parse_args(argv)
+
+
+def load_compare_config(path: str) -> dict:
+    """Load a compare config, resolving `base_config` (relative to this file).
+
+    The named run config supplies every setting; this file's own top-level keys
+    -- the generation_models list, and anything else set here -- replace the
+    base's. A file without `base_config` is loaded as it is."""
+    with open(path, encoding="utf-8") as f:
+        config = yaml.safe_load(f) or {}
+    base_ref = config.pop("base_config", None)
+    if not base_ref:
+        return config
+    base_path = os.path.join(os.path.dirname(os.path.abspath(path)), base_ref)
+    with open(base_path, encoding="utf-8") as f:
+        base = yaml.safe_load(f) or {}
+    return {**base, **config}
 
 
 def _slug(text: str) -> str:
@@ -82,9 +103,10 @@ def _flatten(blocks: dict) -> dict:
             for sub, sv in v.items():
                 if isinstance(sv, dict) and "mean" in sv:
                     flat[f"gen.{ev}.{sub}"] = f"{sv['mean']:.3f}±{sv['std']:.3f}"
-    for ev, val in (blocks.get("real") or {}).items():
+    label = "real_paired" if blocks.get("real_paired") else "real"
+    for ev, val in real_point(blocks).items():
         if isinstance(val, (int, float)):
-            flat[f"real.{ev}"] = f"{val:.3f}"
+            flat[f"{label}.{ev}"] = f"{val:.3f}"
     return flat
 
 
@@ -151,9 +173,7 @@ def run_comparison(base_config: dict) -> dict:
 def main():
     args = parse_compare_args()
     _load_dotenv()
-    with open(args.config) as f:
-        config = yaml.safe_load(f)
-    config = _expand_env_vars(config)
+    config = _expand_env_vars(load_compare_config(args.config))
     # apply_overrides expects main.py's full flag set; fill the flags this
     # driver deliberately doesn't expose with None (= no override).
     overrides = argparse.Namespace(

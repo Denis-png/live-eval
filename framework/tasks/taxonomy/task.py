@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 from typing import Any
 
 from framework.evaluators.taxonomy.diagnostics import compute_diagnostics
@@ -44,6 +45,21 @@ def taxonomy_model_input(domain: str, classes: list[str]) -> dict[str, Any]:
 def serialize_taxonomy_model_input(domain: str, classes: list[str]) -> str:
     """Stable JSON prompt payload containing no gold subclass information."""
     return json.dumps(taxonomy_model_input(domain, classes), ensure_ascii=False, sort_keys=True)
+
+
+def _counts_from_fractions(fractions: dict, total: int) -> dict[str, int]:
+    """Class counts summing exactly to `total`, by largest remainder, keyed by
+    the string form the profiler writes. Empty bins are dropped."""
+    weights = {str(k): max(0.0, float(v)) for k, v in (fractions or {}).items()}
+    mass = sum(weights.values())
+    if total <= 0 or mass <= 0:
+        return {}
+    exact = {k: total * w / mass for k, w in weights.items()}
+    counts = {k: int(x) for k, x in exact.items()}
+    shortfall = total - sum(counts.values())
+    for k in sorted(exact, key=lambda k: (exact[k] - counts[k], k), reverse=True)[:shortfall]:
+        counts[k] += 1
+    return {k: counts[k] for k in sorted(counts, key=int) if counts[k] > 0}
 
 
 _RAW_PREVIEW_LIMIT = 800
@@ -276,9 +292,9 @@ class TaxonomyTask(BaseTask):
         """Subtrees of the real ontology, indexed by their own max depth.
 
         One ontology has to supply the whole pool, so it is sampled rather than
-        used whole. `seed_weights` is accepted for signature compatibility and
-        ignored: reweighting the draw is a calibration concern, and taxonomy has
-        no calibration keys yet.
+        used whole. `seed_weights` (a calibration artifact's, keyed by
+        `str(max_depth)`) switches the pool to `sample_size` weighted draws
+        with replacement; without it the whole pool is returned.
 
         Each subtree is stamped with `pool_index`, its position in the pool: ONE
         numbering over all of `real_data`. sample_subtrees enumerates in sorted
@@ -301,7 +317,18 @@ class TaxonomyTask(BaseTask):
                              "ontology_id": row.get("ontology_id"),
                              "domain": row.get("domain"),
                              "pool_index": len(pool)})
-        return pool
+        if not seed_weights:
+            return pool
+        # Calibrated: draw sample_size seeds -- a max-depth bucket by weight, then
+        # a subtree uniformly within it, with replacement. With the whole pool
+        # drawn every run, repeats are the only way a weight can shift the mix.
+        from framework.calibration.seeds import draw_weighted_seeds
+
+        index: dict[str, list[int]] = {}
+        for i, subtree in enumerate(pool):
+            index.setdefault(str(subtree.get("max_depth")), []).append(i)
+        size = int((config.get("generation") or {}).get("sample_size", len(pool)))
+        return draw_weighted_seeds(pool, index, seed_weights, size, rng or random.Random())
 
     def _target_domain(self, config_domains, rng) -> str:
         return rng.choice(list(config_domains)) if config_domains else "general knowledge"
@@ -411,13 +438,14 @@ class TaxonomyTask(BaseTask):
         never edited -- because the real side is real data.
 
         Per ITEM, a forward+seeded synthetic item is one pool subtree's
-        structure under new names. Per SESSION the sides are not paired: the
-        real side is the whole pool, scored once, while each run's synthetic
-        side is what that run drew and what passed verification. So a seeded
-        session's gap mixes the change of vocabulary with draw and verification
-        attrition. The pairing is recoverable from the archive -- each real item
-        carries `pool_index`, each accepted record the `source_pool_index` of its
-        subtree -- but per-run paired scoring is not implemented.
+        structure under new names. Per SESSION this reference is the whole pool,
+        scored once (results' `real`), while each run's synthetic side is what
+        that run drew and what passed verification, so that gap mixes the change
+        of vocabulary with draw and verification attrition. Each real item
+        therefore carries `pool_index`, which each accepted record's
+        `source_pool_index` names (paired_real_indices): the pipeline also scores
+        every run against the real items it delivered -- `real_paired_runs`, one
+        per run, aggregated as `real_paired` -- and keeps `real` unchanged.
 
         Seedless: the whole ontology, which is what seedless generation targets.
         """
@@ -443,6 +471,27 @@ class TaxonomyTask(BaseTask):
             for subtree in self.get_seed_pool(config, real_data, mode)
         ]
 
+    def paired_real_indices(self, real_reference: list[dict],
+                            synthetic: list[dict]) -> list[int] | None:
+        """Seeded records carry `source_pool_index`, real items `pool_index`:
+        each record pairs with the real subtree it was re-verbalised from.
+
+        A seedless artifact comes from no particular real item, so a run whose
+        records lack the index is not paired. An index that matches no real item
+        means the session's files disagree, and raises rather than guessing."""
+        if not synthetic or any(type(r.get("source_pool_index")) is not int
+                                for r in synthetic):
+            return None
+        position = {item.get("pool_index"): i for i, item in enumerate(real_reference or [])}
+        indices = []
+        for record in synthetic:
+            index = record["source_pool_index"]
+            if index not in position:
+                raise ValueError(f"source_pool_index {index} matches no real "
+                                 "reference item")
+            indices.append(position[index])
+        return indices
+
     def build_fidelity_profile(self, rows: list[dict]) -> dict:
         """Profile taxonomy artifacts with the same structural profiler for all sides.
 
@@ -450,16 +499,67 @@ class TaxonomyTask(BaseTask):
         fields (roots, leaves, class_depths) so fidelity reporting cannot expose
         real ontology class identifiers or URI provenance.
         """
-        from framework.profiling.taxonomy_fidelity import sanitize_taxonomy_profile
+        from framework.profiling.taxonomy_fidelity import (
+            sanitize_taxonomy_profile,
+            structure_measurements,
+        )
         from framework.profiling.taxonomy_profiler import profile_taxonomy_rows
 
-        return sanitize_taxonomy_profile(profile_taxonomy_rows(rows))
+        profile = sanitize_taxonomy_profile(profile_taxonomy_rows(rows))
+        # Top-level class measurements for calibration. The fidelity comparison
+        # and its plots read `taxonomies`, never these.
+        profile.update(structure_measurements(profile["taxonomies"]))
+        return profile
 
     def compare_fidelity_profiles(self, real: dict, generated: dict) -> dict:
         """Real-vs-synthetic structural fidelity for taxonomy profiles."""
         from framework.profiling.taxonomy_fidelity import compare_taxonomy_profiles
 
         return compare_taxonomy_profiles(real, generated)
+
+    def get_calibration_keys(self) -> dict[str, str]:
+        # The framework's two control slots, reused: per-class depth and
+        # per-class child count, the two structural distributions inverse+
+        # seedless imposes. Parent count (multiple inheritance) is left out.
+        return {"type_dist": "depth_dist", "count_dist": "child_count_dist"}
+
+    def get_seed_calibration_key(self) -> str:
+        # A seed-weight artifact steers which subtrees are drawn, by max-depth
+        # bucket, so it is checked against the mix of those same buckets.
+        # Seeded calibration itself refuses (framework.calibrate); a seeded run
+        # still consumes an existing artifact.
+        return "max_depth_mix"
+
+    def apply_calibrated_structure(self, profile: dict, request: dict) -> dict:
+        """A copy of the benchmark profile imposing a calibration request.
+
+        inverse+seedless imposes taxonomies[0]'s structure, through both the
+        prompt and the feedback loop. Calibration replaces its depth and
+        child-count distributions with the request -- class counts summing to
+        n_classes -- and recomputes the fields they determine so the imposed
+        spec stays self-consistent: mean_depth, n_roots (the depth-0 count, at
+        least 1) and max_depth (the deepest non-empty depth bin) from the
+        depths, n_leaves from the child counts. Every other field is kept
+        (n_subclass_axioms and the parent-count distribution stay the real
+        ontology's); `profile` is not mutated."""
+        import copy
+
+        out = copy.deepcopy(profile)
+        target = out["taxonomies"][0]
+        n = int(target.get("n_classes") or 0)
+        if request.get("type_dist"):
+            depth = _counts_from_fractions(request["type_dist"], n)
+            target["depth_distribution"] = depth
+            target["mean_depth"] = (round(sum(int(d) * c for d, c in depth.items()) / n, 4)
+                                    if n else 0.0)
+            if depth:
+                target["n_roots"] = max(1, depth.get("0", 0))
+                target["max_depth"] = max(int(d) for d in depth)
+        if request.get("count_dist"):
+            children = _counts_from_fractions(request["count_dist"], n)
+            target["child_count_distribution"] = children
+            target["n_leaves"] = children.get("0", 0)
+        return out
 
     def get_feedback_config(self, generation_config: dict | None = None) -> dict:
         """Return taxonomy feedback settings, letting run config override defaults."""

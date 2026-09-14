@@ -150,7 +150,27 @@ def profile_spam_dataset(
     topic_call_api=None,
     topic_sample_size: int = 200,
 ) -> dict[str, Any]:
-    """Load the raw spam dataset and return classification profile stats.
+    """Load a HuggingFace spam dataset and return classification profile stats.
+
+    framework.profile_dataset profiles the run config's own benchmark instead,
+    through profile_spam_rows."""
+    rows = load_spam_rows(
+        dataset_name=dataset_name,
+        split=split,
+        streaming=streaming,
+        sample_size=sample_size,
+        hf_token=hf_token,
+    )
+    return profile_spam_rows(rows, topic_call_api=topic_call_api,
+                             topic_sample_size=topic_sample_size)
+
+
+def profile_spam_rows(
+    rows: list[dict[str, str]],
+    topic_call_api=None,
+    topic_sample_size: int = 200,
+) -> dict[str, Any]:
+    """Classification profile stats for {"text", "label"} spam rows.
 
     topic_call_api: optional call_api(prompt) -> str; when given, an LLM
     topic profile is computed per label (see profiling.topics)."""
@@ -163,13 +183,6 @@ def profile_spam_dataset(
         vocab_profile,
     )
 
-    rows = load_spam_rows(
-        dataset_name=dataset_name,
-        split=split,
-        streaming=streaming,
-        sample_size=sample_size,
-        hf_token=hf_token,
-    )
     profile = profile_classification_rows(rows, text_field="text", label_field="label")
     profile["spam_signals"] = analyze_spam_signals(rows)
 

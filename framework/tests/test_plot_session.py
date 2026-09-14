@@ -202,3 +202,18 @@ class RenderSessionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ErrorTypeTallyTests(unittest.TestCase):
+    def test_rejection_dumps_are_not_counted_as_error_types(self):
+        # run_<N>_rejected.json (save_rejections' diagnostics) shares the
+        # generated/ directory and the run_*.json glob, but holds rejected
+        # attempts, not samples -- each would count as an "unknown" error type.
+        with tempfile.TemporaryDirectory() as d:
+            gen = os.path.join(d, "generated")
+            os.makedirs(gen)
+            with open(os.path.join(gen, "run_1.json"), "w") as f:
+                json.dump([{"error_type": "R:VERB"}, {"error_type": "R:VERB"}], f)
+            with open(os.path.join(gen, "run_1_rejected.json"), "w") as f:
+                json.dump([{"index": 3, "attempts": []}], f)
+            self.assertEqual(S._load_error_type_counts(d), {"R:VERB": 2})

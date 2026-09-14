@@ -9,6 +9,8 @@ import os
 import re
 import sys
 
+from framework.real_baseline import real_point
+
 _FIG_DPI = 150
 
 
@@ -63,7 +65,10 @@ def _load_error_type_counts(session_dir: str) -> dict[str, int]:
     """Tally error_type across every run_*.json in <session_dir>/generated/."""
     import glob
     counts: dict[str, int] = {}
-    run_files = glob.glob(os.path.join(session_dir, "generated", "run_*.json"))
+    # run_<N>_rejected.json shares the directory and the glob, but holds
+    # rejected attempts rather than samples.
+    run_files = [p for p in glob.glob(os.path.join(session_dir, "generated", "run_*.json"))
+                 if re.fullmatch(r"run_\d+\.json", os.path.basename(p))]
     for path in run_files:
         try:
             with open(path, encoding="utf-8") as f:
@@ -115,7 +120,7 @@ def render_session(session_dir: str, out_dir: str | None = None) -> list[str]:
         jobs = [(
             f"generated_vs_real_{slug}.png",
             lambda m=model, b=blocks: plots.plot_generated_vs_real(
-                m, b.get("generated") or {}, b.get("real"), meta),
+                m, b.get("generated") or {}, real_point(b) or None, meta),
         )]
         if blocks.get("runs"):
             jobs.append((
@@ -142,6 +147,12 @@ def render_session(session_dir: str, out_dir: str | None = None) -> list[str]:
                 filename = "taxonomy_fidelity_distributions.png"
                 written.append(_save(
                     plots.plot_taxonomy_fidelity_distributions(profile, meta),
+                    os.path.join(out_dir, filename), plt,
+                ))
+            elif fidelity_type == "sentiment_fidelity":
+                filename = "sentiment_fidelity.png"
+                written.append(_save(
+                    plots.plot_sentiment_fidelity(profile, meta),
                     os.path.join(out_dir, filename), plt,
                 ))
             else:

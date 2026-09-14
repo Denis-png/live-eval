@@ -63,10 +63,16 @@ class PipelineClassConditionalTests(unittest.TestCase):
             self.assertIn("fake", final)
             self.assertIn("generated", final["fake"])
             self.assertIn("real", final["fake"])
+            # spam does not pair: no paired keys, results exactly as before
+            self.assertNotIn("real_paired", final["fake"])
+            self.assertNotIn("real_paired_runs", final["fake"])
             task_dir = os.path.join(d, "runs", "spam")
             session = os.listdir(task_dir)[0]
             base = os.path.join(task_dir, session)
             self.assertTrue(os.path.exists(os.path.join(base, "results.json")))
+            # ...and no pairing claimed in the provenance either.
+            meta = json.load(open(os.path.join(base, "results.json")))["meta"]
+            self.assertNotIn("paired_real", meta)
             self.assertTrue(os.path.exists(os.path.join(base, "generated", "run_1.json")))
             self.assertTrue(os.path.exists(os.path.join(base, "real_sample.json")))
             self.assertTrue(os.path.exists(os.path.join(base, "profile.json")))
@@ -98,12 +104,12 @@ class PipelineClassConditionalTests(unittest.TestCase):
                               lambda self, config: _REAL_REF), \
                  patch.object(SpamTask, "get_model", lambda self, mc: _FakeModel(mc)), \
                  mock.patch.object(
-                     pipeline, "_evaluate_real_baseline",
-                     wraps=pipeline._evaluate_real_baseline,
-                 ) as baseline:
+                     pipeline, "_predict_real",
+                     wraps=pipeline._predict_real,
+                 ) as predict_real:
                 final = pipeline.run_pipeline(config)
 
-            self.assertEqual(baseline.call_count, 1)
+            self.assertEqual(predict_real.call_count, 1)
             self.assertIn("fake", final)
             self.assertIn("generated", final["fake"])
             self.assertIn("real", final["fake"])

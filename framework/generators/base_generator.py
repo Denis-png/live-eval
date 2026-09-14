@@ -318,14 +318,6 @@ class BaseGenerator(ABC):
             try:
                 raw = self.call_api(prompt)
                 gen_dt = time.monotonic() - t0
-                if not raw:
-                    time.sleep(30)
-                    raw = self.call_api(prompt)
-                    gen_dt = time.monotonic() - t0
-                if not raw:
-                    print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] empty API response", flush=True)
-                    parse_failed += 1
-                    continue
                 error_type, corrupted, gold = _parse_generation(raw)
                 reason = _accept_pair(corrupted, gold)
                 if reason:
@@ -439,14 +431,6 @@ class BaseGenerator(ABC):
             try:
                 raw = self.call_api(prompt)
                 gen_dt = time.monotonic() - t0
-                if not raw:
-                    time.sleep(3)
-                    raw = self.call_api(prompt)
-                    gen_dt = time.monotonic() - t0
-                if not raw:
-                    print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] empty API response", flush=True)
-                    parse_failed += 1
-                    continue
                 # Refusal check BEFORE _parse_inverse: its bare single-line
                 # fallback would otherwise accept a one-line refusal as the
                 # corrupted text. An explicit Corrupted: field always wins.
@@ -535,14 +519,6 @@ class BaseGenerator(ABC):
             try:
                 raw = self.call_api(prompt.format(spec=spec, error_spec=error_spec))
                 gen_dt = time.monotonic() - t0
-                if not raw:
-                    time.sleep(30)
-                    raw = self.call_api(prompt.format(spec=spec, error_spec=error_spec))
-                    gen_dt = time.monotonic() - t0
-                if not raw:
-                    print(f"[{i}/{total}] gen {gen_dt:.1f}s — [SKIP] empty API response", flush=True)
-                    parse_failed += 1
-                    continue
                 error_type, corrupted, gold = _parse_generation(raw)
                 reason = _accept_pair(corrupted, gold)
                 if reason:
@@ -567,7 +543,7 @@ class BaseGenerator(ABC):
                 synthetic.append({
                     "original": gold,
                     "corrupted": corrupted,
-                    "error_type": ", ".join(keys),
+                    "error_type": error_type or ", ".join(keys),
                 })
                 suffix = f" + judge {judge_dt:.1f}s" if judge_prompt else ""
                 print(f"[{i}/{total}] gen {gen_dt:.1f}s{suffix} ✓ ({error_type or ', '.join(keys)})", flush=True)
@@ -922,6 +898,7 @@ class BaseGenerator(ABC):
         self.last_rejections: list[dict] = []
 
         for sample_idx in range(1, sample_size + 1):
+            t0 = time.monotonic()
             selected = None
             metadata: dict = {
                 "feedback_enabled": feedback_enabled,
@@ -1034,6 +1011,8 @@ class BaseGenerator(ABC):
             if selected is not None:
                 selected["generation_feedback"] = metadata
                 synthetic.append(selected)
+                print(f"[{sample_idx}/{sample_size}] {time.monotonic() - t0:.1f}s ✓ "
+                      f"({len(selected.get('classes') or [])} classes)", flush=True)
             else:
                 self.last_rejections.append({
                     "index": sample_idx,
@@ -1082,6 +1061,7 @@ class BaseGenerator(ABC):
         # the next.
         self.last_rejections: list[dict] = []
         for i, gold in enumerate(golds, 1):
+            t0 = time.monotonic()
             attempts, accepted = 0, False
             diagnostics: list[dict] = []
             while not accepted and attempts < max_parse_attempts:
@@ -1126,6 +1106,8 @@ class BaseGenerator(ABC):
                     record["source_pool_index"] = gold.get("source_pool_index")
                     record["seeded_diagnostics"] = {"attempts": diagnostics}
                     synthetic.append(record)
+                    print(f"[{i}/{len(golds)}] {time.monotonic() - t0:.1f}s ✓ "
+                          f"({len(gold['classes'])} classes)", flush=True)
                 if request_delay > 0:
                     time.sleep(request_delay)
             if not accepted:

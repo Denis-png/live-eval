@@ -16,11 +16,15 @@ answer:
   3. mode impact  — paired forward-vs-inverse deltas for generation models that
                   ran in both modes.
 
+A session that consumed a calibration artifact is its own cell
+(`<cell>+calibrated`), so a calibrated run never shadows the uncalibrated run
+of the same cell. --since keeps only sessions created at or after a date.
+
 Emits figures + analysis.md + analysis.json into --out
 (default: <first-root>/analysis).
 
 Usage:
-    python -m scripts.analyze_results [ROOT ...] [--out DIR]
+    python -m scripts.analyze_results [ROOT ...] [--out DIR] [--since ISO-DATE]
 """
 import argparse
 import glob
@@ -34,6 +38,7 @@ from functools import lru_cache
 
 from framework.generators.base_generator import CLASS_CONDITIONAL_SEMANTICS
 from framework.plotting.plots import flatten_mean_std, flatten_point, _visible
+from framework.real_baseline import real_point
 
 # ── Fixed entity colors (validated: Okabe-Ito subset, all-pairs CVD-checked;
 #    pink/amber/sky carry a contrast WARN whose relief is the direct labels on
@@ -63,6 +68,17 @@ IDENTITY_METRICS = {
     # not on a 0-1 fidelity diagonal.
     "taxonomy": ["precision", "recall", "f1"],
     "sentiment": ["accuracy", "macro_precision", "macro_recall", "macro_f1"],
+}
+# The two fidelity JSDs each task reports per session, and what "lower" means.
+# Taxonomy's structural JSDs are per-taxonomy means with a seeded floor; they
+# live in its own per-session figure, not in this cross-session one.
+FIDELITY_JSD = {
+    "gec": (("type_dist_jsd", "count_dist_jsd"),
+            "generated errors distributed like real ones"),
+    "spam": (("type_dist_jsd", "count_dist_jsd"),
+             "generated errors distributed like real ones"),
+    "sentiment": (("label_dist_jsd", "length_jsd"),
+                  "generated labels and lengths distributed like real ones"),
 }
 
 
@@ -223,6 +239,11 @@ def _strategy_of(meta: dict) -> str:
     strategy = meta.get("strategy") or _task_strategy(meta.get("task"))
     mode = meta.get("mode") or ("inverse" if strategy == "class_conditional" else "forward")
     cell = f"{mode}+seedless" if meta.get("seedless") else mode
+    # A run that consumed a calibration artifact is a different condition from
+    # the uncalibrated run of the same cell -- the calibration ablation compares
+    # exactly those two -- so it gets its own label, ahead of any @semantics.
+    if (meta.get("calibration") or {}).get("path"):
+        cell = f"{cell}+calibrated"
     if strategy != "class_conditional":
         return cell
     semantics = meta.get("class_conditional_semantics") or "asymmetric"
@@ -253,6 +274,14 @@ def discover_sessions(roots):
     return sessions
 
 
+def filter_since(sessions, since: str | None):
+    """Sessions created at or after `since` (an ISO date or timestamp); all of
+    them when it is None. Limits an analysis to one sweep."""
+    if not since:
+        return sessions
+    return [s for s in sessions if (s["meta"].get("created") or "") >= since]
+
+
 def dedup_sessions(sessions):
     """One session per (task, strategy, generation model): most completed runs
     wins, then the newest. Returns (kept, dropped)."""
@@ -275,12 +304,17 @@ def dedup_sessions(sessions):
 
 def session_rows(session):
     """Flatten one session into rows:
-    {task, strategy, gen_model, eval_model, metric, gen_mean, gen_std, real, runs}."""
+    {task, strategy, gen_model, eval_model, metric, gen_mean, gen_std, real,
+    real_unpaired, paired, runs}. `paired` is the session's meta.paired_real."""
     meta = session["meta"]
     rows = []
     for eval_model, blocks in session["results"].items():
         gen = flatten_mean_std(blocks.get("generated") or {})
-        real = flatten_point(blocks.get("real") or {})
+        # The paired mean where the session paired its real side -- the items
+        # each run actually delivered -- so every gap, tau and table compares
+        # like with like. The whole-reference point stays as real_unpaired.
+        real = flatten_point(real_point(blocks))
+        real_unpaired = flatten_point(blocks.get("real") or {})
         per_run = [flatten_point(r) for r in blocks.get("runs") or []]
         for metric in _visible(gen.keys()):
             mean, std = gen[metric]
@@ -289,9 +323,24 @@ def session_rows(session):
                 "gen_model": meta["model"], "eval_model": eval_model,
                 "metric": metric, "gen_mean": mean, "gen_std": std,
                 "real": real.get(metric),
+                "real_unpaired": real_unpaired.get(metric),
+                "paired": bool(meta.get("paired_real")),
                 "runs": [r[metric] for r in per_run if metric in r],
             })
     return rows
+
+
+def _reference(row):
+    """The real score to draw as a reference SHARED by several sessions.
+
+    A paired `real` is specific to one session (the items its runs delivered),
+    so it differs per generator and per cell. `real_unpaired` -- the whole
+    matched reference -- is the same across generators within a cell, and
+    across forward/inverse within a seeded or seedless pair. Rows without it
+    (archived sessions, whose `real` is already unpaired) fall back to `real`.
+    Per-session comparisons (gaps, Kendall tau) keep the paired `real`."""
+    unpaired = row.get("real_unpaired")
+    return unpaired if unpaired is not None else row["real"]
 
 
 def _short(name):
@@ -381,8 +430,8 @@ def plot_model_impact(rows, task, strategy, out_dir):
                        color=_color(gm), edgecolor="white", linewidth=0.5)
             mean = sum(r["runs"]) / len(r["runs"])
             ax.hlines(mean, i - 0.22, i + 0.22, color=_color(gm), linewidth=2, zorder=4)
-            if r["real"] is not None:
-                ax.axhline(r["real"], linestyle="--", color=SERIES_REAL,
+            if _reference(r) is not None:
+                ax.axhline(_reference(r), linestyle="--", color=SERIES_REAL,
                            linewidth=1, zorder=2)
         e2 = eta_squared(groups)
         title = "\n".join(textwrap.wrap(_short(ev), 24))
@@ -435,7 +484,9 @@ def plot_mode_effect(rows, task, out_dir):
                             yerr=[pts["forward"]["gen_std"], pts["inverse"]["gen_std"]],
                             marker="o", markersize=5, linewidth=2, capsize=2,
                             color=_color(gm), markeredgecolor="white", markeredgewidth=0.5)
-                real = pts["forward"]["real"]
+                # The whole matched reference, shared by both modes: the
+                # forward session's paired real is not the inverse one's.
+                real = _reference(pts["forward"])
                 if real is not None:
                     ax.axhline(real, linestyle="--", color=SERIES_REAL, linewidth=1, zorder=1)
         ax.set_xticks([0, 1])
@@ -451,11 +502,13 @@ def plot_mode_effect(rows, task, out_dir):
 
 
 def plot_fidelity_jsd(sessions, task, out_dir):
-    """Distribution fidelity per session: error-type and count JSDs (0 = the
-    generated dataset's error mix matches the real benchmark exactly)."""
+    """Distribution fidelity per session: the task's two FIDELITY_JSD keys
+    (0 = the generated distribution matches the real benchmark exactly)."""
     from framework.plotting.style import SURFACE, apply_axes_style
+    if task not in FIDELITY_JSD:
+        return None
+    keys, meaning = FIDELITY_JSD[task]
     plt = _plt()
-    keys = ("type_dist_jsd", "count_dist_jsd")
     sel = [s for s in sessions if s["meta"]["task"] == task
            and (s.get("profile") or {}).get("fidelity")]
     sel = [s for s in sel if all(k in s["profile"]["fidelity"] for k in keys)]
@@ -478,8 +531,8 @@ def plot_fidelity_jsd(sessions, task, out_dir):
         ax.set_xticklabels(labels, fontsize=8)
         ax.set_title(key.replace("_", " "), fontsize=10)
     axes[0].set_ylabel("Jensen-Shannon divergence", fontsize=9)
-    fig.suptitle(f"{task}: distribution fidelity (lower = generated errors "
-                 f"distributed like real ones)", fontsize=11, y=1.04)
+    fig.suptitle(f"{task}: distribution fidelity (lower = {meaning})",
+                 fontsize=11, y=1.04)
     return _save(fig, os.path.join(out_dir, f"fidelity_{task}.png"))
 
 
@@ -523,8 +576,12 @@ def rank_preservation(rows, task, strategy, gen_model):
     return {
         "tau_b": tau,
         "n_eval_models": len(sel),
+        # The order tau is computed against: this session's (paired) real.
         "real_order": [_short(r["eval_model"])
                        for r in sorted(sel, key=lambda r: -r["real"])],
+        # The real benchmark's own order, shared by every session of the cell.
+        "reference_order": [_short(r["eval_model"])
+                            for r in sorted(sel, key=lambda r: -_reference(r))],
         "generated_order": [_short(r["eval_model"])
                             for r in sorted(sel, key=lambda r: -r["gen_mean"])],
     }
@@ -625,18 +682,39 @@ def write_markdown(summary, sessions, rows, figures, out_path):
                      f"| {'yes' if s['has_profile'] else 'no'} |")
 
     lines += ["", "## Headline scores (generated vs real)", ""]
+    if any(r.get("paired") for r in rows):
+        lines += ["Where a session paired its real side, `real` is the mean of each run's "
+                  "score on the real items it delivered, and `real (whole ref.)` is the "
+                  "score on the whole matched reference (shown only where the two differ). "
+                  "Which gap answers which question: the paired gap isolates generation "
+                  "fidelity on the items a run delivered; the whole-reference gap includes "
+                  "what verification dropped.", ""]
     for task in sorted({r["task"] for r in rows}):
         metric = _headline(task)
         lines += [f"### {task} — {metric}", "",
-                  "| strategy | generation model | evaluated model | generated | real | gap |",
-                  "|---|---|---|---|---|---|"]
+                  "| strategy | generation model | evaluated model | generated | real | gap "
+                  "| real (whole ref.) | gap (whole ref.) |",
+                  "|---|---|---|---|---|---|---|---|"]
         sel = [r for r in rows if r["task"] == task and r["metric"] == metric]
         for r in sorted(sel, key=lambda r: (r["strategy"], r["gen_model"], r["eval_model"])):
             real = f"{r['real']:.3f}" if r["real"] is not None else "-"
             gap = (f"{r['gen_mean'] - r['real']:+.3f}" if r["real"] is not None else "-")
+            # Only where it differs as shown: real_paired is aggregated
+            # (rounded), so an unattrited paired real differs from the whole
+            # reference only past this table's precision.
+            whole = r.get("real_unpaired")
+            if whole is None or f"{whole:.3f}" == real:
+                whole_real = whole_gap = "-"
+            else:
+                whole_real, whole_gap = f"{whole:.3f}", f"{r['gen_mean'] - whole:+.3f}"
             lines.append(f"| {r['strategy']} | {_short(r['gen_model'])} "
                          f"| {_short(r['eval_model'])} "
-                         f"| {r['gen_mean']:.3f} ± {r['gen_std']:.3f} | {real} | {gap} |")
+                         f"| {r['gen_mean']:.3f} ± {r['gen_std']:.3f} | {real} | {gap} "
+                         f"| {whole_real} | {whole_gap} |")
+        paired = sorted({f"{r['strategy']}/{_short(r['gen_model'])}"
+                         for r in sel if r.get("paired")})
+        if paired:
+            lines += ["", f"`real` is paired for: {', '.join(paired)}."]
         lines.append("")
 
     lines += ["## Fidelity gaps & rank preservation", "",
@@ -653,7 +731,7 @@ def write_markdown(summary, sessions, rows, figures, out_path):
                      f"| {' > '.join(rp.get('generated_order', [])) or '-'} |")
     reals = {}
     for key, rp in summary["rank_preservation"].items():
-        reals[" > ".join(rp["real_order"])] = rp["n_eval_models"]
+        reals[" > ".join(rp["reference_order"])] = rp["n_eval_models"]
     for order in reals:
         lines.append(f"\nReal-benchmark order: **{order}**")
 
@@ -689,9 +767,11 @@ def main():
                         default=["/srv/code/data/team_project/results"],
                         help="Results roots to scan recursively for sessions")
     parser.add_argument("--out", help="Output dir (default: <first-root>/analysis)")
+    parser.add_argument("--since", help="Only sessions created at or after this ISO "
+                                        "date/time, e.g. 2026-09-11 for the final sweep")
     args = parser.parse_args()
 
-    sessions = discover_sessions(args.roots)
+    sessions = filter_since(discover_sessions(args.roots), args.since)
     kept, dropped = dedup_sessions(sessions)
     for s in dropped:
         print(f"[dedup] ignoring {s['dir']} "

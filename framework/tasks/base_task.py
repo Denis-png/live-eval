@@ -280,11 +280,36 @@ class BaseTask(ABC):
         """
         return None
 
+    def get_seed_calibration_key(self) -> str | None:
+        """The build_fidelity_profile() key seed-mode calibration measures, when
+        it differs from get_calibration_keys()["type_dist"] (the default, None).
+        A task whose seeds are drawn by a bucket other than its type_dist
+        categories names that bucket's measurement here."""
+        return None
+
+    def apply_calibrated_structure(self, profile: dict, request: dict) -> dict:
+        """A copy of `profile` carrying a calibration request, for structured
+        tasks whose cells impose a structural target. Unsupported by default."""
+        raise NotImplementedError(
+            f"{self.get_task_name()} does not support structural calibration "
+            "(apply_calibrated_structure).")
+
     def get_real_eval_samples(self, config: dict, real_data: list[dict]) -> list[dict] | None:
         """Eval-ready rows for the REAL benchmark, carrying the same schema the
         evaluators expect (classification: text+label; text→text: text+corrupted+
         original). Feeds both the real baseline and real-side profiling. Default
         None → real baseline skipped."""
+        return None
+
+    def paired_real_indices(self, real_reference: list[dict],
+                            synthetic: list[dict]) -> list[int] | None:
+        """For one run's accepted synthetic records, the position in
+        `real_reference` of the real item each record came from -- one entry per
+        record, so a record drawn twice appears twice. The pipeline scores that
+        subset as the run's paired real baseline.
+
+        Default None: the task does not pair, and results keep only the
+        unpaired real block."""
         return None
 
     def profile_error_distribution(self, real_data: list[dict],

@@ -9,6 +9,7 @@ ontology; they are pooled into one reference by pool_taxonomy_profiles.
 
 from __future__ import annotations
 
+from collections import Counter
 from statistics import mean
 from typing import Any
 
@@ -87,6 +88,40 @@ def sanitize_taxonomy_profile(profile: dict[str, Any]) -> dict[str, Any]:
         "taxonomies": taxonomies,
         "summary": profile.get("summary", {}),
     }
+
+
+def structure_measurements(taxonomies: list[dict[str, Any]]) -> dict[str, Any]:
+    """Class-level structure over a whole set of taxonomies: what calibration
+    measures, on the generated side and on the real reference alike.
+
+    Pooled over CLASSES, not taxonomies: ten generated taxonomies of ~30
+    classes give ~300 observations. `max_depth_mix` weights each taxonomy's max
+    depth by its class count, so it moves with what dominates micro-F1 -- losing
+    a 91-class subtree shifts it far more than losing a 5-class one. A cyclic
+    taxonomy has no depth: it counts toward branching and the class total only.
+    """
+    depth, children, mix = Counter(), Counter(), Counter()
+    total = 0
+    for taxonomy in taxonomies:
+        n = int(taxonomy.get("n_classes") or 0)
+        total += n
+        depth.update({str(k): int(v)
+                      for k, v in (taxonomy.get("depth_distribution") or {}).items()})
+        children.update({str(k): int(v)
+                         for k, v in (taxonomy.get("child_count_distribution") or {}).items()})
+        if taxonomy.get("max_depth") is not None and n:
+            mix[str(taxonomy["max_depth"])] += n
+    return {
+        "depth_dist": _fractions(depth),
+        "child_count_dist": _fractions(children),
+        "max_depth_mix": _fractions(mix),
+        "n_classes_total": total,
+    }
+
+
+def _fractions(counts: Counter) -> dict[str, float]:
+    total = sum(counts.values())
+    return {key: counts[key] / total for key in sorted(counts, key=int)} if total else {}
 
 
 def select_reference_taxonomy_profile(

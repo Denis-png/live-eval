@@ -93,3 +93,38 @@ class LegacySemanticsGroupingTests(unittest.TestCase):
         self.assertEqual(
             ar._strategy_of({"task": "taxonomy", "mode": "inverse", "seedless": True}),
             "inverse+seedless")
+
+
+class FidelityJsdCoverageTests(unittest.TestCase):
+    """The cross-session fidelity figure read gec/spam's two keys for every task,
+    so a sentiment session -- whose fidelity has neither -- was silently left out.
+    Each task now registers the pair it reports."""
+
+    def _compare(self, name):
+        task = load_task(name)
+        if name == "spam":
+            rows = [{"text": "WIN a FREE prize now!!", "label": "SPAM"},
+                    {"text": "see you at lunch", "label": "HAM"}]
+            profile = task.build_fidelity_profile(rows)
+            return task.compare_fidelity_profiles(profile, profile)
+        return task.compare_fidelity_profiles({}, {})
+
+    def test_registered_keys_are_ones_the_task_reports(self):
+        for name, (keys, _) in ar.FIDELITY_JSD.items():
+            with self.subTest(task=name):
+                produced = set(self._compare(name))
+                for key in keys:
+                    self.assertIn(key, produced,
+                                  f"{name}: '{key}' is registered but not reported")
+
+    def test_sentiment_sessions_reach_the_figure(self):
+        import os
+        import tempfile
+        fidelity = self._compare("sentiment")
+        sessions = [{"meta": {"task": "sentiment", "strategy": "corruption",
+                              "mode": mode, "seedless": False, "model": "minimax-m3"},
+                     "profile": {"fidelity": fidelity}}
+                    for mode in ("forward", "inverse")]
+        with tempfile.TemporaryDirectory() as d:
+            path = ar.plot_fidelity_jsd(sessions, "sentiment", d)
+            self.assertTrue(path and os.path.exists(path))
