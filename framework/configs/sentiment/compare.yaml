@@ -6,6 +6,9 @@
 base_config: config.yaml
 
 generation_models:
-  - {provider: openrouter, model: z-ai/glm-5.2, temperature: 1.0}
+  - {provider: openrouter, model: z-ai/glm-5.3-flash, temperature: 1.0}
+  - {provider: openrouter, model: deepseek/deepseek-v4-flash-0731, temperature: 1.0}
   - {provider: openrouter, model: xiaomi/mimo-v2.5, temperature: 1.0}
-  - {provider: openrouter, model: 'tencent/hy3:free', temperature: 1.0}
+  - {provider: openrouter, model: tencent/hy3, temperature: 1.0}
+  - {provider: openrouter, model: openai/gpt-5.6-luna, temperature: 1.0}
+  - {provider: openrouter, model: minimax-m3, temperature: 1.0}
