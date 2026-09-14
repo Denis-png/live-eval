@@ -1,6 +1,6 @@
-# Multi-model comparison for spam. Every setting comes from config.yaml, so a
+# Multi-model comparison for taxonomy. Every setting comes from config.yaml, so a
 # comparison differs from a normal run ONLY in the generation model:
-#   python -m scripts.compare_models --config framework/configs/spam/compare.yaml
+#   python -m scripts.compare_models --config framework/configs/taxonomy/compare.yaml
 # The cell is config.yaml's; for another one, copy config.yaml, edit it, and
 # point base_config at the copy.
 base_config: config.yaml

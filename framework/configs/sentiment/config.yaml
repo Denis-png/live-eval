@@ -11,10 +11,13 @@ api_keys:
 # ── Dataset ─────────────────────────────────────────────────────────────────
 # TweetEval sentiment: 3-class Twitter data (NEG=0, NEU=1, POS=2).
 # Same benchmark used to train the bertweet and RoBERTa sentiment models below.
+# The benchmark is the first 150 tweets of its test split. framework/data/** is
+# gitignored, so build the CSV once:
+#   python -m scripts.prepare_sentiment_benchmark
 dataset:
   source: local
   local:
-    path: "framework/data/sentiment/tweeteval_base_150.csv"
+    path: "framework/data/benchmarks/sentiment/tweeteval_test_150.csv"
     format: csv
 
 # ── Generation ───────────────────────────────────────────────────────────────
@@ -30,13 +33,19 @@ generation:
   provider: "openrouter"
   model: "minimax-m3"
   temperature: 1.0
-  max_tokens: 16384           # HARD CAP on the response, honoured by every provider.
+  max_tokens: 65536            # HARD CAP on the response, honoured by every provider
+                              # (a cap, not a spend: you pay for tokens used). Every LLM call in
+                              # every task gets the same 65536, and every sweep model
+                              # accepts at least 128000.
                              # A tweet rewrite is short, but a reasoning model spends
                              # its budget on <think> before emitting any of it: at 512
                              # it returns finish_reason=length and the sample is lost.
   num_runs: 3
   sample_size: 150
-  timeout: 300
+  timeout: 1200                # per-request HTTP timeout in seconds (SDK default: 600),
+                              # sized to the cap: a 32768-token answer took ~4 min
+                              # (taxonomy, 2026-09-14), so at 300 s anything past ~40k
+                              # tokens would time out and be retried instead of finishing.
   max_retries: 2
   request_delay: 1.0           # seconds between requests; one value for every task
 
@@ -45,8 +54,8 @@ profiling:
   provider: "openrouter"
   model: "minimax-m3"
   temperature: 0
-  max_tokens: 8192
-  timeout: 300
+  max_tokens: 65536            # the uniform cap; see generation
+  timeout: 1200
   max_retries: 2
 
 judge:
@@ -54,8 +63,8 @@ judge:
   provider: "openrouter"
   model: "minimax-m3"
   temperature: 0
-  max_tokens: 4096
-  timeout: 300
+  max_tokens: 65536            # the uniform cap; see generation
+  timeout: 1200
   max_retries: 1
 
 evaluation:
