@@ -65,7 +65,10 @@ def _load_error_type_counts(session_dir: str) -> dict[str, int]:
     """Tally error_type across every run_*.json in <session_dir>/generated/."""
     import glob
     counts: dict[str, int] = {}
-    run_files = glob.glob(os.path.join(session_dir, "generated", "run_*.json"))
+    # run_<N>_rejected.json shares the directory and the glob, but holds
+    # rejected attempts rather than samples.
+    run_files = [p for p in glob.glob(os.path.join(session_dir, "generated", "run_*.json"))
+                 if re.fullmatch(r"run_\d+\.json", os.path.basename(p))]
     for path in run_files:
         try:
             with open(path, encoding="utf-8") as f:
