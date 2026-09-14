@@ -148,6 +148,23 @@ Feedback is structural only. It does not include real class names, real subclass
 edges, ontology URIs, URI maps, or real hierarchy examples. Feedback is a guide;
 it is not guaranteed to improve fidelity on every run.
 
+## Judge
+
+The structural checks (parsing, and verification against gold in seeded cells) prove
+an artifact's shape, not its meaning: a taxonomy can match gold and still call a
+part or a property a subclass. The optional LLM judge (`judge:` in the config, off by
+default and turned on per run with `--judge`) reads each accepted artifact's domain,
+classes and axioms through `judge_prompt` in `taxonomy.json`. It drops a taxonomy whose
+axioms are not a sensible is-a hierarchy of the domain, or whose classes are
+degenerate (placeholder names, near-duplicates, classes outside the domain).
+
+It judges the final artifact of every cell: after any feedback rounds, and after
+gold verification in seeded cells. A dropped taxonomy is not regenerated, the same as
+a dropped sentence in the other tasks, so a judged run can deliver fewer than
+`sample_size` taxonomies. Each drop is archived with the judge's verdict in
+`run_<N>_rejected.json`, and `meta.judge_stats` counts what the judge saw and dropped
+per run.
+
 ## Evaluation
 
 Evaluator-model input contains only:

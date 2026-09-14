@@ -564,8 +564,9 @@ Each run session gets its own directory under `output.base_dir/<task>/<session>/
 
 - `meta` — provenance: timestamp, task, mode, generator provider/model, dataset,
   `sample_size`, the number of samples actually **scored** per run, `real_baseline`,
-  `class_balance`, and the judge used (or `null`). `meta.partial` is `true` while runs
-  are still outstanding.
+  `class_balance`, and the judge used (or `null`). A judged session also carries
+  `meta.judge_stats`: per run, how many samples the judge saw and how many it dropped.
+  `meta.partial` is `true` while runs are still outstanding.
 - `results` — per model, a `generated` block (each evaluator reports `mean ± std`
   across runs — high `std` reveals instability on unseen data) and, when the real
   baseline is on, a `real` block (single-pass point estimates on the real benchmark):
@@ -588,7 +589,13 @@ aggregated results of runs 1..N-1. A run that generates zero usable samples abor
 instead of writing misleading all-zero scores.
 
 The LLM-as-judge filter is **opt-in**: no `judge:` block (or `judge.enabled: false`)
-means judging is skipped.
+means judging is skipped. Every shipped config leaves it off, because the judge is an
+ablation condition (turn it on per run with `--judge`), and `scripts.analyze_results`
+files a judged session under its own `<cell>+judge` label. It covers every cell of every
+task: the sentence tasks judge each sample against its seed or counterpart, spam's
+forward+seedless cell (which has no seed) judges each message on its own, told the
+class it was generated as, and taxonomy judges each whole generated taxonomy. A sample
+the judge drops is not regenerated.
 
 ---
 
