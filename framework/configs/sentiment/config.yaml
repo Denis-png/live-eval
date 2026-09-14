@@ -58,8 +58,11 @@ profiling:
   timeout: 1200
   max_retries: 2
 
+# Off by default: the judge is an ablation condition, not part of the baseline.
+# The final sweep's runs are unjudged, and one run of each task's best cell
+# adds it: python -m framework.main --config <this file> ... --judge
 judge:
-  enabled: true
+  enabled: false
   provider: "openrouter"
   model: "minimax-m3"
   temperature: 0

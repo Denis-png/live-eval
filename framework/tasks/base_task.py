@@ -49,9 +49,23 @@ class BaseTask(ABC):
     def get_judge_prompt(self) -> str | None:
         """
         Optional LLM-as-judge prompt for filtering bad generations.
-        Must contain {sentence} and {correction} placeholders.
+        Must contain {sentence} and {correction} placeholders -- except for a
+        structured task, whose template is rendered by
+        build_structured_judge_prompt() with placeholders of its own.
         Return None to disable the judge step.
         """
+        return None
+
+    def get_seedless_judge_prompt(self) -> str | None:
+        """Optional judge template for a sample generated from NO seed, which
+        therefore has no counterpart to compare against: {sentence} is the
+        sample and {label} the class it was generated as. Return None and such
+        samples fall back to the pair prompt, which skips judging them."""
+        return None
+
+    def build_structured_judge_prompt(self, artifact: dict) -> str | None:
+        """The judge prompt for one generated structured artifact, rendered from
+        get_judge_prompt(). Structured tasks only; None when there is no judge."""
         return None
 
     def get_inverse_prompt(self) -> str | None:

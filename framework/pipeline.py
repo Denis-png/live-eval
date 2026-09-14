@@ -611,6 +611,16 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
     if strategy == "structured":
         mode = resolve_mode(config, strategy)
         seedless = resolve_seedless(config, strategy)
+        judge = None
+        if judge_call:
+            # Refused rather than skipped: meta.judge would record a judge that
+            # never ran, and the judge ablation would compare two unjudged runs.
+            if not task.get_judge_prompt():
+                raise RuntimeError(
+                    f"{task.get_task_name()}: the judge is enabled but the task "
+                    "defines no judge_prompt. Add one, or run with --no-judge."
+                )
+            judge = lambda artifact: judge_call(task.build_structured_judge_prompt(artifact))
         if not seedless:
             if (gen_cfg.get("feedback") or {}).get("enabled"):
                 raise RuntimeError(
@@ -646,6 +656,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                 verify=task.verify_structured_match,
                 max_parse_attempts=gen_cfg.get("max_parse_attempts", 3),
                 request_delay=gen_cfg.get("request_delay", 0.0),
+                judge=judge,
             )
         else:
             if profile is None:
@@ -698,6 +709,7 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                 max_parse_attempts=gen_cfg.get("max_parse_attempts", 3),
                 max_feedback_rounds=int(feedback_cfg.get("max_rounds", 0)),
                 request_delay=gen_cfg.get("request_delay", 0.0),
+                judge=judge,
             )
     elif strategy == "class_conditional":
         # No config sets "mode" explicitly today (spam.json's config comment
@@ -796,11 +808,16 @@ def _run_generation(generator, task, config, real_data, error_dist, judge_call, 
                 ]
                 for label in labels
             }
+            # No seed, so no counterpart for the pair prompts to compare against:
+            # the task's seedless judge prompt judges each message on its own.
+            seedless_kwargs = dict(common_kwargs)
+            if judge_call and task.get_seedless_judge_prompt():
+                seedless_kwargs["judge_prompt"] = task.get_seedless_judge_prompt()
             synthetic = generator.generate_class_conditional(
                 seed_policy="none",
                 specs_by_label=specs_by_label,
                 seedless_prompts=seedless_prompts,
-                **common_kwargs,
+                **seedless_kwargs,
             )
         else:
             forward_prompts = task.get_forward_prompts()
@@ -1365,14 +1382,20 @@ def run_pipeline(config: dict) -> dict:
     # One entry per run, None where a run could not be paired: pairing is
     # written for all runs or for none (_all_or_no_pairing).
     paired_per_run: list[dict | None] = []
+    # What the judge actually did per run -- meta.judge only says it was
+    # configured, and a cell can be configured and still never call it.
+    judge_stats: list[dict | None] = []
 
     for run_idx in range(num_runs):
         print(f"\n{'='*50}\nRUN {run_idx + 1} / {num_runs}\n{'='*50}")
+        generator.last_judge_stats = None
         synthetic = run_recording_rejections(
             lambda: _run_generation(generator, task, config, real_data, error_dist,
                                     judge_call, class_prob, profile=profile),
             generator, paths["generated_dir"], run_idx,
         )
+        stats = getattr(generator, "last_judge_stats", None)
+        judge_stats.append(dict(stats) if isinstance(stats, dict) else None)
         all_generated.extend(synthetic)
 
         eval_samples = task.get_eval_samples(synthetic)
@@ -1404,6 +1427,8 @@ def run_pipeline(config: dict) -> dict:
                            real_baseline=bool(real_scores))
         if paired_run_scores:
             meta["paired_real"] = True
+        if judge_call:
+            meta["judge_stats"] = judge_stats
         _write_results(final, paths["results"], meta)
         if run_idx + 1 < num_runs:
             print(f"Partial results (run {run_idx + 1}/{num_runs}) saved to {paths['results']}")

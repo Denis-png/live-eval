@@ -241,18 +241,26 @@ def _accept_pair(corrupted: str | None, gold: str | None) -> str | None:
     return None
 
 
+def _last_verdict(pattern: re.Pattern, text: str) -> str | None:
+    matches = list(pattern.finditer(text))
+    return matches[-1].group(1).lower() if matches else None
+
+
 def _judgement_passes(raw: str) -> bool:
     """True iff the judge marks the sample valid AND the correction correct.
     Missing fields default to True (keep) to mirror Denis's parse_judge_output.
-    Supports both Correction:/Faithfulness: field names."""
+    Supports both Correction:/Faithfulness: field names.
+
+    A reasoning judge restates the answer format while it thinks ("Redundancy:
+    trivial/valid") before it answers, and the first match used to be taken as
+    the verdict. Closed <think> blocks are stripped and the LAST value of each
+    field wins, since the answer follows the reasoning."""
     if not raw:
         return True
-    r = _REDUNDANCY_RE.search(raw)
-    c = _CORRECTION_RE.search(raw)
-    f = _FAITHFULNESS_RE.search(raw)
-    redundant  = (r.group(1).lower() == "trivial") if r else False
-    incorrect  = (c.group(1).lower() == "incorrect") if c else False
-    unfaithful = (f.group(1).lower() == "broken") if f else False
+    text = _strip_reasoning(raw)
+    redundant  = _last_verdict(_REDUNDANCY_RE, text) == "trivial"
+    incorrect  = _last_verdict(_CORRECTION_RE, text) == "incorrect"
+    unfaithful = _last_verdict(_FAITHFULNESS_RE, text) == "broken"
     return not redundant and not incorrect and not unfaithful
 
 
@@ -300,10 +308,11 @@ class BaseGenerator(ABC):
         """
         synthetic = []
         samples = real_samples[:sample_size]
-        judge_dropped = 0
         parse_failed = 0
         refused = 0
         judge_fn = judge_call or self.call_api
+        # Read by the pipeline into meta.judge_stats; reset per call.
+        self.last_judge_stats = judge_stats = {"judged": 0, "dropped": 0}
 
         total = len(samples)
         run_start = time.monotonic()
@@ -339,9 +348,10 @@ class BaseGenerator(ABC):
                         judge_prompt.format(sentence=corrupted, correction=gold)
                     )
                     judge_dt = time.monotonic() - t1
+                    judge_stats["judged"] += 1
                     if not _judgement_passes(judge_raw):
                         print(f"[{i}/{total}] gen {gen_dt:.1f}s + judge {judge_dt:.1f}s — [JUDGE] dropped: {corrupted[:50]}", flush=True)
-                        judge_dropped += 1
+                        judge_stats["dropped"] += 1
                         continue
 
                 synthetic.append({
@@ -364,7 +374,7 @@ class BaseGenerator(ABC):
 
         print(
             f"Generated {len(synthetic)} synthetic samples "
-            f"(judge dropped: {judge_dropped}, parse failed: {parse_failed}, "
+            f"(judge dropped: {judge_stats['dropped']}, parse failed: {parse_failed}, "
             f"refused: {refused})."
         )
         return synthetic
@@ -407,10 +417,11 @@ class BaseGenerator(ABC):
         rng = rng or random.Random()
         synthetic = []
         samples = real_samples[:sample_size]
-        judge_dropped = 0
         parse_failed = 0
         refused = 0
         judge_fn = judge_call or self.call_api
+        # Read by the pipeline into meta.judge_stats; reset per call.
+        self.last_judge_stats = judge_stats = {"judged": 0, "dropped": 0}
 
         total = len(samples)
         run_start = time.monotonic()
@@ -457,9 +468,10 @@ class BaseGenerator(ABC):
                         judge_prompt.format(sentence=corrupted, correction=gold)
                     )
                     judge_dt = time.monotonic() - t1
+                    judge_stats["judged"] += 1
                     if not _judgement_passes(judge_raw):
                         print(f"[{i}/{total}] gen {gen_dt:.1f}s + judge {judge_dt:.1f}s — [JUDGE] dropped: {corrupted[:50]}", flush=True)
-                        judge_dropped += 1
+                        judge_stats["dropped"] += 1
                         continue
 
                 synthetic.append({
@@ -481,7 +493,7 @@ class BaseGenerator(ABC):
         print(f"Generation phase done in {total_dt:.1f}s.")
         print(
             f"Generated {len(synthetic)} synthetic samples (inverse) "
-            f"(judge dropped: {judge_dropped}, parse failed: {parse_failed}, "
+            f"(judge dropped: {judge_stats['dropped']}, parse failed: {parse_failed}, "
             f"refused: {refused})."
         )
         return synthetic
@@ -506,7 +518,9 @@ class BaseGenerator(ABC):
         rng = rng or random.Random()
         synthetic: list[dict] = []
         judge_fn = judge_call or self.call_api
-        judge_dropped = parse_failed = refused = 0
+        # Read by the pipeline into meta.judge_stats; reset per call.
+        self.last_judge_stats = judge_stats = {"judged": 0, "dropped": 0}
+        parse_failed = refused = 0
 
         total = len(specs)
         run_start = time.monotonic()
@@ -535,9 +549,10 @@ class BaseGenerator(ABC):
                     t1 = time.monotonic()
                     judge_raw = judge_fn(judge_prompt.format(sentence=corrupted, correction=gold))
                     judge_dt = time.monotonic() - t1
+                    judge_stats["judged"] += 1
                     if not _judgement_passes(judge_raw):
                         print(f"[{i}/{total}] gen {gen_dt:.1f}s + judge {judge_dt:.1f}s — [JUDGE] dropped: {corrupted[:50]}", flush=True)
-                        judge_dropped += 1
+                        judge_stats["dropped"] += 1
                         continue
 
                 synthetic.append({
@@ -555,7 +570,7 @@ class BaseGenerator(ABC):
         print(f"Generation phase done in {time.monotonic() - run_start:.1f}s.")
         print(
             f"Generated {len(synthetic)} synthetic samples (seedless forward) "
-            f"(judge dropped: {judge_dropped}, parse failed: {parse_failed}, "
+            f"(judge dropped: {judge_stats['dropped']}, parse failed: {parse_failed}, "
             f"refused: {refused})."
         )
         return synthetic
@@ -692,6 +707,8 @@ class BaseGenerator(ABC):
         attrition = {label: {"attempted": 0, "survived": 0} for label in labels}
         self.last_class_attrition = attrition
         judge_fn = judge_call or self.call_api
+        # Read by the pipeline into meta.judge_stats; reset per call.
+        self.last_judge_stats = judge_stats = {"judged": 0, "dropped": 0}
         if seed_policy in ("impose", "inherit") and not real_seeds:
             return synthetic
         if seed_policy == "inherit":
@@ -717,7 +734,7 @@ class BaseGenerator(ABC):
 
         run_start = time.monotonic()
         print(f"Generating {sample_size} samples (class-conditional) ...", flush=True)
-        judge_dropped = parse_failed = refused = 0
+        parse_failed = refused = 0
         judge_skip_notice_printed = False
 
         def _missing_seed(i: int, source) -> bool:
@@ -817,21 +834,26 @@ class BaseGenerator(ABC):
                     continue
 
                 judge_dt = 0.0
-                if judge_prompt and source:
+                # seed_policy="none" has no seed, so only a prompt that judges the
+                # message on its own (no {correction}) can run; it is told the
+                # label the message was generated as instead.
+                standalone = source is None and "{correction}" not in (judge_prompt or "")
+                if judge_prompt and (source or standalone):
                     t1 = time.monotonic()
-                    judge_raw = judge_fn(judge_prompt.format(sentence=text, correction=source))
+                    judge_raw = judge_fn(judge_prompt.format(
+                        sentence=text, correction=source, label=label))
                     judge_dt = time.monotonic() - t1
+                    judge_stats["judged"] += 1
                     if not _judgement_passes(judge_raw):
                         print(f"[{i}/{sample_size}] gen {gen_dt:.1f}s + judge {judge_dt:.1f}s — [JUDGE] dropped: {text[:50]}", flush=True)
-                        judge_dropped += 1
+                        judge_stats["dropped"] += 1
                         continue
                 elif judge_prompt and not judge_skip_notice_printed:
-                    # seed_policy="none" has no seed to compare against — the judge
-                    # prompts ask whether `text` matches/relates to a counterpart
-                    # seed, so calling it with correction=None (rendered "None")
-                    # would make every sample look wrong and get dropped. Skip the
-                    # judge step entirely for this policy; note it once so a run's
-                    # log doesn't look like judging silently never happened.
+                    # A prompt written for a (message, counterpart) pair, with no
+                    # seed to fill the counterpart: correction=None (rendered
+                    # "None") would make every sample look wrong and get dropped.
+                    # Skip the judge step; note it once so a run's log doesn't look
+                    # like judging silently never happened.
                     print(f"[{i}/{sample_size}] judge configured but skipped: no seed "
                           f"to compare against (seed_policy='none').", flush=True)
                     judge_skip_notice_printed = True
@@ -853,7 +875,7 @@ class BaseGenerator(ABC):
         print(f"Generation phase done in {total_dt:.1f}s.")
         print(
             f"Generated {len(synthetic)} synthetic samples (class-conditional) "
-            f"(judge dropped: {judge_dropped}, parse failed: {parse_failed}, refused: {refused})."
+            f"(judge dropped: {judge_stats['dropped']}, parse failed: {parse_failed}, refused: {refused})."
         )
         return synthetic
 
@@ -867,6 +889,7 @@ class BaseGenerator(ABC):
         max_parse_attempts: int = 3,
         max_feedback_rounds: int = 0,
         request_delay: float = 0.0,
+        judge=None,
     ) -> list[dict]:
         """Generate whole structured artifacts, one per sample, with an optional
         per-artifact feedback loop.
@@ -888,6 +911,12 @@ class BaseGenerator(ABC):
         Each returned artifact carries its own `generation_feedback` metadata:
         the rounds it took, why attempts were rejected, and whether it stopped
         early inside tolerance.
+
+            judge(artifact) -> str  optional LLM-as-judge verdict on the FINAL
+                                    artifact (after any feedback rounds); a
+                                    failing verdict drops the sample, as in the
+                                    sentence loops -- the judge filters, it
+                                    never regenerates.
         """
         feedback_enabled = build_feedback is not None
         rounds_budget = max(0, max_feedback_rounds) if feedback_enabled else 0
@@ -896,6 +925,7 @@ class BaseGenerator(ABC):
         # A sample whose every attempt failed used to vanish with its
         # diagnostics. Persisted by the pipeline; reset per call.
         self.last_rejections: list[dict] = []
+        self.last_judge_stats = judge_stats = {"judged": 0, "dropped": 0}
 
         for sample_idx in range(1, sample_size + 1):
             t0 = time.monotonic()
@@ -1008,16 +1038,24 @@ class BaseGenerator(ABC):
                     break
                 feedback = feedback_result
 
-            if selected is not None:
+            judge_rejection = None
+            if selected is not None and judge is not None:
+                judge_rejection = self._judge_artifact(judge, selected, judge_stats)
+            if selected is not None and judge_rejection is None:
                 selected["generation_feedback"] = metadata
                 synthetic.append(selected)
                 print(f"[{sample_idx}/{sample_size}] {time.monotonic() - t0:.1f}s ✓ "
                       f"({len(selected.get('classes') or [])} classes)", flush=True)
             else:
-                self.last_rejections.append({
+                rejection = {
                     "index": sample_idx,
                     "attempts": [a for rnd in metadata["rounds"] for a in rnd["attempts"]],
-                })
+                }
+                if judge_rejection is not None:
+                    rejection["judge"] = judge_rejection
+                    print(f"[{sample_idx}/{sample_size}] {time.monotonic() - t0:.1f}s "
+                          f"[JUDGE] dropped: {judge_rejection['rejection_reason']}", flush=True)
+                self.last_rejections.append(rejection)
 
         if len(synthetic) < sample_size:
             print(
@@ -1036,6 +1074,7 @@ class BaseGenerator(ABC):
         *,
         max_parse_attempts: int = 3,
         request_delay: float = 0.0,
+        judge=None,
     ) -> list[dict]:
         """One artifact per pre-computed gold, verified rather than trusted.
 
@@ -1052,7 +1091,9 @@ class BaseGenerator(ABC):
         failed verification is a parse attempt, not a feedback round.
 
         Stays ontology-agnostic like generate_structured: callables and data in,
-        never the task itself.
+        never the task itself. `judge` is generate_structured's: it sees a record
+        only after verification, and a failing verdict drops the gold rather than
+        spending another attempt on it.
         """
         synthetic: list[dict] = []
         # Rejected golds used to vanish with their diagnostics, so a run that
@@ -1060,6 +1101,7 @@ class BaseGenerator(ABC):
         # this; it is reset per call so one run's rejections never leak into
         # the next.
         self.last_rejections: list[dict] = []
+        self.last_judge_stats = judge_stats = {"judged": 0, "dropped": 0}
         for i, gold in enumerate(golds, 1):
             t0 = time.monotonic()
             attempts, accepted = 0, False
@@ -1105,9 +1147,21 @@ class BaseGenerator(ABC):
                     # An integer: pairs the record with its real pool subtree.
                     record["source_pool_index"] = gold.get("source_pool_index")
                     record["seeded_diagnostics"] = {"attempts": diagnostics}
-                    synthetic.append(record)
-                    print(f"[{i}/{len(golds)}] {time.monotonic() - t0:.1f}s ✓ "
-                          f"({len(gold['classes'])} classes)", flush=True)
+                    judge_rejection = (self._judge_artifact(judge, record, judge_stats)
+                                       if judge is not None else None)
+                    if judge_rejection is None:
+                        synthetic.append(record)
+                        print(f"[{i}/{len(golds)}] {time.monotonic() - t0:.1f}s ✓ "
+                              f"({len(gold['classes'])} classes)", flush=True)
+                    else:
+                        self.last_rejections.append({
+                            "index": i,
+                            "gold_classes": list(gold.get("classes") or []),
+                            "attempts": diagnostics,
+                            "judge": judge_rejection,
+                        })
+                        print(f"[{i}/{len(golds)}] {time.monotonic() - t0:.1f}s [JUDGE] "
+                              f"dropped: {judge_rejection['rejection_reason']}", flush=True)
                 if request_delay > 0:
                     time.sleep(request_delay)
             if not accepted:
@@ -1121,6 +1175,21 @@ class BaseGenerator(ABC):
             print(f"[WARN] seeded structured generation produced {len(synthetic)} "
                   f"artifacts for {len(golds)} golds.", file=sys.stderr)
         return synthetic
+
+    @staticmethod
+    def _judge_artifact(judge, artifact: dict, judge_stats: dict) -> dict | None:
+        """None when the judge keeps `artifact`, else why it was dropped. A
+        judge call that raises costs the sample and is not counted as judged,
+        as in the sentence loops, where the exception skips the sample."""
+        try:
+            raw = judge(artifact)
+        except Exception as e:
+            return {"rejection_reason": f"judge failed: {type(e).__name__}: {e}"}
+        judge_stats["judged"] += 1
+        if _judgement_passes(raw):
+            return None
+        judge_stats["dropped"] += 1
+        return {"rejection_reason": "judge", "verdict": preview_response(raw)}
 
     @abstractmethod
     def call_api(self, prompt: str) -> str:

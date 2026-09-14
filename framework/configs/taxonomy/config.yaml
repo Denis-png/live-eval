@@ -109,6 +109,23 @@ generation:
     domains: ["marine biology", "musical instruments", "architecture",
               "textile manufacturing", "meteorology"]
 
+# ── Judge (optional LLM-as-judge that filters bad generations) ──
+# Off by default: the judge is an ablation condition, not part of the baseline.
+# The final sweep's runs are unjudged, and one run of each task's best cell
+# adds it: python -m framework.main --config <this file> ... --judge
+# It reads each generated taxonomy (domain, classes and axioms) and drops one
+# whose axioms are not a sensible is-a hierarchy or whose classes are
+# degenerate; see judge_prompt in taxonomy.json. It judges the final artifact
+# of every cell, and a dropped taxonomy is not regenerated.
+judge:
+  enabled: false
+  provider: "openrouter"
+  model: "minimax-m3"
+  temperature: 0
+  max_tokens: 65536            # the uniform cap; see generation
+  timeout: 1200
+  max_retries: 1
+
 # ── Evaluated models ────────────────────────────────────────────────────────
 # The model under test receives {domain, classes} and must predict the direct
 # subclass axioms. Gold axioms are never in its prompt.

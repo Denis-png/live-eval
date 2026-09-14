@@ -17,8 +17,8 @@ answer:
                   ran in both modes.
 
 A session that consumed a calibration artifact is its own cell
-(`<cell>+calibrated`), so a calibrated run never shadows the uncalibrated run
-of the same cell. --since keeps only sessions created at or after a date.
+(`<cell>+calibrated`), and so is a judged one (`<cell>+judge`), so neither
+shadows the plain run of the same cell. --since keeps only sessions created at or after a date.
 
 Emits figures + analysis.md + analysis.json into --out
 (default: <first-root>/analysis).
@@ -254,6 +254,10 @@ def _strategy_of(meta: dict) -> str:
     # exactly those two -- so it gets its own label, ahead of any @semantics.
     if (meta.get("calibration") or {}).get("path"):
         cell = f"{cell}+calibrated"
+    # Likewise the judge: an ablation condition beside the unjudged baseline, so
+    # a judged run must not replace the unjudged run of its cell.
+    if meta.get("judge"):
+        cell = f"{cell}+judge"
     if strategy != "class_conditional":
         return cell
     semantics = meta.get("class_conditional_semantics") or "asymmetric"

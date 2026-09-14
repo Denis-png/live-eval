@@ -66,6 +66,9 @@ class SpamTask(BaseTask):
     def get_inverse_judge_prompt(self) -> str | None:
         return self._config.get("inverse_judge_prompt")
 
+    def get_seedless_judge_prompt(self) -> str | None:
+        return self._config.get("seedless_judge_prompt")
+
     def get_generation_strategy(self) -> str:
         return "class_conditional"
 
