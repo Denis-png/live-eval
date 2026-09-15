@@ -307,6 +307,7 @@ def main():
     print(f"Provider : {config['generation']['provider']}")
     print(f"Model    : {config['generation']['model']}")
     print(f"Runs     : {config['generation']['num_runs']}")
+    print(f"Samples  : {config['generation']['sample_size']} per run")
     print(f"Models   : {[m['name'] for m in config['task_models']]}")
 
     try:
