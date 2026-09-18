@@ -14,7 +14,7 @@ import tempfile
 import textwrap
 import unittest
 
-from scripts.prepare_taxonomy_benchmark import prepare_taxonomy_record
+from scripts.benchmarks.prepare_taxonomy_benchmark import prepare_taxonomy_record
 
 _PREFIXES = textwrap.dedent("""\
     @prefix ex: <http://example.org/> .

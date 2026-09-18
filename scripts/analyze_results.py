@@ -31,6 +31,7 @@ import glob
 import json
 import math
 import os
+import sys
 import textwrap
 from collections import defaultdict
 from datetime import datetime
@@ -277,6 +278,12 @@ def discover_sessions(roots):
             with open(results_path, encoding="utf-8") as f:
                 data = json.load(f)
             if "meta" not in data or "results" not in data:
+                continue
+            if not data["results"]:
+                # Nothing to analyse -- and dedup_sessions would let this newer
+                # session shadow the scored run of its cell.
+                print(f"[NOTE] skipping unscored session {session_dir} (score it "
+                      "with: python -m scripts.rescore_session)", file=sys.stderr)
                 continue
             profile_path = os.path.join(session_dir, "profile.json")
             profile = None
@@ -547,23 +554,30 @@ def plot_fidelity_jsd(sessions, task, out_dir):
         return None
     sel.sort(key=lambda s: (_strategy_of(s["meta"]), s["meta"]["model"]))
     labels = [
-        (f"{_strategy_of(s['meta'])}\n{_short(s['meta']['model'])}"
+        (f"{_strategy_of(s['meta'])} · {_short(s['meta']['model'])}"
          if _strategy_of(s["meta"]) != "-" else _short(s["meta"]["model"]))
         for s in sel
     ]
-    fig, axes = plt.subplots(1, 2, figsize=(1.1 * len(sel) + 5, 3.4), sharey=True)
+    # Horizontal: one row per session, its label printed once on the left and
+    # both divergences beside it. Vertical bars ran the cell/model labels into
+    # each other at five sessions, and phase C adds six generators per task.
+    fig, axes = plt.subplots(1, 2, figsize=(11, 0.42 * len(sel) + 1.6), sharey=True)
     fig.patch.set_facecolor(SURFACE)
     for ax, key in zip(axes, keys):
-        apply_axes_style(ax)
-        for i, s in enumerate(sel):
-            ax.bar(i, s["profile"]["fidelity"][key], width=0.62,
-                   color=_color(s["meta"]["model"]), edgecolor=SURFACE, linewidth=1)
-        ax.set_xticks(range(len(sel)))
-        ax.set_xticklabels(labels, fontsize=8)
+        apply_axes_style(ax, grid_axis="x")
+        values = [s["profile"]["fidelity"][key] for s in sel]
+        bars = ax.barh(range(len(sel)), values, height=0.62,
+                       color=[_color(s["meta"]["model"]) for s in sel],
+                       edgecolor=SURFACE, linewidth=1)
+        ax.bar_label(bars, fmt="%.3f", padding=3, fontsize=8, color="#52514e")
+        ax.margins(x=0.15)
         ax.set_title(key.replace("_", " "), fontsize=10)
-    axes[0].set_ylabel("Jensen-Shannon divergence", fontsize=9)
+        ax.set_xlabel("Jensen-Shannon divergence", fontsize=9)
+    axes[0].set_yticks(range(len(sel)))
+    axes[0].set_yticklabels(labels, fontsize=8)
+    axes[0].invert_yaxis()
     fig.suptitle(f"{task}: distribution fidelity (lower = {meaning})",
-                 fontsize=11, y=1.04)
+                 fontsize=11, y=1.02)
     return _save(fig, os.path.join(out_dir, f"fidelity_{task}.png"))
 
 

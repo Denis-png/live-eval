@@ -2,12 +2,13 @@
 sentiment split (cardiffnlp/tweet_eval), as a text,label CSV.
 
 framework/data/** is gitignored, so the CSV the sentiment config points at does
-not ship with the repo; this script is how it is rebuilt. Labels are written as
+not ship with the repo; this script is how it is rebuilt, and it reports whether
+the result matches the final sweep's file byte for byte. Labels are written as
 TweetEval delivers them (0 = negative, 1 = neutral, 2 = positive), the same
 values the task's parse_row reads when the source is HuggingFace.
 
 Usage:
-    python -m scripts.prepare_sentiment_benchmark [--n 150] [--split test] \
+    python -m scripts.benchmarks.prepare_sentiment_benchmark [--n 150] [--split test] \\
         [--output framework/data/benchmarks/sentiment/tweeteval_test_150.csv]
 """
 
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
@@ -22,6 +24,7 @@ from pathlib import Path
 DATASET = "cardiffnlp/tweet_eval"
 SUBSET = "sentiment"
 DEFAULT_OUTPUT = "framework/data/benchmarks/sentiment/tweeteval_test_150.csv"
+SWEEP_ARGS, SWEEP_MD5 = ("test", 150), "5e1cccd2a6c9427d185466a90fdeed01"
 
 
 def load_rows(split: str) -> Iterable[dict]:
@@ -75,6 +78,9 @@ def main() -> None:
     print(f"Source            : {DATASET} ({SUBSET}, {args.split}, first {args.n})")
     print(f"Labels            : {dict(sorted(counts.items()))} (0 neg, 1 neu, 2 pos)")
     print(f"Output            : {args.output}")
+    digest = hashlib.md5(Path(args.output).read_bytes()).hexdigest()
+    same = (args.split, args.n) == SWEEP_ARGS and digest == SWEEP_MD5
+    print(f"Matches the sweep : {'yes' if same else 'NO -- md5 ' + digest}")
 
 
 if __name__ == "__main__":

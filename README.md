@@ -74,6 +74,12 @@ so it can be inspected later.
             runs/<task>/<session>/ - per-session run artifacts; the session name
                                    carries the setup that produced it, e.g.
                                    20260827_120000_inverse_seedless
+    scripts/
+        compare_models.py        - one scored session per generation model (compare.yaml)
+        rescore_session.py       - score or re-score a session from its archived runs
+        analyze_results.py       - cross-session tables and figures
+        benchmarks/              - prepare_<task>_benchmark.py: rebuild each task's
+                                   (gitignored) benchmark file under framework/data/
     docs/
         taxonomy_induction.md    - Taxonomy Induction task guide
 
@@ -86,12 +92,25 @@ so it can be inspected later.
        pip install -r framework/requirements.txt
        python -m spacy download en_core_web_sm    # required by ERRANT
 
-2. Copy `live-eval/example.env` → `live-eval/.env` and fill in the API keys
+2. Build the benchmark files. `framework/data/` is gitignored, so none of them ships
+   with the repo; each script downloads its source, writes the file the task's config
+   points at, and reports whether it matches the final sweep's file byte for byte:
+
+       python -m scripts.benchmarks.prepare_gec_benchmark        # FCE v2.1 test split
+       python -m scripts.benchmarks.prepare_spam_benchmark       # 300 fixed SMS Spam Collection rows
+       python -m scripts.benchmarks.prepare_sentiment_benchmark  # first 150 TweetEval test tweets
+       python -m scripts.benchmarks.prepare_taxonomy_benchmark   # Pizza ontology, pinned commit
+
+   `prepare_taxonomy_benchmark` also converts any other OWL/RDF ontology:
+   `python -m scripts.benchmarks.prepare_taxonomy_benchmark <ontology.owl> <out.jsonl>
+   --ontology-id <id> --domain "<domain>"`.
+
+3. Copy `live-eval/example.env` → `live-eval/.env` and fill in the API keys
    you need. `main.py` loads it automatically. You only need the keys for
    providers you actually use (the generator's provider, plus Anthropic if
    you evaluate Claude as a task model).
 
-3. Edit `framework/configs/<task>/config.yaml` (e.g. `framework/configs/gec/config.yaml`
+4. Edit `framework/configs/<task>/config.yaml` (e.g. `framework/configs/gec/config.yaml`
    or `framework/configs/spam/config.yaml` — each task's config carries only the
    fields that task reads; there is no shared root config):
    - `dataset`         — `source` (huggingface | local). Per-source settings live in
@@ -125,7 +144,9 @@ so it can be inspected later.
                          the task does not declare aborts before any API call.
    - `evaluation.real_baseline` — also score the task models on the real benchmark
                          (default `true`; see "Real baseline & fidelity").
-   - `task.name`       — `gec` or `spam`
+   - `evaluation.generate_only` — generate and archive the session without scoring it
+                         (default `false`; `--generate-only`; see "Running stages separately").
+   - `task.name`       — `gec`, `spam`, `sentiment` or `taxonomy`
    - `task_models`     — list of models to evaluate
    - `output.base_dir` — root for per-session run artifacts (default
                          `framework/data/runs`); see "Results".
@@ -171,6 +192,28 @@ config file. CLI flags override values in the YAML:
 The config is validated up front: missing required keys, `num_runs < 1`,
 an unknown `generation.mode`, or a missing API key for the selected provider
 all abort before any API call with an error naming the offending config path.
+
+### Running stages separately
+
+Every stage has its own entry point, works for every task (`gec`, `spam`,
+`sentiment`, `taxonomy`), and reads or writes the same session format:
+
+| Stage | Command | Reads → writes |
+|---|---|---|
+| Benchmark profiling | `python -m framework.profile_dataset --task <task> --config <config>` | benchmark → profile JSON |
+| Calibration | `python -m framework.calibrate --config <config>` | profile → calibration artifact (consumed by later runs) |
+| Generation only | `python -m framework.main --config <config> --generate-only` | → session: generated runs, real sample, fidelity profile, no scores |
+| Evaluation only | `python -m scripts.rescore_session --config <config> <session_dir>` | session → scores (task models, real baseline, paired real) |
+| Generate + evaluate | `python -m framework.main --config <config>` | → scored session |
+| Plots | `python -m framework.plotting <session_dir>` | session → figures |
+| Generator comparison | `python -m scripts.compare_models --config <compare.yaml>` | → one scored session per generation model |
+| Cross-session analysis | `python -m scripts.analyze_results <runs_root>` | sessions → tables and figures |
+
+`--generate-only` loads no task model and skips the real baseline, so it needs no
+evaluation dependencies. The session it writes is complete except for its scores;
+`scripts.rescore_session` adds them later, on any machine, with the task models the
+config lists. Until then the analysis skips it, so an unscored session never
+shadows a scored run of its cell.
 
 ---
 
@@ -605,7 +648,7 @@ GEC (Grammatical Error Correction) — implemented (corruption: forward + invers
 Spam Detection — implemented (class-conditional generation + real baseline + fidelity)
 Taxonomy Induction — implemented (structured generation + subclass evaluation + structural fidelity); see [docs/taxonomy_induction.md](docs/taxonomy_induction.md)
 Hate Speech Detection — planned
-Sentiment Analysis — implemented (corruption: forward + inverse, seeded + seedless; label-balance fidelity); build its benchmark CSV (first 150 TweetEval test tweets) with `python -m scripts.prepare_sentiment_benchmark`
+Sentiment Analysis — implemented (corruption: forward + inverse, seeded + seedless; label-balance fidelity)
 
 ## Current Evaluators (GEC)
 

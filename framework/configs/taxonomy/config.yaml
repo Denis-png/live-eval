@@ -8,10 +8,12 @@
 # framework/data/** is gitignored, so the two inputs below are built locally and
 # do not ship with the repo. Both steps are one-off per ontology:
 #
-#   1. Build the benchmark from an OWL/RDF ontology:
-#        python -m scripts.prepare_taxonomy_benchmark <ontology.owl> \
-#            framework/data/benchmarks/taxonomy/pizza.jsonl \
-#            --ontology-id pizza --domain "pizza"
+#   1. Build the benchmark (the Pizza ontology, downloaded from a pinned commit):
+#        python -m scripts.benchmarks.prepare_taxonomy_benchmark
+#      or from another OWL/RDF ontology:
+#        python -m scripts.benchmarks.prepare_taxonomy_benchmark <ontology.owl> \
+#            framework/data/benchmarks/taxonomy/<id>.jsonl \
+#            --ontology-id <id> --domain "<domain>"
 #
 #   2. Profile it (the structural target inverse mode samples from):
 #        python -m framework.profile_dataset --task taxonomy \

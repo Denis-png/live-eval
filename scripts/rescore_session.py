@@ -1,6 +1,7 @@
 """Rescore a finished session from its persisted artifacts — no LLM calls.
 
 Re-evaluates the config's task_models on each generated/run_<N>.json, which
+  * scores a session written by `framework.main --generate-only`,
   * restores per-run scores ("runs") for sessions created before they were
     persisted, and
   * adds generated + real-baseline scores for task models that did not exist
@@ -73,10 +74,8 @@ def _drift_report(old_results, new_results):
 
 
 def rescore_session(session_dir, config, *, skip_eval=False, skip_profile=False,
-                    plots=False, pair=True):
-    """Rescore one session in place. `pair=False` writes no paired real scores
-    at all: merge_sessions passes it when its sources' real samples differ, since
-    a run's source_pool_index would then map into another session's pool."""
+                    plots=False):
+    """Rescore one session in place."""
     results_path = os.path.join(session_dir, "results.json")
     old = _load_json(results_path)
     meta = old["meta"]
@@ -120,7 +119,7 @@ def rescore_session(session_dir, config, *, skip_eval=False, skip_profile=False,
         paired_run_scores = _all_or_no_pairing([
             _paired_real_scores(task, real_reference, real_rows, synthetic, evaluator_fns)
             for synthetic in runs_data
-        ]) if pair else None
+        ])
         final = _nest_results(aggregate(all_run_scores), real_scores, all_run_scores,
                               paired_run_scores)
 
@@ -165,6 +164,8 @@ def rescore_session(session_dir, config, *, skip_eval=False, skip_profile=False,
         }
         if meta.get("paired_real") is None:
             meta.pop("paired_real", None)
+        # Scored now: a generate-only session becomes an ordinary one.
+        meta.pop("generate_only", None)
         with open(results_path, "w", encoding="utf-8") as f:
             json.dump({"meta": meta, "results": final}, f, indent=2)
         print(f"Rescored results written to {results_path}")
