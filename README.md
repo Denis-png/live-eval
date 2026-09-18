@@ -205,7 +205,7 @@ Every stage has its own entry point, works for every task (`gec`, `spam`,
 | Generation only | `python -m framework.main --config <config> --generate-only` | → session: generated runs, real sample, fidelity profile, no scores |
 | Evaluation only | `python -m scripts.rescore_session --config <config> <session_dir>` | session → scores (task models, real baseline, paired real) |
 | Generate + evaluate | `python -m framework.main --config <config>` | → scored session |
-| Plots | `python -m framework.plotting <session_dir>` | session → figures |
+| Plots | `python -m framework.plotting <session_dir or runs_root>` | session(s) → figures |
 | Generator comparison | `python -m scripts.compare_models --config <compare.yaml>` | → one scored session per generation model |
 | Cross-session analysis | `python -m scripts.analyze_results <runs_root>` | sessions → tables and figures |
 
@@ -475,7 +475,10 @@ Point the module at a session directory to (re)render it — no API calls, no re
 
     python -m framework.plotting framework/data/runs/spam/20260708_172422/
 
-    # write the PNGs somewhere else instead of <session>/plots/
+    # every session under a folder -- the whole archive, or one task's runs
+    python -m framework.plotting framework/data/runs
+
+    # write the PNGs somewhere else instead of <session>/plots/ (one session only)
     python -m framework.plotting framework/data/runs/gec/<session>/ --out /tmp/figs
 
 It reads only that session's `results.json` (+ `profile.json` if present), so it

@@ -1069,7 +1069,10 @@ without re-running:
 ```bash
 python -m framework.plotting framework/data/runs/spam/20260901_120000_forward_seeded/
 
-# write to a different directory
+# every session under a folder (the whole archive, or one task's runs)
+python -m framework.plotting framework/data/runs
+
+# write to a different directory (one session only)
 python -m framework.plotting framework/data/runs/gec/<session>/ --out /tmp/figs
 ```
 
