@@ -13,7 +13,7 @@ api_keys:
 # Same benchmark used to train the bertweet and RoBERTa sentiment models below.
 # The benchmark is the first 150 tweets of its test split. framework/data/** is
 # gitignored, so build the CSV once:
-#   python -m scripts.prepare_sentiment_benchmark
+#   python -m scripts.benchmarks.prepare_sentiment_benchmark
 dataset:
   source: local
   local:

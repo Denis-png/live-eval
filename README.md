@@ -74,6 +74,12 @@ so it can be inspected later.
             runs/<task>/<session>/ - per-session run artifacts; the session name
                                    carries the setup that produced it, e.g.
                                    20260827_120000_inverse_seedless
+    scripts/
+        compare_models.py        - one scored session per generation model (compare.yaml)
+        rescore_session.py       - score or re-score a session from its archived runs
+        analyze_results.py       - cross-session tables and figures
+        benchmarks/              - prepare_<task>_benchmark.py: rebuild each task's
+                                   (gitignored) benchmark file under framework/data/
     docs/
         taxonomy_induction.md    - Taxonomy Induction task guide
 
@@ -86,12 +92,25 @@ so it can be inspected later.
        pip install -r framework/requirements.txt
        python -m spacy download en_core_web_sm    # required by ERRANT
 
-2. Copy `live-eval/example.env` → `live-eval/.env` and fill in the API keys
+2. Build the benchmark files. `framework/data/` is gitignored, so none of them ships
+   with the repo; each script downloads its source, writes the file the task's config
+   points at, and reports whether it matches the final sweep's file byte for byte:
+
+       python -m scripts.benchmarks.prepare_gec_benchmark        # FCE v2.1 test split
+       python -m scripts.benchmarks.prepare_spam_benchmark       # 300 fixed SMS Spam Collection rows
+       python -m scripts.benchmarks.prepare_sentiment_benchmark  # first 150 TweetEval test tweets
+       python -m scripts.benchmarks.prepare_taxonomy_benchmark   # Pizza ontology, pinned commit
+
+   `prepare_taxonomy_benchmark` also converts any other OWL/RDF ontology:
+   `python -m scripts.benchmarks.prepare_taxonomy_benchmark <ontology.owl> <out.jsonl>
+   --ontology-id <id> --domain "<domain>"`.
+
+3. Copy `live-eval/example.env` → `live-eval/.env` and fill in the API keys
    you need. `main.py` loads it automatically. You only need the keys for
    providers you actually use (the generator's provider, plus Anthropic if
    you evaluate Claude as a task model).
 
-3. Edit `framework/configs/<task>/config.yaml` (e.g. `framework/configs/gec/config.yaml`
+4. Edit `framework/configs/<task>/config.yaml` (e.g. `framework/configs/gec/config.yaml`
    or `framework/configs/spam/config.yaml` — each task's config carries only the
    fields that task reads; there is no shared root config):
    - `dataset`         — `source` (huggingface | local). Per-source settings live in
@@ -629,7 +648,7 @@ GEC (Grammatical Error Correction) — implemented (corruption: forward + invers
 Spam Detection — implemented (class-conditional generation + real baseline + fidelity)
 Taxonomy Induction — implemented (structured generation + subclass evaluation + structural fidelity); see [docs/taxonomy_induction.md](docs/taxonomy_induction.md)
 Hate Speech Detection — planned
-Sentiment Analysis — implemented (corruption: forward + inverse, seeded + seedless; label-balance fidelity); build its benchmark CSV (first 150 TweetEval test tweets) with `python -m scripts.prepare_sentiment_benchmark`
+Sentiment Analysis — implemented (corruption: forward + inverse, seeded + seedless; label-balance fidelity)
 
 ## Current Evaluators (GEC)
 

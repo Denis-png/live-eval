@@ -4,7 +4,7 @@ import unittest
 
 from framework.data_loading import iter_local_rows
 from framework.tasks.sentiment.task import SentimentTask
-from scripts.prepare_sentiment_benchmark import write_benchmark
+from scripts.benchmarks.prepare_sentiment_benchmark import write_benchmark
 
 
 class WriteBenchmarkTests(unittest.TestCase):

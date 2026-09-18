@@ -3,7 +3,7 @@ import tempfile
 import textwrap
 import unittest
 
-from scripts.prepare_taxonomy_benchmark import prepare_taxonomy_record
+from scripts.benchmarks.prepare_taxonomy_benchmark import prepare_taxonomy_record
 
 
 TINY_TTL = textwrap.dedent("""\

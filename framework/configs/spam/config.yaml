@@ -14,6 +14,9 @@ api_keys:
   huggingface: "${HF_TOKEN}"
 
 # ── Dataset ─────────────────────────────────────────────────
+# 300 fixed rows (150 SPAM, 150 HAM) of the UCI SMS Spam Collection.
+# framework/data/** is gitignored, so build the CSV once:
+#   python -m scripts.benchmarks.prepare_spam_benchmark
 dataset:
   source: local
   local:

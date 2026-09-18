@@ -4,6 +4,16 @@ This utility keeps ontology parsing outside the framework's generic runtime
 loader. It extracts named classes, direct named rdfs:subClassOf axioms, and
 the parents named by owl:equivalentClass intersection definitions, ignoring
 anonymous restriction nodes.
+
+With no arguments it builds the benchmark the taxonomy config points at: the
+Pizza ontology, from a pinned commit of owlcs/pizza-ontology, which reproduces
+the final sweep's file byte for byte. framework/data/** is gitignored, so this
+is how that file is rebuilt.
+
+Usage:
+    python -m scripts.benchmarks.prepare_taxonomy_benchmark
+    python -m scripts.benchmarks.prepare_taxonomy_benchmark <ontology.owl> <output.jsonl> \\
+        --ontology-id <id> --domain "<domain>"
 """
 
 from __future__ import annotations
@@ -17,11 +27,20 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
+import tempfile
+import urllib.request
+
 from rdflib import Graph, URIRef
 from rdflib.collection import Collection
 from rdflib.namespace import OWL, RDF, RDFS
 
 _NON_NAME_CHARS = re.compile(r"[^A-Za-z0-9_]+")
+
+# The final sweep's benchmark: owlcs/pizza-ontology at a fixed commit.
+PIZZA_URL = ("https://raw.githubusercontent.com/owlcs/pizza-ontology/"
+             "4922ecbdf5535a00a6515276324c3aa7f5e4407a/pizza.owl")
+DEFAULT_OUTPUT = "framework/data/benchmarks/taxonomy/pizza.jsonl"
+SWEEP_MD5 = "31108207c2dc12701298eb5875d4829b"
 
 
 def _local_name(uri: URIRef) -> str:
@@ -227,22 +246,35 @@ def parse_args() -> argparse.Namespace:
         description="Convert an OWL/RDF ontology into normalized taxonomy JSONL.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("input", help="Path to the OWL/RDF ontology file")
-    parser.add_argument("output", help="Output JSONL path")
-    parser.add_argument("--ontology-id", required=True, help="Stable ontology identifier")
-    parser.add_argument("--domain", required=True, help="Human-readable domain name")
+    parser.add_argument("input", nargs="?",
+                        help="Path to the OWL/RDF ontology file (default: the pinned "
+                             "Pizza ontology, downloaded)")
+    parser.add_argument("output", nargs="?", default=DEFAULT_OUTPUT, help="Output JSONL path")
+    parser.add_argument("--ontology-id", help="Stable ontology identifier "
+                                              "(required with an input; pizza without)")
+    parser.add_argument("--domain", help="Human-readable domain name "
+                                         "(required with an input; pizza without)")
     parser.add_argument("--rdf-format", help="Optional rdflib parser format, e.g. xml or turtle")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.input and not (args.ontology_id and args.domain):
+        parser.error("an input ontology needs --ontology-id and --domain")
+    return args
 
 
 def main() -> None:
     args = parse_args()
-    record = prepare_taxonomy_record(
-        args.input,
-        ontology_id=args.ontology_id,
-        domain=args.domain,
-        rdf_format=args.rdf_format,
-    )
+    pizza = not args.input
+    with tempfile.TemporaryDirectory() as tmp:
+        source = args.input
+        if pizza:
+            source = str(Path(tmp) / "pizza.owl")
+            urllib.request.urlretrieve(PIZZA_URL, source)
+        record = prepare_taxonomy_record(
+            source,
+            ontology_id=args.ontology_id or "pizza",
+            domain=args.domain or "pizza",
+            rdf_format=args.rdf_format,
+        )
     output = write_jsonl_record(record, args.output)
     print("Taxonomy benchmark preparation summary")
     print("=" * 38)
@@ -251,6 +283,9 @@ def main() -> None:
     print(f"Classes           : {len(record['classes'])}")
     print(f"Subclass axioms   : {len(record['subclass_axioms'])}")
     print(f"Output            : {output}")
+    if pizza:
+        digest = hashlib.md5(Path(output).read_bytes()).hexdigest()
+        print(f"Matches the sweep : {'yes' if digest == SWEEP_MD5 else 'NO -- md5 ' + digest}")
 
 
 if __name__ == "__main__":

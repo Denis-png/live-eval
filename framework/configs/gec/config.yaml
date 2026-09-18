@@ -14,6 +14,9 @@ api_keys:
   huggingface: "${HF_TOKEN}"
 
 # ── Dataset ─────────────────────────────────────────────────
+# FCE v2.1 (BEA-2019), test split. framework/data/** is gitignored, so build the
+# file once:
+#   python -m scripts.benchmarks.prepare_gec_benchmark
 dataset:
   source: local # huggingface | local
   local:
