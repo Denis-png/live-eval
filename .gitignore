@@ -54,3 +54,5 @@ docs/superpowers/
 
 # ── Local-only docs ─────────────────────────────────────────
 docs/taxonomy_induction.md
+# superseded by docs/COOKBOOK.md
+docs/COOKBOOK_sections_5_7.md
