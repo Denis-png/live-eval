@@ -48,6 +48,9 @@ experiments/
 
 # ── Tooling scratch ─────────────────────────────────────────
 # Only the agent scratch dirs are ignored — docs/ itself holds real
-# project documentation (e.g. docs/taxonomy_induction.md).
+# project documentation.
 docs/superpowers/
 .superpowers
+
+# ── Local-only docs ─────────────────────────────────────────
+docs/taxonomy_induction.md
