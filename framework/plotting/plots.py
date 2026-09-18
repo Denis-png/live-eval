@@ -16,6 +16,8 @@ from framework.plotting.style import (  # noqa: E402
     SERIES_REAL,
     SURFACE,
     apply_axes_style,
+    figure_legend,
+    new_figure,
 )
 
 
@@ -62,6 +64,26 @@ def _visible(names) -> list[str]:
     return [n for n in names if n not in HIDDEN_METRICS]
 
 
+# Taxonomy's `diagnostics` evaluator returns counters and rates for the run
+# record (tp/fp/fn, failed and malformed predictions); only its macro averages
+# are scores. Drawn beside precision/recall/f1 they made a 26-inch-wide figure.
+_DIAGNOSTIC_SCORES = frozenset({"macro_precision", "macro_recall", "macro_f1"})
+
+
+def _scores(names) -> list[str]:
+    """The metrics a per-model score chart draws: _visible, minus diagnostics
+    counters."""
+    return [n for n in _visible(names)
+            if not n.startswith("diagnostics.")
+            or n.split(".", 1)[1] in _DIAGNOSTIC_SCORES]
+
+
+def _metric_label(name: str) -> str:
+    """Tick label: a diagnostics macro score reads as macro_f1, not
+    diagnostics.macro_f1."""
+    return name.split(".", 1)[1] if name.startswith("diagnostics.") else name
+
+
 def _split_by_scale(values: dict[str, float]) -> list[list[str]]:
     """Group metric names so that each group shares one y-scale.
 
@@ -93,14 +115,13 @@ def plot_generated_vs_real(model: str, generated: dict, real: dict | None,
     gen = flatten_mean_std(generated)
     real_flat = flatten_point(real or {})
     peak = {n: max(gen.get(n, (0.0, 0.0))[0], real_flat.get(n, 0.0))
-            for n in _visible(set(gen) | set(real_flat))}
+            for n in _scores(set(gen) | set(real_flat))}
     groups = _split_by_scale(peak) or [[]]
 
-    fig, axes = plt.subplots(
-        1, len(groups), figsize=(max(6.0, 1.6 * len(peak) + 2), 4.4), squeeze=False,
+    fig, axes = new_figure(
+        1, len(groups), figsize=(max(6.5, 1.15 * len(peak) + 2.5), 4.8), squeeze=False,
         gridspec_kw={"width_ratios": [max(len(g), 1) for g in groups]},
     )
-    fig.patch.set_facecolor(SURFACE)
     width = 0.38  # leaves a visible surface gap between the paired bars
 
     for ax, names in zip(axes[0], groups):
@@ -135,14 +156,13 @@ def plot_generated_vs_real(model: str, generated: dict, real: dict | None,
                            label=real_label, color=SERIES_REAL)
             ax.bar_label(rbars, fmt="%.2f", padding=2, color=INK_MUTED, fontsize=8)
         ax.set_xticks(list(x))
-        ax.set_xticklabels(names, rotation=20, ha="right")
+        ax.set_xticklabels([_metric_label(n) for n in names], rotation=20, ha="right")
         ax.margins(y=0.18)
 
     axes[0][0].set_ylabel("score", color=INK_MUTED)
-    axes[0][0].legend(frameon=False, labelcolor=INK_MUTED, fontsize=9)
+    figure_legend(fig, *axes[0])
     fig.suptitle(f"{model} — generated vs real\n{_subtitle(meta)}".strip(),
                  color=INK, fontsize=11)
-    fig.tight_layout()
     return fig
 
 
@@ -152,15 +172,14 @@ def plot_run_variance(model: str, runs: list[dict], generated: dict | None = Non
     Shows run-to-run instability — the core GET signal. Deliberately unlabelled:
     a number on every dot would be chaos; the y-axis carries the values."""
     per_run = [flatten_point(r) for r in (runs or [])]
-    names = sorted(_visible({n for r in per_run for n in r}))
+    names = sorted(_scores({n for r in per_run for n in r}))
     peak = {n: max([r[n] for r in per_run if n in r] or [0.0]) for n in names}
     groups = _split_by_scale(peak) or [[]]
 
-    fig, axes = plt.subplots(
-        1, len(groups), figsize=(max(6.0, 1.5 * len(names) + 2), 4.4), squeeze=False,
+    fig, axes = new_figure(
+        1, len(groups), figsize=(max(6.5, 1.1 * len(names) + 2.5), 4.8), squeeze=False,
         gridspec_kw={"width_ratios": [max(len(g), 1) for g in groups]},
     )
-    fig.patch.set_facecolor(SURFACE)
 
     for ax, group in zip(axes[0], groups):
         apply_axes_style(ax)
@@ -176,15 +195,13 @@ def plot_run_variance(model: str, runs: list[dict], generated: dict | None = Non
                 ax.plot([i - 0.22, i + 0.22], [mean, mean], color=INK_MUTED,
                         linewidth=2, zorder=4, label="mean" if i == 0 else None)
         ax.set_xticks(range(len(group)))
-        ax.set_xticklabels(group, rotation=20, ha="right")
+        ax.set_xticklabels([_metric_label(n) for n in group], rotation=20, ha="right")
         ax.margins(x=0.15, y=0.2)
 
     axes[0][0].set_ylabel("score", color=INK_MUTED)
-    if names:
-        axes[0][0].legend(frameon=False, labelcolor=INK_MUTED, fontsize=9)
+    figure_legend(fig, *axes[0])
     fig.suptitle(f"{model} — score per run (n={len(per_run)})\n{_subtitle(meta)}".strip(),
                  color=INK, fontsize=11)
-    fig.tight_layout()
     return fig
 
 
@@ -193,54 +210,57 @@ def plot_error_type_distribution(
     real_rates: dict[str, float] | None = None,
     meta: dict | None = None,
 ):
-    """Bar chart of synthetic error-type counts with optional real signal-rate overlay.
+    """Horizontal bars of synthetic error-type counts, most frequent first, with
+    an optional real overlay.
+
+    Horizontal because error types are many and their names long (19 ERRANT
+    codes in a gec session): the figure grows downward, one row per type, and
+    every name reads without rotation.
 
     synthetic_counts: {error_type: count} tallied from the run JSONs.
     real_rates: {signal_type: share} from profile.real.signal_type_dist, a
-        distribution summing to 1 -- drawn as a second bar group when present,
+        distribution summing to 1 -- drawn as a second bar per type when present,
         scaled to the synthetic count over the SAME types (a synthetic type the
         real distribution lacks, e.g. spam's no-signal "imitation", is not part
-        of the unit) so both groups count the same thing.  When absent, only the
-        synthetic bars are shown.
+        of the unit) so both bars count the same thing.
     """
-    labels = sorted(synthetic_counts)
+    labels = sorted(synthetic_counts, key=lambda l: (-synthetic_counts[l], l))
     synth_vals = [synthetic_counts[l] for l in labels]
-
     has_real = bool(real_rates)
     if has_real:
         total = sum(synthetic_counts[l] for l in labels if l in real_rates) or 1
         real_vals = [real_rates.get(l, 0.0) * total for l in labels]
 
-    width = 0.38 if has_real else 0.55
-    x = range(len(labels))
-
-    fig, ax = plt.subplots(figsize=(max(7.0, 1.4 * len(labels) + 2), 4.4))
-    fig.patch.set_facecolor(SURFACE)
-    apply_axes_style(ax)
+    row = 0.5 if has_real else 0.34
+    fig, ax = new_figure(figsize=(8.5, 2.2 + row * len(labels)))
+    apply_axes_style(ax, grid_axis="x")
+    y = range(len(labels))
+    height = 0.38 if has_real else 0.6
 
     if has_real:
-        rb = ax.bar([i - width / 2 - 0.01 for i in x], real_vals, width,
-                    label="real (scaled)", color=SERIES_REAL)
-        ax.bar_label(rb, fmt="%.1f", padding=2, color=INK_MUTED, fontsize=8)
-        gb = ax.bar([i + width / 2 + 0.01 for i in x], synth_vals, width,
-                    label="synthetic", color=SERIES_GENERATED)
-        ax.bar_label(gb, fmt="%d", padding=2, color=INK_MUTED, fontsize=8)
-        ax.legend(frameon=False, labelcolor=INK_MUTED, fontsize=9)
+        rb = ax.barh([i - height / 2 - 0.01 for i in y], real_vals, height,
+                     label="real (scaled)", color=SERIES_REAL)
+        ax.bar_label(rb, fmt="%.1f", padding=3, color=INK_MUTED, fontsize=8)
+        gb = ax.barh([i + height / 2 + 0.01 for i in y], synth_vals, height,
+                     label="synthetic", color=SERIES_GENERATED)
     else:
-        gb = ax.bar(list(x), synth_vals, width, label="synthetic", color=SERIES_GENERATED)
-        ax.bar_label(gb, fmt="%d", padding=2, color=INK_MUTED, fontsize=8)
+        gb = ax.barh(list(y), synth_vals, height, label="synthetic",
+                     color=SERIES_GENERATED)
+    ax.bar_label(gb, fmt="%d", padding=3, color=INK_MUTED, fontsize=8)
 
-    ax.set_xticks(list(x))
-    ax.set_xticklabels(labels, rotation=25, ha="right")
-    ax.set_ylabel("count", color=INK_MUTED)
-    ax.margins(y=0.18)
+    ax.set_yticks(list(y))
+    ax.set_yticklabels(labels)
+    ax.invert_yaxis()  # most frequent at the top
+    ax.set_xlabel("count", color=INK_MUTED)
+    ax.margins(x=0.12, y=0.02)
+    if has_real:
+        figure_legend(fig, ax)
 
     fig.suptitle(
         f"error-type distribution — synthetic{'  vs  real (scaled)' if has_real else ''}"
         f"\n{_subtitle(meta)}".strip(),
         color=INK, fontsize=11,
     )
-    fig.tight_layout()
     return fig
 
 
@@ -252,11 +272,10 @@ def plot_fidelity(profile: dict, meta: dict | None = None):
     fid = (profile or {}).get("fidelity") or {}
 
     signals = sorted(set(real.get("signal_rate", {})) | set(gen.get("signal_rate", {})))
-    fig, (ax_sig, ax_bal) = plt.subplots(
-        1, 2, figsize=(max(8.0, 1.5 * len(signals) + 4), 4.4),
+    fig, (ax_sig, ax_bal) = new_figure(
+        1, 2, figsize=(max(8.5, 1.3 * len(signals) + 4.5), 4.8),
         gridspec_kw={"width_ratios": [max(len(signals), 1), 1]},
     )
-    fig.patch.set_facecolor(SURFACE)
     width = 0.38
 
     apply_axes_style(ax_sig)
@@ -273,7 +292,6 @@ def plot_fidelity(profile: dict, meta: dict | None = None):
     ax_sig.set_xticklabels(signals, rotation=20, ha="right")
     ax_sig.set_ylabel("signal rate (of SPAM messages)", color=INK_MUTED)
     ax_sig.set_title("spam signals", color=INK, fontsize=10)
-    ax_sig.legend(frameon=False, labelcolor=INK_MUTED, fontsize=9)
     ax_sig.margins(y=0.18)
 
     apply_axes_style(ax_bal)
@@ -290,9 +308,81 @@ def plot_fidelity(profile: dict, meta: dict | None = None):
     jsd = (f"JSD type {fid.get('type_dist_jsd', float('nan')):.3f}  ·  "
            f"JSD count {fid.get('count_dist_jsd', float('nan')):.3f}  "
            f"(0 = identical, 1 = disjoint)")
+    figure_legend(fig, ax_sig)
     fig.suptitle(f"real vs generated fidelity — {jsd}\n{_subtitle(meta)}".strip(),
                  color=INK, fontsize=11)
-    fig.tight_layout()
+    return fig
+
+
+GEC_TOP_TYPES = 12
+
+
+def plot_gec_fidelity(profile: dict, meta: dict | None = None):
+    """Real vs generated ERRANT edit types and edits per sentence, with the JSD
+    scores in the title. The generic figure reads spam's signal rates and SPAM
+    fraction, which a gec profile does not have, so it drew two empty panels.
+
+    Types: the GEC_TOP_TYPES largest by either side's share, the rest folded
+    into one "other" row, as horizontal bars (ERRANT codes are many and long)."""
+    real = (profile or {}).get("real") or {}
+    gen = (profile or {}).get("generated") or {}
+    fid = (profile or {}).get("fidelity") or {}
+    real_types = real.get("error_type_dist") or {}
+    gen_types = gen.get("error_type_dist") or {}
+
+    ranked = sorted(set(real_types) | set(gen_types),
+                    key=lambda t: (-max(real_types.get(t, 0.0), gen_types.get(t, 0.0)), t))
+    shown, rest = ranked[:GEC_TOP_TYPES], ranked[GEC_TOP_TYPES:]
+    labels = list(shown)
+    real_vals = [real_types.get(t, 0.0) for t in shown]
+    gen_vals = [gen_types.get(t, 0.0) for t in shown]
+    if rest:
+        labels.append(f"other ({len(rest)} types)")
+        real_vals.append(sum(real_types.get(t, 0.0) for t in rest))
+        gen_vals.append(sum(gen_types.get(t, 0.0) for t in rest))
+
+    fig, (ax_types, ax_counts) = new_figure(
+        1, 2, figsize=(12.5, 2.4 + 0.42 * len(labels)),
+        gridspec_kw={"width_ratios": [3, 2]},
+    )
+    height = 0.38
+    apply_axes_style(ax_types, grid_axis="x")
+    y = range(len(labels))
+    for offset, vals, color, name in ((-1, real_vals, SERIES_REAL, "real"),
+                                      (1, gen_vals, SERIES_GENERATED, "generated")):
+        bars = ax_types.barh([i + offset * (height / 2 + 0.01) for i in y], vals, height,
+                             label=name, color=color)
+        ax_types.bar_label(bars, fmt="%.2f", padding=3, color=INK_MUTED, fontsize=8)
+    ax_types.set_yticks(list(y))
+    ax_types.set_yticklabels(labels)
+    ax_types.invert_yaxis()
+    ax_types.set_xlabel("share of edits", color=INK_MUTED)
+    ax_types.set_title("ERRANT edit types", color=INK, fontsize=10)
+    ax_types.margins(x=0.14, y=0.02)
+
+    apply_axes_style(ax_counts)
+    real_counts = real.get("error_count_dist") or {}
+    gen_counts = gen.get("error_count_dist") or {}
+    bins = _sort_distribution_bins(set(real_counts) | set(gen_counts))
+    x = range(len(bins))
+    for offset, side, color, name in ((-1, real_counts, SERIES_REAL, "real"),
+                                      (1, gen_counts, SERIES_GENERATED, "generated")):
+        ax_counts.bar([i + offset * (height / 2 + 0.01) for i in x],
+                      [side.get(b, 0.0) for b in bins], height, label=name, color=color)
+    ax_counts.set_xticks(list(x))
+    ax_counts.set_xticklabels(bins)
+    ax_counts.set_xlabel("edits per sentence", color=INK_MUTED)
+    ax_counts.set_ylabel("share of sentences", color=INK_MUTED)
+    ax_counts.set_title("edits per sentence", color=INK, fontsize=10)
+    ax_counts.margins(y=0.12)
+
+    figure_legend(fig, ax_types)
+    jsd = (f"JSD type {fid.get('type_dist_jsd', float('nan')):.3f}  ·  "
+           f"JSD count {fid.get('count_dist_jsd', float('nan')):.3f}  ·  "
+           f"JSD length {fid.get('length_jsd', float('nan')):.3f}  "
+           f"(0 = identical, 1 = disjoint)")
+    fig.suptitle(f"real vs generated fidelity — {jsd}\n{_subtitle(meta)}".strip(),
+                 color=INK, fontsize=11)
     return fig
 
 
@@ -304,8 +394,7 @@ def plot_sentiment_fidelity(profile: dict, meta: dict | None = None):
     gen = (profile or {}).get("generated") or {}
     fid = (profile or {}).get("fidelity") or {}
 
-    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.4), gridspec_kw={"width_ratios": [1, 2]})
-    fig.patch.set_facecolor(SURFACE)
+    fig, axes = new_figure(1, 2, figsize=(11.5, 4.8), gridspec_kw={"width_ratios": [1, 2]})
     width = 0.38
     panels = (
         ("label_dist", "fraction of samples", "label balance", 0),
@@ -325,14 +414,13 @@ def plot_sentiment_fidelity(profile: dict, meta: dict | None = None):
         ax.set_ylabel(ylabel, color=INK_MUTED)
         ax.set_title(title, color=INK, fontsize=10)
         ax.margins(y=0.18)
-    axes[0].legend(frameon=False, labelcolor=INK_MUTED, fontsize=9)
+    figure_legend(fig, axes[0])
 
     jsd = (f"JSD label {fid.get('label_dist_jsd', float('nan')):.3f}  ·  "
            f"JSD length {fid.get('length_jsd', float('nan')):.3f}  "
            f"(0 = identical, 1 = disjoint)")
     fig.suptitle(f"real vs generated fidelity — {jsd}\n{_subtitle(meta)}".strip(),
                  color=INK, fontsize=11)
-    fig.tight_layout()
     return fig
 
 
@@ -362,10 +450,9 @@ def plot_taxonomy_fidelity(profile: dict, meta: dict | None = None):
         "child_count_distribution",
     ]
 
-    fig, (ax_scalar, ax_dist) = plt.subplots(
-        1, 2, figsize=(12.0, 4.6), gridspec_kw={"width_ratios": [5, 3]},
+    fig, (ax_scalar, ax_dist) = new_figure(
+        1, 2, figsize=(12.5, 5.0), gridspec_kw={"width_ratios": [5, 3]},
     )
-    fig.patch.set_facecolor(SURFACE)
     width = 0.38
 
     apply_axes_style(ax_scalar)
@@ -408,7 +495,6 @@ def plot_taxonomy_fidelity(profile: dict, meta: dict | None = None):
     ax_scalar.set_xticklabels(scalar_keys, rotation=20, ha="right")
     ax_scalar.set_ylabel("count / value", color=INK_MUTED)
     ax_scalar.set_title("structural scalars", color=INK, fontsize=10)
-    ax_scalar.legend(frameon=False, labelcolor=INK_MUTED, fontsize=9)
     ax_scalar.margins(y=0.2)
 
     apply_axes_style(ax_dist)
@@ -423,14 +509,21 @@ def plot_taxonomy_fidelity(profile: dict, meta: dict | None = None):
     ax_dist.set_xticklabels(dist_keys, rotation=20, ha="right")
     ax_dist.set_ylabel("JSD (0 = identical)", color=INK_MUTED)
     ax_dist.set_title("distribution divergence", color=INK, fontsize=10)
-    ax_dist.set_ylim(0, max(1.0, max(divergences or [0]) * 1.15))
+    # Scaled to the data: on a fixed 0-1 axis, a cell that imposes the real
+    # structure (inverse+seedless: JSD 0.000-0.004) drew three invisible bars.
+    top = max(divergences or [0.0])
+    ax_dist.set_ylim(0, min(1.0, max(0.05, top * 1.3)))
+    if top < 0.01:
+        ax_dist.text(0.5, 0.62, "every JSD below 0.01:\nsynthetic structure matches real",
+                     ha="center", va="center", color=INK_MUTED, fontsize=9,
+                     transform=ax_dist.transAxes)
 
+    figure_legend(fig, ax_scalar)
     n = aggregate.get("n_synthetic_taxonomies", 0)
     fig.suptitle(
         f"taxonomy structural fidelity — real vs synthetic (n={n})\n{_subtitle(meta)}".strip(),
         color=INK, fontsize=11,
     )
-    fig.tight_layout()
     return fig
 
 
@@ -518,8 +611,7 @@ def plot_taxonomy_fidelity_distributions(profile: dict, meta: dict | None = None
         ("parent_count_distribution", "parent count", "number of parents"),
         ("child_count_distribution", "child / branching count", "number of children"),
     ]
-    fig, axes = plt.subplots(1, 3, figsize=(13.2, 4.4), squeeze=False)
-    fig.patch.set_facecolor(SURFACE)
+    fig, axes = new_figure(1, 3, figsize=(13.5, 4.9), squeeze=False)
 
     for ax, (key, title, xlabel) in zip(axes[0], panels):
         apply_axes_style(ax)
@@ -539,14 +631,18 @@ def plot_taxonomy_fidelity_distributions(profile: dict, meta: dict | None = None
                 color=SERIES_GENERATED, alpha=0.18,
                 label="synthetic min/max" if key == panels[0][0] else None,
             )
+            # The mean is solid with large filled dots, the real line dashed with
+            # small hollow ones on top: when a cell imposes the real structure
+            # the two coincide, and a solid real line drawn over the mean hid it.
             ax.plot(
-                x, series["synthetic_mean"], marker="o", linewidth=2,
-                color=SERIES_GENERATED,
+                x, series["synthetic_mean"], marker="o", markersize=8, linewidth=2.5,
+                color=SERIES_GENERATED, zorder=3,
                 label="synthetic mean" if key == panels[0][0] else None,
             )
             ax.plot(
-                x, series["real"], marker="o", linewidth=2,
-                color=SERIES_REAL,
+                x, series["real"], marker="o", markersize=5, linewidth=1.6,
+                linestyle="--", color=SERIES_REAL, markerfacecolor=SURFACE,
+                markeredgewidth=1.4, zorder=4,
                 label="real" if key == panels[0][0] else None,
             )
             ax.set_xticks(x)
@@ -559,10 +655,9 @@ def plot_taxonomy_fidelity_distributions(profile: dict, meta: dict | None = None
         ax.set_xlabel(xlabel, color=INK_MUTED)
         ax.set_ylabel("proportion of classes", color=INK_MUTED)
 
-    axes[0][0].legend(frameon=False, labelcolor=INK_MUTED, fontsize=9)
+    figure_legend(fig, axes[0][0])
     fig.suptitle(
         f"taxonomy structural distributions — real vs synthetic\n{_subtitle(meta)}".strip(),
         color=INK, fontsize=11,
     )
-    fig.tight_layout()
     return fig

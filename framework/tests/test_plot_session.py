@@ -267,9 +267,9 @@ class ErrorTypeFigureTests(unittest.TestCase):
             {"urgency": 60, "phishing_link": 40, "imitation": 50},
             {"urgency": 0.5, "phishing_link": 0.5})
         self.addCleanup(plots.plt.close, fig)
-        real = {int(round(b.get_x() + b.get_width())): b.get_height()
-                for b in fig.axes[0].containers[0]}
-        self.assertEqual(sorted(real.values()), [0.0, 50.0, 50.0])
+        # Horizontal bars: a bar's value is its width.
+        real = [b.get_width() for b in fig.axes[0].containers[0]]
+        self.assertEqual(sorted(real), [0.0, 50.0, 50.0])
 
     def test_free_text_types_draw_nothing_and_say_why(self):
         items = [{"error_type": f"the model's own phrase number {i}"}

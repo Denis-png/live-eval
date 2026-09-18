@@ -88,7 +88,9 @@ class GeneratedVsRealTests(unittest.TestCase):
         ax = fig.axes[0]
         # 2 series x 2 metrics = 4 bars
         self.assertEqual(len(ax.containers[0]), 2)
-        labels = [t.get_text() for t in ax.get_legend().get_texts()]
+        # One figure-level legend, outside the plots, never on an axis.
+        self.assertIsNone(ax.get_legend())
+        labels = [t.get_text() for t in fig.legends[0].get_texts()]
         self.assertEqual(len(labels), 2)
         self.assertTrue(any("generated" in l for l in labels))
         self.assertTrue(any("real" in l for l in labels))
@@ -217,6 +219,112 @@ class SubtitleCellTests(unittest.TestCase):
 
     def test_empty_meta_still_empty(self):
         self.assertEqual(plots._subtitle(None), "")
+
+_SENTIMENT_PROFILE = {
+    "real": {"label_dist": {"NEGATIVE": 0.3, "NEUTRAL": 0.5, "POSITIVE": 0.2},
+             "word_count_hist": {"1-5": 0.4, "6-10": 0.6}},
+    "generated": {"label_dist": {"NEGATIVE": 0.35, "NEUTRAL": 0.45, "POSITIVE": 0.2},
+                  "word_count_hist": {"1-5": 0.5, "6-10": 0.5}},
+    "fidelity": {"label_dist_jsd": 0.01, "length_jsd": 0.02},
+}
+# 14 ERRANT types with distinct shares: the 12 largest are drawn, 2 are folded.
+_GEC_TYPES = {f"R:T{i:02d}": (14 - i) / 105 for i in range(14)}
+_GEC_PROFILE = {
+    "real": {"error_type_dist": _GEC_TYPES, "error_count_dist": {"1": 0.6, "2": 0.4}},
+    "generated": {"error_type_dist": _GEC_TYPES, "error_count_dist": {"1": 0.5, "2": 0.5}},
+    "fidelity": {"type_dist_jsd": 0.1, "count_dist_jsd": 0.02, "length_jsd": 0.01},
+}
+
+
+class LegendPlacementTests(unittest.TestCase):
+    """Every per-session figure keeps its legend off the data: one figure-level
+    legend below the plots, never one inside an axis, where it covered bars and
+    value labels."""
+
+    def test_no_builder_draws_a_legend_inside_a_plot(self):
+        builders = {
+            "generated_vs_real": lambda: plot_generated_vs_real("m", _GENERATED, _REAL),
+            "run_variance": lambda: plot_run_variance("m", _RUNS, _GENERATED),
+            "spam fidelity": lambda: plot_fidelity(_PROFILE),
+            "error types": lambda: plots.plot_error_type_distribution(
+                {"a": 3, "b": 1}, {"a": 0.5, "b": 0.5}),
+            "sentiment fidelity": lambda: plots.plot_sentiment_fidelity(_SENTIMENT_PROFILE),
+            "gec fidelity": lambda: plots.plot_gec_fidelity(_GEC_PROFILE),
+            "taxonomy fidelity": lambda: plot_taxonomy_fidelity(_TAXONOMY_PROFILE),
+            "taxonomy distributions":
+                lambda: plot_taxonomy_fidelity_distributions(_TAXONOMY_PROFILE),
+        }
+        for name, build in builders.items():
+            fig = build()
+            try:
+                with self.subTest(figure=name):
+                    self.assertTrue(all(ax.get_legend() is None for ax in fig.axes))
+                    self.assertEqual(len(fig.legends), 1)
+            finally:
+                plots.plt.close(fig)
+
+
+class GecFidelityTests(unittest.TestCase):
+    def test_the_largest_types_are_drawn_and_the_rest_folded(self):
+        fig = plots.plot_gec_fidelity(_GEC_PROFILE)
+        self.addCleanup(plots.plt.close, fig)
+        ax_types = fig.axes[0]
+        labels = [t.get_text() for t in ax_types.get_yticklabels()]
+        self.assertEqual(len(labels), plots.GEC_TOP_TYPES + 1)
+        self.assertEqual(labels[0], "R:T00")
+        self.assertEqual(labels[-1], "other (2 types)")
+        other_real = ax_types.containers[0][-1].get_width()
+        self.assertAlmostEqual(other_real, (2 + 1) / 105)
+
+    def test_the_session_draws_it_for_a_gec_profile(self):
+        import json
+        import os
+        import tempfile
+        from unittest import mock
+        from framework.plotting import session as S
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "results.json"), "w") as f:
+                json.dump({"meta": {"task": "gec"}, "results": {}}, f)
+            with open(os.path.join(d, "profile.json"), "w") as f:
+                json.dump(_GEC_PROFILE, f)
+            # The spam figure is the fallback; a gec profile must never reach it.
+            with mock.patch.object(plots, "plot_fidelity", side_effect=AssertionError):
+                names = [os.path.basename(p) for p in S.render_session(d)]
+        self.assertIn("fidelity.png", names)
+
+
+class ScoreChartMetricTests(unittest.TestCase):
+    def test_diagnostics_counters_are_left_out_and_macro_scores_kept(self):
+        names = {"f1", "diagnostics.tp", "diagnostics.invalid_relation_rate",
+                 "diagnostics.macro_f1", "fpr"}
+        self.assertEqual(sorted(plots._scores(names)), ["diagnostics.macro_f1", "f1"])
+
+    def test_a_macro_score_is_labelled_without_its_prefix(self):
+        generated = {**_GENERATED, "diagnostics": {"macro_f1": {"mean": 0.7, "std": 0.0},
+                                                   "tp": {"mean": 40.0, "std": 2.0}}}
+        fig = plot_generated_vs_real("m", generated, _REAL)
+        self.addCleanup(plots.plt.close, fig)
+        ticks = [t.get_text() for ax in fig.axes for t in ax.get_xticklabels()]
+        self.assertIn("macro_f1", ticks)
+        self.assertNotIn("tp", " ".join(ticks))
+        self.assertEqual(len(fig.axes), 1)   # no counts panel beside the scores
+
+
+class TaxonomyDivergenceAxisTests(unittest.TestCase):
+    def test_near_zero_divergences_stay_visible_and_are_explained(self):
+        profile = {"fidelity": {**_TAXONOMY_PROFILE["fidelity"], "aggregate": {
+            **_TAXONOMY_PROFILE["fidelity"]["aggregate"],
+            "distribution_characteristics": {
+                k: {"jensen_shannon_divergence": {"mean": v}}
+                for k, v in (("depth_distribution", 0.0),
+                             ("parent_count_distribution", 0.0),
+                             ("child_count_distribution", 0.004))}}}}
+        fig = plot_taxonomy_fidelity(profile)
+        self.addCleanup(plots.plt.close, fig)
+        ax_dist = fig.axes[1]
+        self.assertAlmostEqual(ax_dist.get_ylim()[1], 0.05)
+        self.assertTrue(any("below 0.01" in t.get_text() for t in ax_dist.texts))
+
 
 if __name__ == "__main__":
     unittest.main()

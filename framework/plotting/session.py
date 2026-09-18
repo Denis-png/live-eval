@@ -181,6 +181,10 @@ def render_session(session_dir: str, out_dir: str | None = None) -> list[str]:
                     plots.plot_sentiment_fidelity(profile, meta),
                     os.path.join(out_dir, filename), plt,
                 ))
+            elif "error_type_dist" in (profile.get("real") or {}):
+                # gec: ERRANT edit distributions, not spam's signals.
+                written.append(_save(plots.plot_gec_fidelity(profile, meta),
+                                     os.path.join(out_dir, filename), plt))
             else:
                 written.append(_save(plots.plot_fidelity(profile, meta),
                                      os.path.join(out_dir, filename), plt))

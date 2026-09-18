@@ -393,7 +393,7 @@ class PlotTests(unittest.TestCase):
         generated = {"f1": {"mean": 0.5, "std": 0.1}}
         paired = plot_generated_vs_real("m", generated, {"f1": 0.4}, {"paired_real": True})
         whole = plot_generated_vs_real("m", generated, {"f1": 0.3}, {})
-        label = lambda fig: [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
+        label = lambda fig: [t.get_text() for t in fig.legends[0].get_texts()]
         self.assertIn("real (paired)", label(paired))
         self.assertIn("real benchmark", label(whole))
 
