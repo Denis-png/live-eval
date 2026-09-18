@@ -195,6 +195,12 @@ def render_session(session_dir: str, out_dir: str | None = None) -> list[str]:
     skip = _error_type_skip_reason(error_counts) if error_counts else None
     if skip:
         print(f"[NOTE] no error_type_dist.png: {skip}", file=sys.stderr)
+        # Re-rendering overwrites figures but never removed them, so a chart
+        # drawn before this skip existed (one "unknown" bar, or one bar per
+        # free-text phrase) outlived the fix.
+        stale = os.path.join(out_dir, "error_type_dist.png")
+        if os.path.exists(stale):
+            os.remove(stale)
     elif error_counts:
         # The real signal-type DISTRIBUTION, not signal_rate: a rate is the share
         # of spam messages carrying a signal, multi-label and summing above 1, so
