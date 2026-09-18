@@ -181,7 +181,9 @@ The most important fields are:
 | `num_runs` | Number of repeated synthetic benchmark runs |
 | `sample_size` | Number of generated samples per run |
 
-Common CLI overrides:
+> **Task-specific settings** (class balance for Spam, feedback loops for Taxonomy, seed-pool options for GEC) are not listed here — they are documented alongside each task in **Section 5**.
+
+Common CLI overrides for the fields above:
 
 ```bash
 --mode inverse
@@ -189,8 +191,6 @@ Common CLI overrides:
 --runs 1
 --sample-size 20
 ```
-
-Task-specific options such as class balance, taxonomy feedback, or seed-pool settings are described in **Section 5**.
 
 ---
 
