@@ -271,6 +271,20 @@ class ErrorTypeFigureTests(unittest.TestCase):
         real = [b.get_width() for b in fig.axes[0].containers[0]]
         self.assertEqual(sorted(real), [0.0, 50.0, 50.0])
 
+    def test_a_skipped_figure_left_by_an_earlier_render_is_removed(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "results.json"), "w") as f:
+                json.dump(_RESULTS, f)
+            os.makedirs(os.path.join(d, "generated"))
+            with open(os.path.join(d, "generated", "run_1.json"), "w") as f:
+                json.dump([{"text": "x"}] * 3, f)
+            os.makedirs(os.path.join(d, "plots"))
+            old = os.path.join(d, "plots", "error_type_dist.png")
+            open(old, "wb").close()
+            with patch("sys.stderr"):
+                S.render_session(d)
+            self.assertFalse(os.path.exists(old))
+
     def test_free_text_types_draw_nothing_and_say_why(self):
         items = [{"error_type": f"the model's own phrase number {i}"}
                  for i in range(S.MAX_ERROR_TYPES + 1)]
