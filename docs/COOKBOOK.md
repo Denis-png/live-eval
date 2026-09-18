@@ -782,11 +782,11 @@ reference (default: entire split — can be slow on CPU).
 transformation (negation, sarcasm, intensity reduction, …), which implies a
 deterministic ground-truth label the classifier is scored against.
 
-**Benchmark:** TweetEval sentiment subset (`framework/data/benchmarks/sentiment/tweeteval_base_150.csv`).  
+**Benchmark:** TweetEval sentiment subset (`framework/data/benchmarks/sentiment/tweeteval_test_150.csv`).  
 Build the CSV once per clone:
 
 ```bash
-python -m scripts.prepare_sentiment_benchmark
+python -m scripts.benchmarks.prepare_sentiment_benchmark
 ```
 
 #### Error types → labels
@@ -851,10 +851,11 @@ Both fine-tuned on TweetEval sentiment — same benchmark the seeds are drawn fr
 
 ```yaml
 generation:
-  seedless: true           # the shipped config runs seedless forward
-  model: "google/gemini-2.5-flash"   # via openrouter
-  judge:
-    enabled: true          # judge enabled in the shipped config
+  mode: forward            # the shipped config is the forward + seeded baseline
+  seedless: false
+  model: "minimax-m3"      # via openrouter, like every task
+judge:
+  enabled: false           # off in every shipped config; turn it on per run with --judge
 ```
 
 `forward + seeded` is the only Sentiment cell that cannot be calibrated — the
@@ -870,14 +871,11 @@ to aim a seed mix at.
 costs ten full LLM artifacts, each potentially several thousand tokens.
 
 **Benchmark:** Pizza ontology in JSONL format (`framework/data/benchmarks/taxonomy/pizza.jsonl`).  
-This file is **not shipped** — build it once from the OWL source:
+This file is **not shipped** — build it once (the script downloads the Pizza
+ontology from a pinned commit):
 
 ```bash
-python -m scripts.prepare_taxonomy_benchmark \
-  --input /path/to/pizza.owl \
-  --output framework/data/benchmarks/taxonomy/pizza.jsonl \
-  --ontology-id pizza \
-  --domain pizza
+python -m scripts.benchmarks.prepare_taxonomy_benchmark
 ```
 
 #### The four cells
@@ -997,8 +995,10 @@ framework/data/runs/<task>/<session>/
   plots/
     generated_vs_real_<model>.png
     run_variance_<model>.png
-    fidelity.png            # spam
+    fidelity.png            # spam, gec
     sentiment_fidelity.png  # sentiment
+    error_type_dist.png     # gec, spam, sentiment (skipped, with a note, when the
+                            #   samples carry no coded types)
     taxonomy_fidelity.png               # taxonomy
     taxonomy_fidelity_distributions.png # taxonomy
 ```
@@ -1139,10 +1139,10 @@ Benchmark files are gitignored. You need to provide them yourself:
 
 | task | file | how to get it |
 |---|---|---|
-| GEC | `framework/data/benchmarks/gec/fce.m2` | Download FCE corpus |
-| Spam | `framework/data/benchmarks/spam/sms_spam_ham_300.csv` | Download SMS spam dataset |
-| Sentiment | `framework/data/benchmarks/sentiment/tweeteval_base_150.csv` | `python -m scripts.prepare_sentiment_benchmark` |
-| Taxonomy | `framework/data/benchmarks/taxonomy/pizza.jsonl` | `python -m scripts.prepare_taxonomy_benchmark --input pizza.owl ...` |
+| GEC | `framework/data/benchmarks/gec/fce.m2` | `python -m scripts.benchmarks.prepare_gec_benchmark` |
+| Spam | `framework/data/benchmarks/spam/sms_spam_ham_300.csv` | `python -m scripts.benchmarks.prepare_spam_benchmark` |
+| Sentiment | `framework/data/benchmarks/sentiment/tweeteval_test_150.csv` | `python -m scripts.benchmarks.prepare_sentiment_benchmark` |
+| Taxonomy | `framework/data/benchmarks/taxonomy/pizza.jsonl` | `python -m scripts.benchmarks.prepare_taxonomy_benchmark` |
 
 ---
 
