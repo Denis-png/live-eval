@@ -61,8 +61,32 @@ def _save(fig, path: str, plt) -> str:
     return path
 
 
+# A coded error-type vocabulary is small: the ERRANT codes a run actually uses,
+# spam's signals, sentiment's transformations -- at most ~20 in the final sweep.
+# A generator that names its own types (gec's forward cells, sentiment's
+# forward+seedless) writes a new phrase almost every sample, and one bar per
+# phrase is no distribution at all.
+MAX_ERROR_TYPES = 30
+
+
+def _error_type_skip_reason(counts: dict[str, int]) -> str | None:
+    """Why error_type_dist.png would say nothing, or None when it can be drawn."""
+    if set(counts) == {"unknown"}:
+        return "the samples carry no error types"
+    if len(counts) > MAX_ERROR_TYPES:
+        return (f"{len(counts)} distinct error types -- the generator named them in "
+                "free text, so there is no distribution to plot")
+    return None
+
+
 def _load_error_type_counts(session_dir: str) -> dict[str, int]:
-    """Tally error_type across every run_*.json in <session_dir>/generated/."""
+    """Tally error types across every run_*.json in <session_dir>/generated/.
+
+    A sample's types are its `error_type`, or `technique` -- the same thing under
+    the name class-conditional (spam) records use -- split on commas: one sample
+    can carry several (gec's inverse cells join ERRANT codes, spam joins its
+    signals), and tallying the joined string made every combination its own
+    type."""
     import glob
     counts: dict[str, int] = {}
     # run_<N>_rejected.json shares the directory and the glob, but holds
@@ -74,8 +98,10 @@ def _load_error_type_counts(session_dir: str) -> dict[str, int]:
             with open(path, encoding="utf-8") as f:
                 items = json.load(f)
             for item in (items or []):
-                et = item.get("error_type") or "unknown"
-                counts[et] = counts.get(et, 0) + 1
+                raw = item.get("error_type") or item.get("technique") or "unknown"
+                for et in (t.strip() for t in str(raw).split(",")):
+                    if et:
+                        counts[et] = counts.get(et, 0) + 1
         except Exception as e:
             print(f"[WARN] could not read {path} for error-type counts: {e}", file=sys.stderr)
     return counts
@@ -162,8 +188,14 @@ def render_session(session_dir: str, out_dir: str | None = None) -> list[str]:
             print(f"[WARN] could not render {filename}: {e}", file=sys.stderr)
 
     error_counts = _load_error_type_counts(session_dir)
-    if error_counts:
-        real_rates = (profile or {}).get("real", {}).get("signal_rate") if profile else None
+    skip = _error_type_skip_reason(error_counts) if error_counts else None
+    if skip:
+        print(f"[NOTE] no error_type_dist.png: {skip}", file=sys.stderr)
+    elif error_counts:
+        # The real signal-type DISTRIBUTION, not signal_rate: a rate is the share
+        # of spam messages carrying a signal, multi-label and summing above 1, so
+        # scaling it to a count inflated every real bar.
+        real_rates = (profile or {}).get("real", {}).get("signal_type_dist") if profile else None
         try:
             written.append(_save(
                 plots.plot_error_type_distribution(error_counts, real_rates, meta),

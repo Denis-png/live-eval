@@ -196,16 +196,19 @@ def plot_error_type_distribution(
     """Bar chart of synthetic error-type counts with optional real signal-rate overlay.
 
     synthetic_counts: {error_type: count} tallied from the run JSONs.
-    real_rates: {signal_type: rate} from profile.real.signal_rate — drawn as a
-        second bar group when present, scaled to the synthetic total so both axes
-        share the same unit (count).  When absent, only the synthetic bars are shown.
+    real_rates: {signal_type: share} from profile.real.signal_type_dist, a
+        distribution summing to 1 -- drawn as a second bar group when present,
+        scaled to the synthetic count over the SAME types (a synthetic type the
+        real distribution lacks, e.g. spam's no-signal "imitation", is not part
+        of the unit) so both groups count the same thing.  When absent, only the
+        synthetic bars are shown.
     """
     labels = sorted(synthetic_counts)
     synth_vals = [synthetic_counts[l] for l in labels]
-    total = sum(synth_vals) or 1
 
     has_real = bool(real_rates)
     if has_real:
+        total = sum(synthetic_counts[l] for l in labels if l in real_rates) or 1
         real_vals = [real_rates.get(l, 0.0) * total for l in labels]
 
     width = 0.38 if has_real else 0.55

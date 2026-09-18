@@ -200,8 +200,6 @@ class RenderSessionTests(unittest.TestCase):
             self.assertIn("fidelity.png", names)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class ErrorTypeTallyTests(unittest.TestCase):
@@ -217,3 +215,68 @@ class ErrorTypeTallyTests(unittest.TestCase):
             with open(os.path.join(gen, "run_1_rejected.json"), "w") as f:
                 json.dump([{"index": 3, "attempts": []}], f)
             self.assertEqual(S._load_error_type_counts(d), {"R:VERB": 2})
+
+    def _tally(self, items):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "generated"))
+            with open(os.path.join(d, "generated", "run_1.json"), "w") as f:
+                json.dump(items, f)
+            return S._load_error_type_counts(d)
+
+    def test_joined_types_are_counted_one_by_one(self):
+        # gec's inverse cells join ERRANT codes; each combination used to be its
+        # own bar, 141-198 of them per session.
+        counts = self._tally([{"error_type": "R:SPELL, R:PREP"}, {"error_type": "R:SPELL"}])
+        self.assertEqual(counts, {"R:SPELL": 2, "R:PREP": 1})
+
+    def test_spam_technique_is_its_error_type(self):
+        # Spam's records carry `technique`; every spam sample used to tally as
+        # "unknown" against the real signal rates the figure plots beside it.
+        counts = self._tally([{"technique": "phishing_link, urgency"},
+                              {"technique": "imitation"}])
+        self.assertEqual(counts, {"phishing_link": 1, "urgency": 1, "imitation": 1})
+
+
+class ErrorTypeFigureTests(unittest.TestCase):
+    def _render(self, items):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "results.json"), "w") as f:
+                json.dump(_RESULTS, f)
+            os.makedirs(os.path.join(d, "generated"))
+            with open(os.path.join(d, "generated", "run_1.json"), "w") as f:
+                json.dump(items, f)
+            with patch("sys.stderr") as err:
+                names = [os.path.basename(p) for p in S.render_session(d)]
+            notes = "".join(str(c.args[0]) for c in err.write.call_args_list if c.args)
+            return names, notes
+
+    def test_a_coded_vocabulary_is_drawn(self):
+        names, _ = self._render([{"error_type": "R:SPELL, R:PREP"}] * 3)
+        self.assertIn("error_type_dist.png", names)
+
+    def test_samples_without_types_draw_nothing_and_say_why(self):
+        names, notes = self._render([{"text": "x"}] * 3)
+        self.assertNotIn("error_type_dist.png", names)
+        self.assertIn("no error types", notes)
+
+    def test_real_signals_are_scaled_like_for_like(self):
+        # 100 synthetic signals over two types beside 50 no-signal rows: the real
+        # distribution scales to the 100, not to all 150.
+        from framework.plotting import plots
+        fig = plots.plot_error_type_distribution(
+            {"urgency": 60, "phishing_link": 40, "imitation": 50},
+            {"urgency": 0.5, "phishing_link": 0.5})
+        self.addCleanup(plots.plt.close, fig)
+        real = {int(round(b.get_x() + b.get_width())): b.get_height()
+                for b in fig.axes[0].containers[0]}
+        self.assertEqual(sorted(real.values()), [0.0, 50.0, 50.0])
+
+    def test_free_text_types_draw_nothing_and_say_why(self):
+        items = [{"error_type": f"the model's own phrase number {i}"}
+                 for i in range(S.MAX_ERROR_TYPES + 1)]
+        names, notes = self._render(items)
+        self.assertNotIn("error_type_dist.png", names)
+        self.assertIn("free text", notes)
+
+if __name__ == "__main__":
+    unittest.main()
