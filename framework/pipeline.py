@@ -1050,8 +1050,8 @@ def _all_or_no_pairing(per_run: list[dict | None]) -> list[dict] | None:
     """The session's paired real scores -- one per run, in run order -- or None.
 
     `real_paired_runs[k]` is read as the paired score of `runs[k]`, so a session
-    whose runs did not ALL pair (e.g. merge_sessions combining an archived run
-    that predates source_pool_index with a current one) pairs none of them:
+    whose runs did not ALL pair (e.g. a rescored archive holding a run that
+    predates source_pool_index beside a current one) pairs none of them:
     dropping only the unpaired runs would shift every later entry onto the
     wrong run. Warns when that discards pairing some runs had."""
     paired = [scores for scores in per_run if scores is not None]

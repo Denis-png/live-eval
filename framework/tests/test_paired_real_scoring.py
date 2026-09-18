@@ -206,32 +206,6 @@ class AllOrNonePairingTests(unittest.TestCase):
         _assert_unpaired(self, rescored)
         self.assertIn("1 of 2 runs", err.getvalue())
 
-    def test_merging_sessions_with_differing_real_samples_pairs_nothing(self):
-        # Indices from the second session would map into the first's pool.
-        from scripts.merge_sessions import merge_sessions
-        tmp = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, tmp)
-        cfg, _ = _session(tmp, "a", _Gen())
-        _session(tmp, "b", _Gen())
-        other = os.path.join(tmp, "taxonomy", "b", "real_sample.json")
-        with open(other, encoding="utf-8") as f:
-            real = json.load(f)
-        real[0]["domain"] = "somewhere else"
-        with open(other, "w", encoding="utf-8") as f:
-            json.dump(real, f)
-
-        merged = os.path.join(tmp, "merged")
-        err = io.StringIO()
-        with redirect_stdout(io.StringIO()), redirect_stderr(err):
-            merge_sessions([os.path.join(tmp, "taxonomy", "a"),
-                            os.path.join(tmp, "taxonomy", "b")], merged, cfg)
-        with open(os.path.join(merged, "results.json"), encoding="utf-8") as f:
-            combined = json.load(f)
-        for scores in combined["results"].values():
-            self.assertEqual(len(scores["runs"]), 4)
-        _assert_unpaired(self, combined)
-        self.assertIn("not paired", err.getvalue())
-
 
 class PrinterTests(unittest.TestCase):
     def test_the_paired_real_is_printed_beside_the_real(self):
@@ -451,13 +425,11 @@ class CompareTableTests(unittest.TestCase):
 
 
 class RescoreTests(unittest.TestCase):
-    def test_rescoring_and_merging_reproduce_the_paired_block(self):
-        from scripts.merge_sessions import merge_sessions
+    def test_rescoring_reproduces_the_paired_block(self):
         from scripts.rescore_session import rescore_session
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp)
         cfg, first = _session(tmp, "a", _RejectLargest())
-        _, second = _session(tmp, "b", _RejectLargest())
         session = os.path.join(tmp, "taxonomy", "a")
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             rescore_session(session, cfg)
@@ -467,14 +439,6 @@ class RescoreTests(unittest.TestCase):
             self.assertEqual(rescored["results"][model]["real_paired_runs"],
                              scores["real_paired_runs"])
         self.assertIs(rescored["meta"]["paired_real"], True)
-
-        merged = os.path.join(tmp, "merged")
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            merge_sessions([session, os.path.join(tmp, "taxonomy", "b")], merged, cfg)
-        with open(os.path.join(merged, "results.json"), encoding="utf-8") as f:
-            combined = json.load(f)["results"]
-        for model in first["results"]:
-            self.assertEqual(len(combined[model]["real_paired_runs"]), 4)
 
 
 if __name__ == "__main__":

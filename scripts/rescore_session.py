@@ -73,10 +73,8 @@ def _drift_report(old_results, new_results):
 
 
 def rescore_session(session_dir, config, *, skip_eval=False, skip_profile=False,
-                    plots=False, pair=True):
-    """Rescore one session in place. `pair=False` writes no paired real scores
-    at all: merge_sessions passes it when its sources' real samples differ, since
-    a run's source_pool_index would then map into another session's pool."""
+                    plots=False):
+    """Rescore one session in place."""
     results_path = os.path.join(session_dir, "results.json")
     old = _load_json(results_path)
     meta = old["meta"]
@@ -120,7 +118,7 @@ def rescore_session(session_dir, config, *, skip_eval=False, skip_profile=False,
         paired_run_scores = _all_or_no_pairing([
             _paired_real_scores(task, real_reference, real_rows, synthetic, evaluator_fns)
             for synthetic in runs_data
-        ]) if pair else None
+        ])
         final = _nest_results(aggregate(all_run_scores), real_scores, all_run_scores,
                               paired_run_scores)
 
