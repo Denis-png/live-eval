@@ -125,7 +125,9 @@ so it can be inspected later.
                          the task does not declare aborts before any API call.
    - `evaluation.real_baseline` — also score the task models on the real benchmark
                          (default `true`; see "Real baseline & fidelity").
-   - `task.name`       — `gec` or `spam`
+   - `evaluation.generate_only` — generate and archive the session without scoring it
+                         (default `false`; `--generate-only`; see "Running stages separately").
+   - `task.name`       — `gec`, `spam`, `sentiment` or `taxonomy`
    - `task_models`     — list of models to evaluate
    - `output.base_dir` — root for per-session run artifacts (default
                          `framework/data/runs`); see "Results".
@@ -171,6 +173,28 @@ config file. CLI flags override values in the YAML:
 The config is validated up front: missing required keys, `num_runs < 1`,
 an unknown `generation.mode`, or a missing API key for the selected provider
 all abort before any API call with an error naming the offending config path.
+
+### Running stages separately
+
+Every stage has its own entry point, works for every task (`gec`, `spam`,
+`sentiment`, `taxonomy`), and reads or writes the same session format:
+
+| Stage | Command | Reads → writes |
+|---|---|---|
+| Benchmark profiling | `python -m framework.profile_dataset --task <task> --config <config>` | benchmark → profile JSON |
+| Calibration | `python -m framework.calibrate --config <config>` | profile → calibration artifact (consumed by later runs) |
+| Generation only | `python -m framework.main --config <config> --generate-only` | → session: generated runs, real sample, fidelity profile, no scores |
+| Evaluation only | `python -m scripts.rescore_session --config <config> <session_dir>` | session → scores (task models, real baseline, paired real) |
+| Generate + evaluate | `python -m framework.main --config <config>` | → scored session |
+| Plots | `python -m framework.plotting <session_dir>` | session → figures |
+| Generator comparison | `python -m scripts.compare_models --config <compare.yaml>` | → one scored session per generation model |
+| Cross-session analysis | `python -m scripts.analyze_results <runs_root>` | sessions → tables and figures |
+
+`--generate-only` loads no task model and skips the real baseline, so it needs no
+evaluation dependencies. The session it writes is complete except for its scores;
+`scripts.rescore_session` adds them later, on any machine, with the task models the
+config lists. Until then the analysis skips it, so an unscored session never
+shadows a scored run of its cell.
 
 ---
 
