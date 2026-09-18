@@ -1372,7 +1372,12 @@ def run_pipeline(config: dict) -> dict:
 
     all_run_scores, effective_samples, all_generated = [], [], []
     num_runs = config["generation"]["num_runs"]
-    real_baseline = (config.get("evaluation") or {}).get("real_baseline", True)
+    evaluation = config.get("evaluation") or {}
+    # Generate-only archives a complete session -- generated runs, real sample,
+    # fidelity profile, meta -- and stops short of the task models, so
+    # scripts.rescore_session can score it later, on any machine.
+    generate_only = bool(evaluation.get("generate_only"))
+    real_baseline = evaluation.get("real_baseline", True) and not generate_only
 
     # The real baseline is deterministic (fixed reference sample, fixed task
     # models): compute it once and reuse it in every per-run checkpoint write.
@@ -1399,29 +1404,31 @@ def run_pipeline(config: dict) -> dict:
         all_generated.extend(synthetic)
 
         eval_samples = task.get_eval_samples(synthetic)
-        texts = [s["text"] for s in eval_samples]
-        run_scores = {}
-        for model_config in config["task_models"]:
-            model = task.get_model(model_config)
-            predictions = model.predict(texts)
-            results = [{**s, "prediction": p} for s, p in zip(eval_samples, predictions)]
-            run_scores[model_config["name"]] = {
-                name: evaluator_fns[name](results) for name in task.get_evaluators()
-            }
-            for name, score in run_scores[model_config["name"]].items():
-                print(f"  {model_config['name']}  {name}: {score}")
-        all_run_scores.append(run_scores)
-        paired_per_run.append(_paired_real_scores(task, real_reference, real_rows,
-                                                  synthetic, evaluator_fns))
-        paired_run_scores = _all_or_no_pairing(paired_per_run)
         effective_samples.append(len(eval_samples))
+        paired_run_scores = None
+        if not generate_only:
+            texts = [s["text"] for s in eval_samples]
+            run_scores = {}
+            for model_config in config["task_models"]:
+                model = task.get_model(model_config)
+                predictions = model.predict(texts)
+                results = [{**s, "prediction": p} for s, p in zip(eval_samples, predictions)]
+                run_scores[model_config["name"]] = {
+                    name: evaluator_fns[name](results) for name in task.get_evaluators()
+                }
+                for name, score in run_scores[model_config["name"]].items():
+                    print(f"  {model_config['name']}  {name}: {score}")
+            all_run_scores.append(run_scores)
+            paired_per_run.append(_paired_real_scores(task, real_reference, real_rows,
+                                                      synthetic, evaluator_fns))
+            paired_run_scores = _all_or_no_pairing(paired_per_run)
 
         saved_path = save_synthetic_data(synthetic, paths["generated_dir"], run_idx)
         print(f"\nSynthetic data archived to {saved_path}")
 
-        generated_agg = aggregate(all_run_scores)
-        final = _nest_results(generated_agg, real_scores, all_run_scores,
-                              paired_run_scores)
+        final = ({} if generate_only else
+                 _nest_results(aggregate(all_run_scores), real_scores, all_run_scores,
+                               paired_run_scores))
         meta = _build_meta(config, task, runs_completed=run_idx + 1,
                            effective_samples_per_run=effective_samples,
                            real_baseline=bool(real_scores))
@@ -1429,11 +1436,16 @@ def run_pipeline(config: dict) -> dict:
             meta["paired_real"] = True
         if judge_call:
             meta["judge_stats"] = judge_stats
+        if generate_only:
+            meta["generate_only"] = True
         _write_results(final, paths["results"], meta)
         if run_idx + 1 < num_runs:
             print(f"Partial results (run {run_idx + 1}/{num_runs}) saved to {paths['results']}")
 
     _write_fidelity_artifacts(task, real_reference, all_generated, paths)
     _render_plots(config, paths)
-    print(f"\nResults saved to {paths['results']}")
+    if generate_only:
+        print(f"\nSession archived to {paths['session_dir']} (generate-only: no scores)")
+    else:
+        print(f"\nResults saved to {paths['results']}")
     return final

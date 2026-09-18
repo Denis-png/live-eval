@@ -31,6 +31,7 @@ import glob
 import json
 import math
 import os
+import sys
 import textwrap
 from collections import defaultdict
 from datetime import datetime
@@ -277,6 +278,12 @@ def discover_sessions(roots):
             with open(results_path, encoding="utf-8") as f:
                 data = json.load(f)
             if "meta" not in data or "results" not in data:
+                continue
+            if not data["results"]:
+                # Nothing to analyse -- and dedup_sessions would let this newer
+                # session shadow the scored run of its cell.
+                print(f"[NOTE] skipping unscored session {session_dir} (score it "
+                      "with: python -m scripts.rescore_session)", file=sys.stderr)
                 continue
             profile_path = os.path.join(session_dir, "profile.json")
             profile = None

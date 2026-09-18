@@ -38,6 +38,10 @@ def parse_args():
                         help="Evaluate models on the real benchmark too (--real-baseline / --no-real-baseline)")
     parser.add_argument("--plots", action=argparse.BooleanOptionalAction, default=None,
                         help="Render figures into the session's plots/ dir (--plots / --no-plots)")
+    parser.add_argument("--generate-only", dest="generate_only", action="store_true",
+                        default=None,
+                        help="Generate and archive the session, but load no task model and "
+                             "score nothing; evaluate it later with scripts.rescore_session")
     parser.add_argument("--seedless", dest="seedless", action="store_true", default=None,
                         help="Generate from the benchmark profile only (no real seeds)")
     parser.add_argument("--no-seedless", dest="seedless", action="store_false",
@@ -68,6 +72,8 @@ def apply_overrides(config: dict, args) -> dict:
         config.setdefault("evaluation", {})["real_baseline"] = args.real_baseline
     if getattr(args, "plots", None) is not None:
         config.setdefault("output", {})["plots"] = args.plots
+    if getattr(args, "generate_only", None):
+        config.setdefault("evaluation", {})["generate_only"] = True
     if getattr(args, "seedless", None) is not None:
         config["generation"]["seedless"] = args.seedless
     return config
@@ -97,7 +103,8 @@ def validate_config(config: dict) -> None:
         problems.extend(
             f"missing key '{section}.{key}'" for key in keys if key not in block
         )
-    if not config.get("task_models"):
+    # A generate-only run evaluates nothing; its task models are the rescore's.
+    if not config.get("task_models") and not generate_only(config):
         problems.append("'task_models' must be a non-empty list of models to evaluate")
 
     if isinstance(config.get("dataset"), dict):
@@ -135,6 +142,11 @@ def validate_config(config: dict) -> None:
         raise ValueError(
             "Invalid config:\n  - " + "\n  - ".join(problems)
         )
+
+
+def generate_only(config: dict) -> bool:
+    """True when the run generates and archives but evaluates nothing."""
+    return bool((config.get("evaluation") or {}).get("generate_only"))
 
 
 def generation_models_notice(config: dict) -> str | None:
@@ -308,7 +320,10 @@ def main():
     print(f"Model    : {config['generation']['model']}")
     print(f"Runs     : {config['generation']['num_runs']}")
     print(f"Samples  : {config['generation']['sample_size']} per run")
-    print(f"Models   : {[m['name'] for m in config['task_models']]}")
+    if generate_only(config):
+        print("Models   : none -- generate-only, nothing is scored")
+    else:
+        print(f"Models   : {[m['name'] for m in config['task_models']]}")
 
     try:
         results = run_pipeline(config)
@@ -316,6 +331,11 @@ def main():
         # User-facing pipeline failures (0 usable samples, missing clean field,
         # unknown provider/task) — exit cleanly instead of dumping a traceback.
         sys.exit(f"\n[ERROR] {e}")
+
+    if generate_only(config):
+        print("\nGenerate-only: nothing was scored. Evaluate the session with:\n"
+              f"    python -m scripts.rescore_session --config {args.config} <session_dir>")
+        return
 
     print("\n" + "=" * 55)
     print("FINAL RESULTS (generated mean ± std across runs | real baseline)")

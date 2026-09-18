@@ -1,6 +1,7 @@
 """Rescore a finished session from its persisted artifacts — no LLM calls.
 
 Re-evaluates the config's task_models on each generated/run_<N>.json, which
+  * scores a session written by `framework.main --generate-only`,
   * restores per-run scores ("runs") for sessions created before they were
     persisted, and
   * adds generated + real-baseline scores for task models that did not exist
@@ -163,6 +164,8 @@ def rescore_session(session_dir, config, *, skip_eval=False, skip_profile=False,
         }
         if meta.get("paired_real") is None:
             meta.pop("paired_real", None)
+        # Scored now: a generate-only session becomes an ordinary one.
+        meta.pop("generate_only", None)
         with open(results_path, "w", encoding="utf-8") as f:
             json.dump({"meta": meta, "results": final}, f, indent=2)
         print(f"Rescored results written to {results_path}")
