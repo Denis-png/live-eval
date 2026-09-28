@@ -1,6 +1,6 @@
 # Live-Eval Cookbook
 
-This cookbook provides a practical guide to using the Live-Eval framework, from setup and configuration to running experiments, profiling benchmarks, evaluating generated data, interpreting outputs, and extending the framework with new tasks. It also includes task-specific examples for GEC, Spam Detection, Sentiment Analysis, and Taxonomy Induction, as well as troubleshooting guidance for common issues.
+This cookbook provides a practical guide to using the Live-Eval framework, from setup and configuration to running experiments, profiling benchmarks, calibration, evaluating generated data, comparing generation models, cross-session analysis, interpreting outputs, and extending the framework with new tasks. It also includes task-specific examples for GEC, Spam Detection, Sentiment Analysis, and Taxonomy Induction, as well as troubleshooting guidance for common issues. This is the low-level reference; [README.md](../README.md) covers setup, running, and the current tasks/models/evaluators at a glance.
 
 ---
 
@@ -118,6 +118,88 @@ writes results, profiles and plots
 
 ---
 
+### 1.5 Project Structure
+
+```text
+framework/
+    main.py                  - entry point
+    pipeline.py              - GET loop (Generate, Evaluate, Trash)
+    data_loading.py          - dataset source resolution + local file loaders (m2/csv/tsv/jsonl)
+    requirements.txt         - Python dependencies
+    configs/                 - one directory per task: config.yaml (dataset,
+                               generator, task models, output) beside
+                               <task>.json (error types, prompts, evaluators,
+                               model params)
+        gec/       config.yaml + gec.json
+        spam/      config.yaml + spam.json
+        sentiment/ config.yaml + sentiment.json
+        taxonomy/  config.yaml + taxonomy.json
+    tasks/
+        base_task.py         - abstract task template (declares generation strategy)
+        gec/task.py          - Grammatical Error Correction task (corruption: forward + inverse)
+        spam/task.py         - Spam Detection task (class-conditional)
+        sentiment/task.py    - Sentiment Analysis task (corruption)
+        taxonomy/task.py     - Taxonomy Induction task (structured)
+    generators/              - LLM that creates synthetic evaluation data
+        base_generator.py    - shared generate() / generate_inverse() / generate_class_conditional() loops
+        openai_generator.py  - OpenAI / Groq / OpenRouter / Mistral (OpenAI-compatible)
+        anthropic_generator.py  - Anthropic / MiniMax (Anthropic-compatible)
+        google_generator.py
+        factory.py           - provider-neutral generator construction
+    profiling/               - two distinct kinds of profile, do not confuse them:
+                               BENCHMARK profile (topics/length/style, built by
+                               `profile_dataset`, INPUT to seedless generation) and
+                               FIDELITY profile (task.build_fidelity_profile, a
+                               MEASUREMENT of real vs generated)
+        dataset_profiler.py   - stdlib-only profiling shared by spam and sentiment
+        gec_profiler.py       - GEC-specific benchmark profiling
+        spam_profiler.py      - spam-specific benchmark profiling
+        sentiment_profiler.py - sentiment (TweetEval) benchmark profiling
+        taxonomy_profiler.py  - structural profiling for taxonomy records
+        errant_distribution.py  - ERRANT-based GEC error distribution
+        spam_distribution.py  - spam-signal-based spam error distribution
+        fidelity.py           - Jensen-Shannon divergence for distribution fidelity
+        taxonomy_fidelity.py  - structural real-vs-generated fidelity (taxonomy)
+        text_stats.py         - samplable length/style/vocabulary characteristics
+        spec_sampler.py       - samples a seedless content spec from a profile
+        topics.py             - opt-in LLM topic profiling (profile_dataset --topics)
+        syntax_stats.py       - spaCy-based GEC syntactic complexity
+    plotting/            - figures from a run session (matplotlib, headless)
+        plots.py         - pure figure builders (dict -> Figure)
+        session.py       - load a session, render + save PNGs (fail-soft)
+    models/gec/              - GEC models under evaluation
+        seq2seq.py (t5/gec_v1/coedit), claude.py
+    models/spam/             - Spam models under evaluation
+        roberta.py, bert_tiny.py
+    models/sentiment/        - Sentiment models under evaluation
+        transformer.py       - HF sequence-classification wrapper (BERTweet, DistilBERT)
+    models/taxonomy/         - Taxonomy Induction models under evaluation
+        baselines.py         - deterministic lexical / star baselines (no LLM call)
+        llm.py                - LLM task model
+    evaluators/              - scoring functions applied to model predictions
+        gleu.py              - GLEU score
+        prf.py               - shared precision/recall/F-beta every family builds on
+        gec/                 - errant, errant_dist, cola, correction_extent, n_edits
+        classification/      - accuracy, precision, recall, f1, fpr (spam), macro_* (sentiment)
+        taxonomy/             - exact-relation precision, recall, f1, diagnostics
+    data/                    - all gitignored (only .gitkeep is committed)
+        benchmarks/<task>/   - source benchmark files (fce.m2, *.csv, *.jsonl)
+        profiles/            - profile JSON from `python -m framework.profile_dataset`
+        runs/<task>/<session>/ - per-session run artifacts; the session name
+                               carries the setup that produced it, e.g.
+                               20260827_120000_inverse_seedless
+scripts/
+    compare_models.py        - one scored session per generation model (compare.yaml)
+    rescore_session.py       - score or re-score a session from its archived runs
+    analyze_results.py       - cross-session tables and figures
+    benchmarks/              - prepare_<task>_benchmark.py: rebuild each task's
+                               (gitignored) benchmark file under framework/data/
+docs/
+    COOKBOOK.md               - this file
+```
+
+---
+
 ## 2. Configuration
 
 Each task has a YAML run configuration under:
@@ -145,6 +227,17 @@ dataset:
 ```
 
 Benchmark files under `framework/data/` are not distributed through Git, so they may need to be prepared locally before the first run.
+
+`source` also accepts `huggingface` (`{name, split}`) instead of `local`; both blocks
+can stay filled in at once, so switching source is a one-field change. Local formats:
+`m2` (GEC benchmarks like FCE/CoNLL-14, annotator 0's edits), `csv`, `tsv` (header row,
+fields matched by the task's `parse_row`, e.g. `label`/`text` for spam). `format` is
+optional when the file extension already says it.
+
+> Sampling is deterministic: `load_real_data` takes the first `generation.sample_size`
+> matching rows (no shuffle/seed). As long as the dataset settings (source, HF
+> name/split or local path) and `sample_size` are unchanged, every invocation sees the
+> same benchmark sample — which is what makes cross-model comparison fair.
 
 See **Section 5** for the exact benchmark setup for GEC, Spam, Sentiment, and Taxonomy.
 
@@ -217,6 +310,10 @@ python -m framework.profile_dataset \
 ```
 
 Taxonomy uses structural profiling and does **not** use `--topics`.
+
+A profile lands at `framework/data/profiles/<task>/<benchmark>_<n>_<task>_profile.json`,
+which is where the pipeline looks for it by default; override per-run with
+`generation.profile_path` to pin a specific artifact.
 
 ---
 
@@ -324,6 +421,26 @@ python -m framework.main \
 
 The exact meaning of forward and inverse is task-specific; see **Section 5**.
 
+The axis is defined by whether an empirical distribution is imposed, not by task shape,
+so it plays out asymmetrically across tasks: GEC `forward + seeded` is the only seeded
+text-level cell that loads no empirical distribution at all, because it is the only one
+that imposes nothing — the generator infers the error type from its seed. Every other
+seeded text-level cell imposes at least part of the annotation and needs a distribution
+to draw it from (Spam `forward` inherits the label from its seed but still imposes the
+signal mix; GEC `forward + seedless` draws the error type from the profile while the
+correction stays the model's own assertion). Taxonomy `forward` imposes nothing either,
+but structured generation never loads an empirical distribution in the first place, so
+it sits outside this comparison entirely. Back-translation (generate the target, derive
+the source) and doc2query (pick a document, generate a query for it) are inverse under
+this definition; annotating text you just generated is forward.
+
+**Fail-fast.** A task that hasn't defined the prompt a requested cell needs (e.g. a
+corruption task with no `seedless_forward_prompt`, or a classification task with no
+`carrier_prompt`) raises `RuntimeError` before any API call, naming the task, the
+`(mode, seedless)` cell, and the missing accessor — never a silent fallback to a
+different cell. Classification forward mode also fails fast when the labeled seed pool
+is missing one of the classes.
+
 ---
 
 ### 3.3 Seeded and Seedless Generation
@@ -405,6 +522,17 @@ The judge is **not** the task evaluator. Its role is to filter generated samples
 
 Rejected samples are stored separately so the effect of the judge can be analysed.
 
+The judge is **opt-in**: no `judge:` block (or `judge.enabled: false`) means judging is
+skipped, and every shipped config leaves it off, because the judge is itself an ablation
+condition — turn it on per run with `--judge` and compare against the unjudged session
+of the same cell. `scripts.analyze_results` files a judged session under its own
+`<cell>+judge` label so both sides of that comparison survive. The judge covers every
+cell of every task: the sentence tasks (GEC, Sentiment) judge each sample against its
+seed or counterpart, Spam's `forward + seedless` cell (which has no seed) judges each
+message on its own, told the class it was generated as, and Taxonomy judges each whole
+generated taxonomy. A sample the judge drops is not regenerated, so a judged session can
+deliver fewer than `sample_size` items.
+
 ---
 
 ### 3.5 Calibration
@@ -436,7 +564,92 @@ Calibration is performed separately from the scored experiment. It creates reusa
 
 Not every task and generation cell supports calibration. Unsupported combinations fail explicitly instead of silently falling back to another behaviour.
 
+Calibration is a **separate phase** on purpose: steering runs *inside* a scored session
+would make them non-i.i.d. and turn `results.json`'s `mean ± std` — the core GET
+instability signal — into "generator noise plus controller settling" instead. So
+calibration runs once, emits a tuned spec, and the GET session runs unchanged at that
+fixed setting. `meta.calibration` in `results.json` records which artifact produced a
+run; artifacts themselves are gitignored, so that field is the only surviving
+provenance.
+
+All settings are optional and have working defaults:
+
+```bash
+python -m framework.calibrate --config framework/configs/spam/config.yaml \
+    --rounds 3 --alpha 0.5 --tolerance 0.1 --sample-size 120
+```
+
+```yaml
+calibration:
+  rounds: 3          # extra rounds after round 0 (round 0 = the target, before correction)
+  alpha: 0.5         # damping; lower is more conservative
+  tolerance: 0.1     # per-dimension JSD at which the loop stops
+  sample_size: 120   # default max(generation.sample_size, 100)
+```
+
+`sample_size` deliberately does **not** inherit `generation.sample_size` (tuned for eval
+cost, not estimation precision); a round measured on fewer than 50 informative samples
+warns that the update may be chasing noise. The loop emits the **best** round, and
+round 0 always requests exactly the target distribution before any correction, so
+calibration can never make a benchmark worse than round 0. Calibration is numeric only —
+no wording is ever added to a generation prompt, which keeps it from teaching the
+generator what the fidelity checks look for.
+
+**Per-cell control input** varies by task, summarized here (task-specific detail in
+**Section 5**): most imposed cells correct the same type/count distribution that seeds
+the prompt. GEC `forward + seeded` has no injectable distribution — the generator picks
+its own error type — so calibration instead reweights **which seeds are fed**. Spam
+additionally corrects `class_prob` in closed form from per-class attrition (a model
+refuses to write spam far more often than it refuses a benign paraphrase). Sentiment's
+`forward + seeded` cell cannot be calibrated at all (the model picks its own
+transformation, and real tweets carry none to aim a seed mix at). Taxonomy calibrates
+only `inverse + seedless`, steering the depth/child-count distributions it imposes.
+
+#### Limitations
+
+- **A concentrated signal mix may be unreachable.** Categories are drawn without
+  replacement, so one category's achievable share saturates near
+  `1 / mean_signals_per_message`; measured directly, requesting a 0.830 share yielded
+  0.353. Past that ceiling the request keeps rising while the measurement does not
+  follow. The loop degrades safely (best round wins, never worse than round 0) but
+  cannot close that gap.
+- **JSD has a floor above zero.** The target is Laplace-smoothed (so every supported
+  category stays sample-able) while the measurement is raw, so even a perfectly
+  compliant generator scores slightly above 0. Set `tolerance` with that floor in mind
+  rather than chasing 0.
+- **`mode` partly degenerates for `class_conditional` + `seedless`.** With no seed there
+  is nothing to inherit, so `forward + seedless` draws its label from the balance —
+  imposition, by the definition in Section 3.2. What actually separates the two seedless
+  cells is one-step generation (write a message from a spec) versus two-step (synthesize
+  a carrier, then impose a label on it); both are reachable, the axis just carries less
+  meaning there.
+
 See **Section 5** for task-specific calibration notes and restrictions.
+
+---
+
+### 3.6 Running Stages Separately
+
+Every stage has its own entry point, works for every task, and reads or writes the same
+session format, so stages can be run independently, on different machines, and at
+different times, without re-running earlier stages:
+
+| Stage | Command | Reads → writes |
+|---|---|---|
+| Benchmark profiling | `python -m framework.profile_dataset --task <task> --config <config>` | benchmark → profile JSON |
+| Calibration | `python -m framework.calibrate --config <config>` | profile → calibration artifact (consumed by later runs) |
+| Generation only | `python -m framework.main --config <config> --generate-only` | → session: generated runs, real sample, fidelity profile, no scores |
+| Evaluation only | `python -m scripts.rescore_session --config <config> <session_dir>` | session → scores (task models, real baseline, paired real) |
+| Generate + evaluate | `python -m framework.main --config <config>` | → scored session |
+| Plots | `python -m framework.plotting <session_dir or runs_root>` | session(s) → figures |
+| Generator comparison | `python -m scripts.compare_models --config <compare.yaml>` | → one scored session per generation model (Section 8) |
+| Cross-session analysis | `python -m scripts.analyze_results <runs_root>` | sessions → tables and figures (Section 9) |
+
+`--generate-only` loads no task model and skips the real baseline, so it needs no
+evaluation dependencies. The session it writes is complete except for its scores;
+`scripts.rescore_session` adds them later, on any machine, with the task models the
+config lists. Until then, cross-session analysis skips it, so an unscored session never
+shadows a scored run of its cell.
 
 ---
 
@@ -585,7 +798,18 @@ Fidelity uses task-specific properties. Examples include:
 For distributional comparisons, the framework can use **Jensen-Shannon divergence (JSD)**:
 
 - `0` means the compared distributions are identical,
-- larger values indicate greater divergence.
+- `1` means they are disjoint,
+- values in between indicate partial overlap.
+
+The generated side of a fidelity comparison is measured by re-running the same signal
+detectors on the generated text, so JSD reflects detector-visible distribution match,
+not ground-truth semantics.
+
+By default (`evaluation.real_baseline: true`), every run also evaluates the same task
+models on the real benchmark as a reference point for the generated scores. It is a
+**single deterministic pass** (no repeated runs, no variance), scored with the same
+evaluators, and saved alongside the generated scores as `results.<model>.real`. Disable
+it with `--no-real-baseline` when you only want the generated-side scores.
 
 Fidelity results complement task-model scores: good model performance alone does not prove that the synthetic benchmark resembles the real benchmark.
 
@@ -773,6 +997,15 @@ generation:
 `class_balance: empirical` re-reads P(SPAM) from the loaded reference each run.
 Set `reference_size` under `dataset.local` to cap how many rows are loaded as the
 reference (default: entire split — can be slow on CPU).
+
+`class_balance` is actually a generic `class_conditional`-strategy setting, not
+Spam-specific, and its full semantics apply to any future classification task: a bare
+float is the two-label spelling of a mapping (`0.3` means `{first label: 0.3, second:
+0.7}`) and raises for a task with three or more labels, where it cannot say what it
+means; an explicit float or mapping is a user instruction and always beats a calibrated
+balance (calibration only ever refines `empirical`); mapping values are normalized, so
+relative weights are what matter; and naming a label the task does not declare aborts
+before any API call.
 
 ---
 
@@ -972,7 +1205,7 @@ python -m framework.calibrate \
   --mode inverse --seedless
 ```
 
-The other three cells refuse calibration (see README for the rationale).
+The other three cells refuse calibration (see Section 3.5 for the rationale).
 
 ---
 
@@ -1061,10 +1294,30 @@ For taxonomy seeded sessions, two extra fields appear:
 | `results.<model>.real_paired_runs` | One paired score per run |
 | `meta.paired_real: true` | All runs carry paired scores |
 
-### 6.3 Re-rendering plots
+### 6.3 Plots
 
-Plots are written automatically after every run. To re-render from a past session
-without re-running:
+Figures are rendered with matplotlib, headless (no display needed). Plotting runs
+**after** `results.json` is already on disk and is **fail-soft**: if matplotlib is
+missing or a figure fails to build, it warns and skips rather than costing you a run
+that already succeeded. Disable it with `--no-plots` or `output.plots: false`.
+
+| File | Reads | Shows |
+|------|-------|-------|
+| `generated_vs_real_<model>.png` | `results.json` | Per evaluator: generated (mean ± std) beside the real-benchmark baseline. The headline chart — is the synthetic benchmark a good proxy for real data? |
+| `run_variance_<model>.png` | `results.json` → `runs` | Each individual run's score per evaluator — run-to-run instability, the core GET signal. |
+| `fidelity.png` / `sentiment_fidelity.png` / `taxonomy_fidelity*.png` | `profile.json` | Real vs generated distributions, titled with the Jensen-Shannon divergences. Classification/structured tasks only. |
+
+Figures whose data is absent are skipped, not errored (a GEC session has no
+`profile.json`, so it simply gets no fidelity chart). Reading conventions that hold in
+every figure: **blue is always generated, orange is always real**; metrics on different
+scales (e.g. GEC's unbounded `n_edits` count vs 0–1 scores) are drawn in separate
+panels, never on a second y-axis; `fpr` is computed and written to `results.json` but
+omitted from the charts (it reads a flat 0.00 against a 0.00 baseline — dead space), see
+`HIDDEN_METRICS` in `framework/plotting/plots.py`.
+
+### 6.4 Re-rendering plots
+
+To re-render a past session's plots without re-running anything:
 
 ```bash
 python -m framework.plotting framework/data/runs/spam/20260901_120000_forward_seeded/
@@ -1076,7 +1329,11 @@ python -m framework.plotting framework/data/runs
 python -m framework.plotting framework/data/runs/gec/<session>/ --out /tmp/figs
 ```
 
-### 6.4 Troubleshooting
+It reads only that session's `results.json` (+ `profile.json` if present), so it
+reproduces exactly the figures the run itself would have made. A bad path fails loudly
+with a clear message.
+
+### 6.5 Troubleshooting
 
 ---
 
@@ -1398,3 +1655,58 @@ This produces one run of five samples, no real-benchmark baseline, no plots — 
 fastest possible check that generation, parsing, evaluation and results writing
 all complete without error. Inspect `framework/data/runs/mytask/<session>/generated/run_1.json`
 to verify the generated samples look correct before running at full scale.
+
+---
+
+## 8. Comparing Generation Models
+
+Use the multi-model driver to run several generation models over the identical
+benchmark sample in one command:
+
+```bash
+python -m scripts.compare_models --config framework/configs/gec/compare.yaml
+```
+
+A task's `compare.yaml` holds only `base_config: config.yaml` and a `generation_models`
+list; every other setting is the run config's own, so a comparison differs from a
+normal run only in the generation model. For another cell, point `base_config` at an
+edited copy of `config.yaml`.
+
+> **`generation_models` is read ONLY by `scripts.compare_models`.** `python -m
+> framework.main` always runs the single model in `generation.provider` /
+> `generation.model` and ignores the list — adding `generation_models` and then running
+> `framework.main` does *not* compare anything. `framework.main` prints a `[NOTE]` at
+> startup when it sees the list, naming the entries it is ignoring and the one model it
+> is actually about to run.
+
+Each model gets its own session under `output.base_dir/<task>/<provider>_<model>/` (the
+same per-session layout as a normal run), plus a combined
+`output.base_dir/<task>/comparison/comparison.json` and a printed comparison table
+(generated `mean ± std` and, per model, the `real` baseline). The same benchmark sample
+is guaranteed by deterministic first-N sampling (Section 2.1), so keep `dataset.*` and
+`sample_size` constant across entries.
+
+The driver accepts only sample-shaping flags (`--config/--task/--runs/--sample-size`);
+`--provider/--model` are rejected because per-model provider/model come from the
+`generation_models` list. API keys for **all** listed providers are checked before the
+first model runs.
+
+---
+
+## 9. Cross-Session Analysis
+
+`scripts.analyze_results` reads every session under one or more results roots and writes
+the report-level figures plus `analysis.md` / `analysis.json`: generated-vs-real
+fidelity and model ranking (Kendall tau-b), how much score variance the generation model
+explains, the paired forward-vs-inverse mode effect, and each task's fidelity JSDs.
+
+```bash
+python -m scripts.analyze_results framework/data/runs --since 2026-09-11 \
+    --out framework/data/runs/analysis
+```
+
+It keeps one session per (task, cell, generation model): the one with the most completed
+runs, then the newest. A run that consumed a calibration artifact is its own cell
+(`<cell>+calibrated`), and a judged run its own (`<cell>+judge`), so an ablation keeps
+both sides of each comparison. `--since` limits the analysis to one sweep — without it,
+an older session with more runs outranks a fresh one.
